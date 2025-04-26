@@ -143,11 +143,6 @@ def load_data_from_gsheet():
     # 5.5) убираем временный столбец
     df.drop(columns="step", inplace=True)
 
-    # 6) форматируем концы периодов и первую дату
-    for c in ["1st_period_end", "2nd_period_end", "3rd_period_end"]:
-        df[c] = pd.to_datetime(df[c]).dt.strftime("%d/%m/%Y")
-    df["first_lesson_date_teach"] = df["first_lesson_date_dt"].dt.strftime("%d/%m/%Y")
-
     # 7) подтягиваем team_lead
     ws2 = client.open_by_key(LEADS_SS_ID).worksheet(LEADS_SHEET)
     leads = {
