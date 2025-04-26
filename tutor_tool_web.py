@@ -57,45 +57,44 @@ def load_data_from_gsheet():
     df["course_duration"] = pd.to_numeric(df["course_duration"], errors="coerce")
     df["first_lesson"]    = pd.to_numeric(df["first_lesson"],    errors="coerce")
 
-    # === 5) рассчитываем границы периодов точно по ARRAYFORMULA ===
-    # шаг в днях: 7 для 32/40, иначе 3.5
-    df["step"] = df["course_duration"].apply(lambda x: 7 if x in (32, 40) else 3.5)
-
-    # 1-й период начинается в день first_lesson_date_dt + (first_lesson−1)*step
+    # === 5) рассчитываем границы периодов по логике ARRAYFORMULA ===
+    
+    # 5.1) заводим «step» (шаг) в днях
+    df["step"] = df["course_duration"].apply(lambda x: 7 if x in (32,40) else 3.5)
+    
+    # 5.2) начало 1-го периода от даты первого урока:
     df["1st_period_start"] = (
         df["first_lesson_date_dt"]
         + pd.to_timedelta((df["first_lesson"] - 1) * df["step"], unit="D")
     )
-    # 1-й период длится 10 шагов минус один (т.е. exactly как в IF(F=32, H+(10*7)-7…))
+    
+    # 5.3) конец 1-го периода: 10 шагов минус один шаг
     df["1st_period_end"] = (
-        df["first_lesson_date_dt"]
-        + pd.to_timedelta((df["first_lesson"] - 1 + 10) * df["step"] - df["step"], unit="D")
+        df["1st_period_start"]
+        + pd.to_timedelta((10 - 1) * df["step"], unit="D")
     )
-
-    # 2-й период стартует сразу после 1-го: first + 10*step
-    df["2nd_period_start"] = (
-        df["first_lesson_date_dt"]
-        + pd.to_timedelta(10 * df["step"], unit="D")
-    )
-    # 2-й период длится 8 шагов минус один
+    
+    # 5.4) начало 2-го периода: сразу после окончания 1-го (т.е. +1 день)
+    df["2nd_period_start"] = df["1st_period_end"] + pd.Timedelta(days=1)
+    
+    # 5.5) конец 2-го периода: 8 шагов минус один шаг
     df["2nd_period_end"] = (
-        df["first_lesson_date_dt"]
-        + pd.to_timedelta(10 * df["step"] + 8 * df["step"] - df["step"], unit="D")
+        df["2nd_period_start"]
+        + pd.to_timedelta((8 - 1) * df["step"], unit="D")
     )
-
-    # 3-й период стартует сразу после 2-го: first + (10+8)*step
-    df["3rd_period_start"] = (
-        df["first_lesson_date_dt"]
-        + pd.to_timedelta((10 + 8) * df["step"], unit="D")
-    )
-    # 3-й период длится 13 шагов минус один
+    
+    # 5.6) начало 3-го периода: сразу после окончания 2-го
+    df["3rd_period_start"] = df["2nd_period_end"] + pd.Timedelta(days=1)
+    
+    # 5.7) конец 3-го периода: 13 шагов минус один шаг
     df["3rd_period_end"] = (
-        df["first_lesson_date_dt"]
-        + pd.to_timedelta(10 * df["step"] + 8 * df["step"] + 13 * df["step"] - df["step"], unit="D")
+        df["3rd_period_start"]
+        + pd.to_timedelta((13 - 1) * df["step"], unit="D")
     )
+    
+    # 5.8) чистим вспомогательный столбец
+    df.drop(columns="step", inplace=True)
 
-    # уберём вспомогательный столбец
-    df = df.drop(columns="step")
 
     # 6) форматируем концы периодов и первую дату в dd/mm/YYYY
     for c in ["1st_period_end","2nd_period_end","3rd_period_end"]:
