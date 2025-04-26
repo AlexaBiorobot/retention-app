@@ -124,6 +124,15 @@ def load_data_from_gsheet():
                 "3rd_period_start", "3rd_period_end"
             ]
         )
+        
+    # 5.3.1) применяем compute_periods ко всем строкам и создаём колонки
+    df[
+        [
+            "1st_period_end",
+            "2nd_period_start", "2nd_period_end",
+            "3rd_period_start", "3rd_period_end"
+        ]
+    ] = df.apply(compute_periods, axis=1)
 
     
     # 5.4) форматируем в строку dd/mm/YYYY
