@@ -46,10 +46,10 @@ def load_data_from_gsheet():
           .replace({"^\s*$": None}, regex=True)  # пустые строки → None
     )
     df["first_lesson_date_dt"] = pd.to_datetime(
-        df["first_lesson_date_teach"],
-        dayfirst=True,
-        errors="coerce"          # некорректные превратятся в NaT
-    )
+    df["first_lesson_date_teach"],
+    format="%Y-%m-%d",
+    errors="coerce"
+    )    
     # --- отсечём строки, где парсинг не сработал ---
     df = df[~df["first_lesson_date_dt"].isna()]
 
