@@ -159,22 +159,6 @@ hide_cols = [
 ]
 dff = dff.drop(columns=[c for c in hide_cols if c in dff.columns])
 
-# 1) create a new “Open” link column
-dff["Open"] = dff["bo_id"].apply(
-    lambda bo: f'<a href="https://bo.kodland.org/students/{bo}" '
-               f'target="_blank">Open</a>'
-)
-
-# 2) render the entire table as HTML so links stay live
-st.write(
-    dff.to_html(
-        index=False,     # no DataFrame index column
-        escape=False,    # don’t escape our <a> tags
-        classes="table"  # bootstrap-ish styling
-    ),
-    unsafe_allow_html=True
-)
-
 # И выводим без .style, чтобы не было лимита Styler:
 st.dataframe(
     dff,
