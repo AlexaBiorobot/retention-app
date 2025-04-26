@@ -206,7 +206,6 @@ for col in dff.select_dtypes("number").columns:
     dff[col] = dff[col].round(2)
 
 hide_cols = [
-    "1st_period_start","2nd_period_start","3rd_period_start",
     "first_lesson_date_teach","dropp","one_time_replacement"
 ]
 dff = dff.drop(columns=[c for c in hide_cols if c in dff.columns])
