@@ -228,16 +228,16 @@ for col in dff.select_dtypes("number").columns:
 hide_cols = ["first_lesson_date_teach", "dropp", "one_time_replacement", "1st_period_start", "2nd_period_start", "3rd_period_start"]
 dff = dff.drop(columns=[c for c in hide_cols if c in dff.columns])
 
-    # Форматируем колонки-дат в строки только для отображения
-    dff_display = dff.copy()
-    for c in [
-        "1st_period_end","2nd_period_start","2nd_period_end",
-        "3rd_period_start","3rd_period_end"
-    ]:
-        dff_display[c] = dff_display[c].dt.strftime("%d/%m/%Y")
+# Форматируем колонки-дат в строки только для отображения
+dff_display = dff.copy()
+for c in [
+    "1st_period_end","2nd_period_start","2nd_period_end",
+    "3rd_period_start","3rd_period_end"
+]:
+    dff_display[c] = dff_display[c].dt.strftime("%d/%m/%Y")
 
-    # Выводим уже отформатированную копию
-    st.dataframe(dff_display, use_container_width=True)
+# Выводим уже отформатированную копию
+st.dataframe(dff_display, use_container_width=True)
 
 @st.cache_data
 def to_excel(data: pd.DataFrame):
