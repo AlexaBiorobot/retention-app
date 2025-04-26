@@ -132,6 +132,18 @@ def load_data_from_gsheet():
             "3rd_period_start", "3rd_period_end"
         ]
     ] = df.apply(compute_periods, axis=1)
+    
+    # 5.3.2) приводим эти пять колонок в настоящий datetime64
+    for c in [
+        "1st_period_end","2nd_period_start","2nd_period_end",
+        "3rd_period_start","3rd_period_end"
+    ]:
+        df[c] = pd.to_datetime(
+            df[c],
+            format="%d/%m/%Y",
+            dayfirst=True,
+            errors="coerce"
+        )
 
     # 5.4) форматируем в строку dd/mm/YYYY
     for c in [
@@ -216,7 +228,16 @@ for col in dff.select_dtypes("number").columns:
 hide_cols = ["first_lesson_date_teach", "dropp", "one_time_replacement", "1st_period_start", "2nd_period_start", "3rd_period_start"]
 dff = dff.drop(columns=[c for c in hide_cols if c in dff.columns])
 
-st.dataframe(dff, use_container_width=True)
+# Форматируем колонки-дат в строки только для отображения
+dff_display = dff.copy()
+for c in [
+    "1st_period_end","2nd_period_start","2nd_period_end",
+    "3rd_period_start","3rd_period_end"
+]:
+    dff_display[c] = dff_display[c].dt.strftime("%d/%m/%Y")
+
+# Выводим уже отформатированную копию
+st.dataframe(dff_display, use_container_width=True)
 
 @st.cache_data
 def to_excel(data: pd.DataFrame):
