@@ -230,16 +230,12 @@ for c in [
 
 # после того, как dff у вас уже отфильтрован и готов:
 fmt = {
-    "1st_period_end":   "{:%d/%m/%Y}",
-    "2nd_period_end":   "{:%d/%m/%Y}",
-    "3rd_period_end":   "{:%d/%m/%Y}",
+    "1st_period_end": "{:%d/%m/%Y}",
+    "2nd_period_end": "{:%d/%m/%Y}",
+    "3rd_period_end": "{:%d/%m/%Y}",
 }
 styled = dff.style.format(fmt)
-
-st.dataframe(
-    styled,
-    use_container_width=True
-)
+st.dataframe(styled, use_container_width=True)
 
 @st.cache_data
 def to_excel(data: pd.DataFrame):
