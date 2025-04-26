@@ -67,23 +67,22 @@ def load_data_from_gsheet():
         80: (26, 34, 19),
     }
     
-    # 5.1) вычисляем шаг (step) в днях
-    #    — 7 дней для курсов 32,40; 3.5 дня для 64,80
-    df["step"] = df["course_duration"].apply(
-        lambda dur: 3.5 if dur in (64, 80) else 7
-    )
-    
-    # 5.2) первый день первого периода (H)
-    #    = дата первого урока 
-    #      − first_lesson * step 
-    #      + step
+    # 5.1) вычисляем шаг (step) в днях:
+    #     7 дней для курсов 32,40; 3.5 дня для 64,80
+    df["step"] = df["course_duration"].apply(lambda dur: 3.5 if dur in (64, 80) else 7)
+
+    # 5.2) рассчитываем старт первого периода:
     df["1st_period_start"] = (
         df["first_lesson_date_dt"]
         - pd.to_timedelta(df["first_lesson"] * df["step"], unit="D")
         + pd.to_timedelta(df["step"], unit="D")
     )
-    
-    H = df["1st_period_start"]
+
+    # и сразу форматируем в нужный вид (если надо строкой):
+    df["1st_period_start"] = df["1st_period_start"].dt.strftime("%d/%m/%Y")
+
+    # чистим временный столбец
+    df.drop(columns="step", inplace=True)
     
     # 5.3) теперь концы и начала периодов «от H» в одну строку
     def compute_periods(row):
