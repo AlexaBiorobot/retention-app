@@ -228,8 +228,18 @@ for c in [
 ]:
     dff_display[c] = dff_display[c].dt.strftime("%d/%m/%Y")
 
-# Выводим уже отформатированную копию
-st.dataframe(dff_display, use_container_width=True)
+# после того, как dff у вас уже отфильтрован и готов:
+fmt = {
+    "1st_period_end":   "{:%d/%m/%Y}",
+    "2nd_period_end":   "{:%d/%m/%Y}",
+    "3rd_period_end":   "{:%d/%m/%Y}",
+}
+styled = dff.style.format(fmt)
+
+st.dataframe(
+    styled,
+    use_container_width=True
+)
 
 @st.cache_data
 def to_excel(data: pd.DataFrame):
