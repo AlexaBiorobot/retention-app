@@ -1,4 +1,5 @@
 import streamlit as st
+import json
 st.set_page_config(
     page_title="Retention Tool",
     layout="wide",
@@ -9,7 +10,6 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import timedelta, datetime
 
 # === Constants ===
-SERVICE_ACCOUNT_FILE = "service_account.json"
 MAIN_SS_ID           = "1sZeAqY6dwdnEwPBg5vhOJDVXODyMuoV8OKMzBOviYQA"
 MAIN_SHEET           = "auto"
 LEADS_SS_ID          = "1SudB1YkPD0Tt7xkEiNJypRv0vb62BSdsCLrcrGqALAI"
@@ -17,10 +17,15 @@ LEADS_SHEET          = "Tutors"
 
 @st.cache_data
 def load_data_from_gsheet():
-    scope = ["https://spreadsheets.google.com/feeds",
-             "https://www.googleapis.com/auth/drive"]
-    creds  = ServiceAccountCredentials.from_json_keyfile_name(
-        SERVICE_ACCOUNT_FILE, scope)
+    scope = [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive",
+    ]
+    # берём JSON сервис-аккаунта из секрета
+    sa_json = st.secrets["GCP_SERVICE_ACCOUNT"]
+    sa_info = json.loads(sa_json)
+    creds   = ServiceAccountCredentials.from_json_keyfile_dict(sa_info, scope)
+
     client = gspread.authorize(creds)
 
     # 1) читаем основной лист
