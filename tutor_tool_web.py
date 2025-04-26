@@ -84,16 +84,9 @@ def load_data_from_gsheet():
     def compute_periods(row):
         dur = row["course_duration"]
         s   = row["step"]
-        lc1, lc2, lc3 = lesson_counts[dur]
         h = row["1st_period_start"]
     
-        # конец 1-го периода:
-        def compute_periods(row):
-        dur = row["course_duration"]
-        s   = row["step"]
-        h   = row["1st_period_start"]
-    
-        # конец 1-го периода по длительности курса
+        # конец 1-го периода
         if   dur == 32:
             end1 = h + pd.to_timedelta(10*7  - 7,   unit="D")
         elif dur == 40:
@@ -105,17 +98,14 @@ def load_data_from_gsheet():
         else:
             end1 = pd.NaT
     
-        # дальше без изменений:
-        start2 = h + pd.to_timedelta(end_lesson_counts[dur][0] * s,     unit="D")
-        end2   = h + pd.to_timedelta(end_lesson_counts[dur][0] * s
-                                     + end_lesson_counts[dur][1] * s
-                                     - s, unit="D")
-        start3 = h + pd.to_timedelta(end_lesson_counts[dur][0] * s
-                                     + end_lesson_counts[dur][1] * s,     unit="D")
-        # начало 3-го периода:
-        start3 = h + pd.to_timedelta(lc1 * s + lc2 * s, unit="D")
+        # начало и конец 2-го периода
+        lc1, lc2, lc3 = lesson_counts[dur]
+        start2 = h + pd.to_timedelta(lc1 * s,             unit="D")
         
-        # конец 3-го периода по длительности курса
+        # начало 3-го периода
+        end2   = start2 + pd.to_timedelta(lc2 * s - s,     unit="D")
+        
+        # конец 3-го периода
         if   dur == 32:
             end3 = start3 + pd.to_timedelta(13 * 7,   unit="D")
         elif dur == 40:
@@ -126,7 +116,6 @@ def load_data_from_gsheet():
             end3 = start3 + pd.to_timedelta(19 * 3.5, unit="D")
         else:
             end3 = pd.NaT
-
     
         return pd.Series(
             [end1, start2, end2, start3, end3],
