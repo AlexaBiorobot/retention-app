@@ -145,13 +145,6 @@ def load_data_from_gsheet():
             errors="coerce"
         )
 
-    # 5.4) форматируем в строку dd/mm/YYYY
-    for c in [
-        "1st_period_end", "2nd_period_start", "2nd_period_end",
-        "3rd_period_start", "3rd_period_end"
-    ]:
-        df[c] = df[c].dt.strftime("%d/%m/%Y")
-
     # 5.5) убираем временный столбец
     df.drop(columns="step", inplace=True)
 
