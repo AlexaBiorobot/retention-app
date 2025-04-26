@@ -5,3 +5,4 @@ oauth2client
 openpyxl
 tk
 streamlit
+streamlit-aggrid
