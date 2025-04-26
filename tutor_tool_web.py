@@ -1,4 +1,5 @@
 import streamlit as st
+from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
 import json
 st.set_page_config(
     page_title="Retention Tool",
@@ -175,10 +176,39 @@ st.write(
     unsafe_allow_html=True
 )
 
-# И выводим без .style, чтобы не было лимита Styler:
-st.dataframe(
+# === Main table через AgGrid с кликабельными BO-ID ===
+
+# 1) Округляем числа и удаляем скрытые колонки
+for col in dff.select_dtypes("number").columns:
+    dff[col] = dff[col].round(2)
+dff = dff.drop(columns=hide_cols, errors="ignore")
+
+# 2) Готовим настройки грида
+gb = GridOptionsBuilder.from_dataframe(dff)
+
+# 3) В колонке bo_id делаем ссылку
+link_renderer = JsCode("""
+function(params) {
+    if (!params.value) return "";
+    const url = `https://bo.kodland.org/students/${params.value}`;
+    return `<a href="${url}" target="_blank">${params.value}</a>`;
+}
+""")
+gb.configure_column(
+    "bo_id",
+    headerName="BO ID",
+    cellRenderer=link_renderer
+)
+
+# 4) Рендерим AgGrid
+grid_options = gb.build()
+AgGrid(
     dff,
-    use_container_width=True
+    gridOptions=grid_options,
+    enable_enterprise_modules=False,
+    fit_columns_on_grid_load=True,
+    height=600,
+    width="100%",
 )
 
 # === Export button ===
