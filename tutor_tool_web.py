@@ -112,10 +112,21 @@ def load_data_from_gsheet():
                                      - s, unit="D")
         start3 = h + pd.to_timedelta(end_lesson_counts[dur][0] * s
                                      + end_lesson_counts[dur][1] * s,     unit="D")
-        end3   = h + pd.to_timedelta(end_lesson_counts[dur][0] * s
-                                     + end_lesson_counts[dur][1] * s
-                                     + end_lesson_counts[dur][2] * s
-                                     - s, unit="D")
+        # начало 3-го периода:
+        start3 = h + pd.to_timedelta(lc1 * s + lc2 * s, unit="D")
+        
+        # конец 3-го периода по длительности курса
+        if   dur == 32:
+            end3 = start3 + pd.to_timedelta(13 * 7,   unit="D")
+        elif dur == 40:
+            end3 = start3 + pd.to_timedelta(14 * 7,   unit="D")
+        elif dur == 64:
+            end3 = start3 + pd.to_timedelta(23 * 3.5, unit="D")
+        elif dur == 80:
+            end3 = start3 + pd.to_timedelta(19 * 3.5, unit="D")
+        else:
+            end3 = pd.NaT
+
     
         return pd.Series(
             [end1, start2, end2, start3, end3],
