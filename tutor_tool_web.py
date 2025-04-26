@@ -84,38 +84,39 @@ def load_data_from_gsheet():
     def compute_periods(row):
         dur = row["course_duration"]
         s   = row["step"]
+        lc1, lc2, lc3 = lesson_counts[dur]
+        h = row["1st_period_start"]
+    
+        # конец 1-го периода:
+        def compute_periods(row):
+        dur = row["course_duration"]
+        s   = row["step"]
         h   = row["1st_period_start"]
-
-        # === 1-й период ===
+    
+        # конец 1-го периода по длительности курса
         if   dur == 32:
-            end1 = h + pd.to_timedelta(10*7   - 7,   unit="D")
+            end1 = h + pd.to_timedelta(10*7  - 7,   unit="D")
         elif dur == 40:
-            end1 = h + pd.to_timedelta(13*7   - 7,   unit="D")
+            end1 = h + pd.to_timedelta(13*7  - 7,   unit="D")
         elif dur == 64:
             end1 = h + pd.to_timedelta(20*3.5 - 3.5, unit="D")
         elif dur == 80:
             end1 = h + pd.to_timedelta(26*3.5 - 3.5, unit="D")
         else:
             end1 = pd.NaT
-
-        # === 2-й период ===
-        lc1, lc2, lc3 = lesson_counts[dur]
-        start2 = h + pd.to_timedelta(lc1 * s,       unit="D")
-        end2   = start2 + pd.to_timedelta(lc2 * s - s, unit="D")
-
-        # === 3-й период ===
-        start3 = h + pd.to_timedelta((lc1 + lc2) * s, unit="D")
-        if   dur == 32:
-            end3 = start3 + pd.to_timedelta(13 * 7,   unit="D")
-        elif dur == 40:
-            end3 = start3 + pd.to_timedelta(14 * 7,   unit="D")
-        elif dur == 64:
-            end3 = start3 + pd.to_timedelta(23 * 3.5, unit="D")
-        elif dur == 80:
-            end3 = start3 + pd.to_timedelta(19 * 3.5, unit="D")
-        else:
-            end3 = pd.NaT
-
+    
+        # дальше без изменений:
+        start2 = h + pd.to_timedelta(end_lesson_counts[dur][0] * s,     unit="D")
+        end2   = h + pd.to_timedelta(end_lesson_counts[dur][0] * s
+                                     + end_lesson_counts[dur][1] * s
+                                     - s, unit="D")
+        start3 = h + pd.to_timedelta(end_lesson_counts[dur][0] * s
+                                     + end_lesson_counts[dur][1] * s,     unit="D")
+        end3   = h + pd.to_timedelta(end_lesson_counts[dur][0] * s
+                                     + end_lesson_counts[dur][1] * s
+                                     + end_lesson_counts[dur][2] * s
+                                     - s, unit="D")
+    
         return pd.Series(
             [end1, start2, end2, start3, end3],
             index=[
@@ -124,7 +125,14 @@ def load_data_from_gsheet():
                 "3rd_period_start", "3rd_period_end"
             ]
         )
-
+    
+    df[
+        [
+            "1st_period_end",
+            "2nd_period_start", "2nd_period_end",
+            "3rd_period_start", "3rd_period_end"
+        ]
+    ] = df.apply(compute_periods, axis=1)
     
     # 5.4) форматируем в строку dd/mm/YYYY
     for c in ["1st_period_end","2nd_period_start","2nd_period_end","3rd_period_start","3rd_period_end"]:
