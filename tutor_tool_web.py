@@ -209,6 +209,7 @@ with st.sidebar:
 
     bo_ids   = st.multiselect("bo_id", df["bo_id"].unique(), default=None)
     teachers = st.multiselect("teacher_name", df["teacher_name"].unique(), default=None)
+    teacher_ids = st.multiselect("teacher_id", df["teacher_id"].unique(), default=None)
     leads    = st.multiselect("team_lead", df["team_lead"].unique(), default=None)
     courses  = st.multiselect("course", df["course"].unique(), default=None)
     groups   = st.multiselect("group_title", df["group_title"].unique(), default=None)
@@ -230,6 +231,7 @@ def apply_multiselect(col, sel):
 
 if bo_ids:   dff = apply_multiselect("bo_id", bo_ids)
 if teachers: dff = apply_multiselect("teacher_name", teachers)
+if teacher_ids: dff = apply_multiselect("teacher_id", teacher_ids)
 if leads:    dff = apply_multiselect("team_lead", leads)
 if courses:  dff = apply_multiselect("course", courses)
 if groups:   dff = apply_multiselect("group_title", groups)
