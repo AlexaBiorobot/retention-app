@@ -11,7 +11,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import timedelta, datetime
 
 # === Constants ===
-MAIN_SS_ID = os.getenv("MAIN_SS_ID")
+MAIN_SS_ID = os.getenv("MAIN_SS_ID") or st.secrets["MAIN_SS_ID"]
 MAIN_SHEET   = "auto"
 LEADS_SS_ID  = "1SudB1YkPD0Tt7xkEiNJypRv0vb62BSdsCLrcrGqALAI"
 LEADS_SHEET  = "Tutors"
