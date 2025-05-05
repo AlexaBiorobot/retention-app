@@ -145,9 +145,6 @@ def load_data_from_gsheet():
             errors="coerce"
         )
 
-    # 5.5) убираем временный столбец
-    df.drop(columns="step", inplace=True)
-
         # 5.5) убираем временный столбец
     df.drop(columns="step", inplace=True)
 
