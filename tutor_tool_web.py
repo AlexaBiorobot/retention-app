@@ -18,15 +18,26 @@ LEADS_SHEET  = "Tutors"
 
 @st.cache_data
 def load_data_from_gsheet():
+    import os, json
+    from oauth2client.service_account import ServiceAccountCredentials
+    import gspread
+
+    # === 1) авторизационный скоуп ===
     scope = [
         "https://spreadsheets.google.com/feeds",
         "https://www.googleapis.com/auth/drive",
     ]
-    # берём JSON сервис-аккаунта из секрета
-    sa_json = st.secrets["GCP_SERVICE_ACCOUNT"]
-    sa_info = json.loads(sa_json)
-    creds   = ServiceAccountCredentials.from_json_keyfile_dict(sa_info, scope)
 
+    # === 2) читаем JSON ключ ===
+    # сначала из переменной окружения GCP_SERVICE_ACCOUNT
+    sa_json = os.getenv("GCP_SERVICE_ACCOUNT")
+    if not sa_json:
+        # fallback на локальный streamlit secret
+        sa_json = st.secrets["GCP_SERVICE_ACCOUNT"]
+    sa_info = json.loads(sa_json)
+
+    # === 3) собираем credentials и клиент ===
+    creds  = ServiceAccountCredentials.from_json_keyfile_dict(sa_info, scope)
     client = gspread.authorize(creds)
 
     # 1) читаем основной лист
