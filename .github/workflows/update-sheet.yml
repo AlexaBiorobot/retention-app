@@ -3,7 +3,7 @@ name: Update Google Sheet
 on:
   workflow_dispatch:      # ручной запуск из UI
   schedule:
-    - cron: "*/30 * * * *"  # каждые 30 минут
+    - cron: "0 3 * * *"
 
 jobs:
   push-to-sheet:
