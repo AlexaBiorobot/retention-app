@@ -20,8 +20,8 @@ client  = gspread.authorize(creds)
 df = load_data_from_gsheet()   # здесь — уже со всеми override-ами и чисткой
 
 # === открыть гугл-таблицу и «залить» в лист Exported ===
-SS_ID     = "ВАШ_ЦЕЛЕВОЙ_SS_ID"
-SHEET_NAME = "Exported"
+SS_ID     = "https://docs.google.com/spreadsheets/d/1wJvMIf62izX10-r_-B1QtfKWRzobZHCH8dufVsCCVko/edit?gid=1572100264#gid=1572100264"
+SHEET_NAME = "data2"
 sh = client.open_by_key(SS_ID)
 try:
     ws = sh.worksheet(SHEET_NAME)
