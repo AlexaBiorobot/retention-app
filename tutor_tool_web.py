@@ -132,7 +132,7 @@ def load_data_from_gsheet():
             "3rd_period_start", "3rd_period_end"
         ]
     ] = df.apply(compute_periods, axis=1)
-    
+
     # 5.3.2) приводим эти пять колонок в настоящий datetime64
     for c in [
         "1st_period_end","2nd_period_start","2nd_period_end",
@@ -145,7 +145,7 @@ def load_data_from_gsheet():
             errors="coerce"
         )
 
-        # 5.5) убираем временный столбец
+    # 5.5) убираем временный столбец — убедитесь, что этот вызов НЕ внутри цикла!
     df.drop(columns="step", inplace=True)
 
     # === 6) подхватываем оверрайды из листа "tech" ===
@@ -158,29 +158,31 @@ def load_data_from_gsheet():
     all_vals   = ws3.get_all_values()
     headers    = all_vals[0]
     data_rows  = all_vals[1:]
-    tech_df    = pd.DataFrame(data_rows, columns=headers)
+    tech_df    = pd.DataFrame(data_rows, columns=headers).fillna("")
 
     # разбиваем на три блока A–C, D–F, G–I
     ov1 = tech_df.iloc[:, 0:3].copy(); ov1.columns = ["teacher_id","bo_id","ov1"]
     ov2 = tech_df.iloc[:, 3:6].copy(); ov2.columns = ["teacher_id","bo_id","ov2"]
     ov3 = tech_df.iloc[:, 6:9].copy(); ov3.columns = ["teacher_id","bo_id","ov3"]
 
-    # если нужно, приведите типы ключей:
-    # ov1["teacher_id"] = ov1["teacher_id"].astype(df["teacher_id"].dtype)
-    # ov1["bo_id"]      = ov1["bo_id"].astype(df["bo_id"].dtype)
-    # ...и то же для ov2, ov3
+    # приводим ключи к строкам без пробелов
+    for key in ["teacher_id","bo_id"]:
+        df[key]  = df[key].astype(str).str.strip()
+        ov1[key] = ov1[key].astype(str).str.strip()
+        ov2[key] = ov2[key].astype(str).str.strip()
+        ov3[key] = ov3[key].astype(str).str.strip()
 
-    # мердж и переопределение period_1
+    # мерж + override period_1
     df = df.merge(ov1, on=["teacher_id","bo_id"], how="left")
-    df["period_1"] = np.where(df["ov1"].notna(), df["ov1"], df["period_1"])
+    df["period_1"] = np.where(df["ov1"].isna(), df["period_1"], df["ov1"])
 
-    # мердж и переопределение period_2
+    # period_2
     df = df.merge(ov2, on=["teacher_id","bo_id"], how="left")
-    df["period_2"] = np.where(df["ov2"].notna(), df["ov2"], df["period_2"])
+    df["period_2"] = np.where(df["ov2"].isna(), df["period_2"], df["ov2"])
 
-    # мердж и переопределение period_3
+    # period_3
     df = df.merge(ov3, on=["teacher_id","bo_id"], how="left")
-    df["period_3"] = np.where(df["ov3"].notna(), df["ov3"], df["period_3"])
+    df["period_3"] = np.where(df["ov3"].isna(), df["period_3"], df["ov3"])
 
     # удаляем временные колонки
     df.drop(columns=["ov1","ov2","ov3"], inplace=True)
