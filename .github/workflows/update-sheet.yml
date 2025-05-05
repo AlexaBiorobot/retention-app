@@ -1,0 +1,26 @@
+name: Update Google Sheet
+
+on:
+  workflow_dispatch:      # можно запустить вручную из UI
+  schedule:
+    - cron: "*/30 * * * *"  # каждые 30 минут
+
+jobs:
+  push-to-sheet:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        run: |
+          pip install gspread oauth2client gspread-dataframe pandas
+
+      - name: Update Google Sheet
+        run: python update_sheet.py
+        env:
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
