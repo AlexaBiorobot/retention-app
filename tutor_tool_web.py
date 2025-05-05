@@ -165,6 +165,11 @@ def load_data_from_gsheet():
     ov2 = tech_df.iloc[:, 3:6].copy(); ov2.columns = ["teacher_id","bo_id","ov2"]
     ov3 = tech_df.iloc[:, 6:9].copy(); ov3.columns = ["teacher_id","bo_id","ov3"]
 
+    # — ПРИВОДИМ OVERRIDE-СТОЛБЦЫ К ЧИСЛАМ —
+    ov1["ov1"] = pd.to_numeric(ov1["ov1"], errors="coerce")
+    ov2["ov2"] = pd.to_numeric(ov2["ov2"], errors="coerce")
+    ov3["ov3"] = pd.to_numeric(ov3["ov3"], errors="coerce")
+
     # приводим ключи к строкам без пробелов
     for key in ["teacher_id","bo_id"]:
         df[key]  = df[key].astype(str).str.strip()
