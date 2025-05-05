@@ -148,6 +148,46 @@ def load_data_from_gsheet():
     # 5.5) убираем временный столбец
     df.drop(columns="step", inplace=True)
 
+        # 5.5) убираем временный столбец
+    df.drop(columns="step", inplace=True)
+
+    # === 6) подхватываем оверрайды из листа "tech" ===
+    import numpy as np
+
+    TECH_SS_ID  = "1wJvMIf62izX10-r_-B1QtfKWRzobZHCH8dufVsCCVko"
+    TECH_SHEET  = "tech"
+    ws3 = client.open_by_key(TECH_SS_ID).worksheet(TECH_SHEET)
+
+    all_vals   = ws3.get_all_values()
+    headers    = all_vals[0]
+    data_rows  = all_vals[1:]
+    tech_df    = pd.DataFrame(data_rows, columns=headers)
+
+    # разбиваем на три блока A–C, D–F, G–I
+    ov1 = tech_df.iloc[:, 0:3].copy(); ov1.columns = ["teacher_id","bo_id","ov1"]
+    ov2 = tech_df.iloc[:, 3:6].copy(); ov2.columns = ["teacher_id","bo_id","ov2"]
+    ov3 = tech_df.iloc[:, 6:9].copy(); ov3.columns = ["teacher_id","bo_id","ov3"]
+
+    # если нужно, приведите типы ключей:
+    # ov1["teacher_id"] = ov1["teacher_id"].astype(df["teacher_id"].dtype)
+    # ov1["bo_id"]      = ov1["bo_id"].astype(df["bo_id"].dtype)
+    # ...и то же для ov2, ov3
+
+    # мердж и переопределение period_1
+    df = df.merge(ov1, on=["teacher_id","bo_id"], how="left")
+    df["period_1"] = np.where(df["ov1"].notna(), df["ov1"], df["period_1"])
+
+    # мердж и переопределение period_2
+    df = df.merge(ov2, on=["teacher_id","bo_id"], how="left")
+    df["period_2"] = np.where(df["ov2"].notna(), df["ov2"], df["period_2"])
+
+    # мердж и переопределение period_3
+    df = df.merge(ov3, on=["teacher_id","bo_id"], how="left")
+    df["period_3"] = np.where(df["ov3"].notna(), df["ov3"], df["period_3"])
+
+    # удаляем временные колонки
+    df.drop(columns=["ov1","ov2","ov3"], inplace=True)
+
     # 7) подтягиваем team_lead
     ws2 = client.open_by_key(LEADS_SS_ID).worksheet(LEADS_SHEET)
     leads = {
