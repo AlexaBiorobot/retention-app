@@ -29,3 +29,7 @@ jobs:
         run: python update_sheet.py
         env:
           GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          MAIN_SS_ID:          ${{ secrets.MAIN_SS_ID }}
+          MAIN_SHEET:          ${{ secrets.MAIN_SHEET }}
+          LEADS_SS_ID:         ${{ secrets.LEADS_SS_ID }}
+          LEADS_SHEET:         ${{ secrets.LEADS_SHEET }}
