@@ -1,32 +1,34 @@
-import os, json
-import pandas as pd
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-from gspread_dataframe import set_with_dataframe
+name: Update Google Sheet
 
-# загрузить DataFrame из кода — либо дублировать функцию load_data_from_gsheet(),
-# либо импортировать её из вашего модуля:
-from tutor_tool_web import load_data_from_gsheet
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 0 * * *"  # например, раз в сутки в полночь
 
-# === авторизация ===
-sa_info = json.loads(os.environ["GCP_SERVICE_ACCOUNT"])
-creds   = ServiceAccountCredentials.from_json_keyfile_dict(
-    sa_info,
-    ["https://spreadsheets.google.com/feeds","https://www.googleapis.com/auth/drive"]
-)
-client  = gspread.authorize(creds)
+jobs:
+  push-to-sheet:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
 
-# === получить DF ===
-df = load_data_from_gsheet()   # здесь — уже со всеми override-ами и чисткой
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
 
-# === открыть гугл-таблицу и «залить» в лист Exported ===
-SS_ID = "1wJvMIf62izX10-r_-B1QtfKWRzobZHCH8dufVsCCVko"
-SHEET_NAME = "data2"
-sh = client.open_by_key(SS_ID)
-try:
-    ws = sh.worksheet(SHEET_NAME)
-    ws.clear()
-except gspread.exceptions.WorksheetNotFound:
-    ws = sh.add_worksheet(SHEET_NAME, rows=1000, cols=50)
+      - name: Install deps
+        run: |
+          pip install \
+            gspread \
+            oauth2client \
+            gspread-dataframe \
+            pandas
 
-set_with_dataframe(ws, df)
+      - name: Run update script
+        env:
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          MAIN_SS_ID:          ${{ secrets.MAIN_SS_ID }}
+          MAIN_SHEET:          ${{ secrets.MAIN_SHEET }}
+          LEADS_SS_ID:         ${{ secrets.LEADS_SS_ID }}
+          LEADS_SHEET:         ${{ secrets.LEADS_SHEET }}
+        run: python update_sheet.py
