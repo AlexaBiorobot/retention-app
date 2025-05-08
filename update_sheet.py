@@ -1,12 +1,40 @@
-import os, json
+import os
+import json
+import time
+
 import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from gspread_dataframe import set_with_dataframe
+from gspread.exceptions import APIError, WorksheetNotFound
 
-# загрузить DataFrame из кода — либо дублировать функцию load_data_from_gsheet(),
-# либо импортировать её из вашего модуля:
-from tutor_tool_web import load_data_from_gsheet
+# —————————————————————————————
+# Вспомогательные функции для retry при 503
+# —————————————————————————————
+
+def api_retry_open(client, key, max_attempts=5, backoff=1.0):
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return client.open_by_key(key)
+        except APIError as e:
+            code = getattr(e.response, "status_code", None) or getattr(e.response, "status", None)
+            if code == 503 and attempt < max_attempts:
+                time.sleep(backoff)
+                backoff *= 2
+                continue
+            raise
+
+def api_retry_worksheet(spreadsheet, name, max_attempts=5, backoff=1.0):
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return spreadsheet.worksheet(name)
+        except APIError as e:
+            code = getattr(e.response, "status_code", None) or getattr(e.response, "status", None)
+            if code == 503 and attempt < max_attempts:
+                time.sleep(backoff)
+                backoff *= 2
+                continue
+            raise
 
 # === авторизация ===
 sa_info = json.loads(os.environ["GCP_SERVICE_ACCOUNT"])
@@ -17,16 +45,22 @@ creds   = ServiceAccountCredentials.from_json_keyfile_dict(
 client  = gspread.authorize(creds)
 
 # === получить DF ===
-df = load_data_from_gsheet()   # здесь — уже со всеми override-ами и чисткой
+from tutor_tool_web import load_data_from_gsheet
+df = load_data_from_gsheet()   # ваш основной загрузчик с override-ами
 
 # === открыть гугл-таблицу и «залить» в лист Exported ===
-SS_ID = "1wJvMIf62izX10-r_-B1QtfKWRzobZHCH8dufVsCCVko"
+SS_ID      = "1wJvMIf62izX10-r_-B1QtfKWRzobZHCH8dufVsCCVko"
 SHEET_NAME = "data2"
-sh = client.open_by_key(SS_ID)
+
+# вместо client.open_by_key делаем с retry
+sh = api_retry_open(client, SS_ID)
+
+# вместо sh.worksheet тоже с retry, но обрабатывая отсутствие листа
 try:
-    ws = sh.worksheet(SHEET_NAME)
+    ws = api_retry_worksheet(sh, SHEET_NAME)
     ws.clear()
-except gspread.exceptions.WorksheetNotFound:
+except WorksheetNotFound:
     ws = sh.add_worksheet(SHEET_NAME, rows=1000, cols=50)
 
+# запись с помощью set_with_dataframe
 set_with_dataframe(ws, df)
