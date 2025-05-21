@@ -162,76 +162,54 @@ def load_data_from_gsheet():
 
     # === 6) подхватываем оверрайды из листа "tech" ===
     import numpy as np
-
-    TECH_SS_ID  = "1wJvMIf62izX10-r_-B1QtfKWRzobZHCH8dufVsCCVko"
+    
+    TECH_SS_ID = "1wJvMIf62izX10-r_-B1QtfKWRzobZHCH8dufVsCCVko"
     TECH_SHEET  = "tech"
     ws3 = client.open_by_key(TECH_SS_ID).worksheet(TECH_SHEET)
-
-    all_vals   = ws3.get_all_values()
-    headers    = all_vals[0]
-    data_rows  = all_vals[1:]
-    tech_df    = pd.DataFrame(data_rows, columns=headers).fillna("")
-
-    # разбиваем на три блока A–C, D–F, G–I
+    
+    # 1) загружаем исходную тех.таблицу
+    all_vals  = ws3.get_all_values()
+    headers   = all_vals[0]
+    tech_df   = pd.DataFrame(all_vals[1:], columns=headers).fillna("")
+    
+    # 2) разбиваем на три блока и конвертим оверрайды в числа
     ov1 = tech_df.iloc[:, 0:3].copy(); ov1.columns = ["teacher_id","bo_id","ov1"]
     ov2 = tech_df.iloc[:, 3:6].copy(); ov2.columns = ["teacher_id","bo_id","ov2"]
     ov3 = tech_df.iloc[:, 6:9].copy(); ov3.columns = ["teacher_id","bo_id","ov3"]
-
-    # — ПРИВОДИМ OVERRIDE-СТОЛБЦЫ К ЧИСЛАМ —
-    ov1["ov1"] = pd.to_numeric(ov1["ov1"], errors="coerce")
-    ov2["ov2"] = pd.to_numeric(ov2["ov2"], errors="coerce")
-    ov3["ov3"] = pd.to_numeric(ov3["ov3"], errors="coerce")
-
-    # приводим ключи к строкам без пробелов
-    for key in ["teacher_id","bo_id"]:
-        df[key]  = df[key].astype(str).str.strip()
-        ov1[key] = ov1[key].astype(str).str.strip()
-        ov2[key] = ov2[key].astype(str).str.strip()
-        ov3[key] = ov3[key].astype(str).str.strip()
-
-    # мерж + override period_1
-    df = df.merge(ov1, on=["teacher_id","bo_id"], how="left")
-    df["period_1"] = np.where(
-        df["bo_id"] == "",                # если bo_id пустой
-        "",                               # — ставим пустую строку
-        np.where(
-            df["ov1"].isna(),             # если override нет
-            df["period_1"],               # — оставляем старое значение
-            df["ov1"]                     # — иначе берем ov1
-        )
-    )
-
-    # period_2
-    df = df.merge(ov2, on=["teacher_id","bo_id"], how="left")
-    df["period_2"] = np.where(
-        df["bo_id"] == "",
-        "",
-        np.where(
-            df["ov2"].isna(),
-            df["period_2"],
-            df["ov2"]
-        )
-    )
-
-    # period_3
-    df = df.merge(ov3, on=["teacher_id", "bo_id"], how="left")
-    df["period_3"] = np.where(
-        df["bo_id"] == "",
-        "",
-        np.where(
-            df["ov3"].isna(),
-            df["period_3"],
-            df["ov3"]
-        )
-    )
-
-    # 1) формируем маску «bo_id пуст или NaN»
-    mask_empty_bo = df["bo_id"].isna() | (df["bo_id"].astype(str).str.strip() == "")
     
-    # 2) очищаем сразу все три period_*
-    df.loc[mask_empty_bo, ["period_1", "period_2", "period_3"]] = ""
-
-    # удаляем временные колонки
+    for df_ov, col in [(ov1,"ov1"), (ov2,"ov2"), (ov3,"ov3")]:
+        df_ov[col] = pd.to_numeric(df_ov[col], errors="coerce")
+        # чистим teacher_id и bo_id
+        df_ov["teacher_id"] = df_ov["teacher_id"].astype(str).str.strip()
+        df_ov["bo_id"]      = df_ov["bo_id"].astype(str).str.strip()
+    
+    # 3) сразу же чистим в основном df ключи (до merge)
+    df["teacher_id"] = df["teacher_id"].astype(str).str.strip()
+    df["bo_id"]      = df["bo_id"].astype(str).str.strip()
+    
+    # 4) делаем merge и ваш обычный override
+    df = df.merge(ov1, on=["teacher_id","bo_id"], how="left")
+    df["period_1"] = np.where(df["ov1"].isna(), df["period_1"], df["ov1"])
+    
+    df = df.merge(ov2, on=["teacher_id","bo_id"], how="left")
+    df["period_2"] = np.where(df["ov2"].isna(), df["period_2"], df["ov2"])
+    
+    df = df.merge(ov3, on=["teacher_id","bo_id"], how="left")
+    df["period_3"] = np.where(df["ov3"].isna(), df["period_3"], df["ov3"])
+    
+    # 5) ---- НОВЫЙ БЛОК: очищаем периоды по пустому bo_id из override-таблицы ----
+    # Получаем списки teacher_id, у которых в ov1/ov2/ov3 bo_id == ""
+    blank1 = ov1.loc[ov1["bo_id"] == "", "teacher_id"]
+    blank2 = ov2.loc[ov2["bo_id"] == "", "teacher_id"]
+    blank3 = ov3.loc[ov3["bo_id"] == "", "teacher_id"]
+    
+    # Объединяем и оставляем уникальные
+    blank_teachers = pd.Index(blank1.tolist() + blank2.tolist() + blank3.tolist()).unique()
+    
+    # Для этих учителей очищаем всё, что нужно
+    df.loc[df["teacher_id"].isin(blank_teachers), ["period_1","period_2","period_3"]] = ""
+    
+    # 6) удаляем временные колонки
     df.drop(columns=["ov1","ov2","ov3"], inplace=True)
 
     # 7) подтягиваем team_lead
