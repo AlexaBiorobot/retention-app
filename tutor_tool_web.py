@@ -214,7 +214,6 @@ def load_data_from_gsheet():
     )
 
     # period_3
-    df = df.merge(ov3, on=["teacher_id","bo_id"], how="left")
     df = df.merge(ov3, on=["teacher_id", "bo_id"], how="left")
     df["period_3"] = np.where(
         df["bo_id"] == "",
