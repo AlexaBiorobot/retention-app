@@ -225,6 +225,12 @@ def load_data_from_gsheet():
         )
     )
 
+    # 1) формируем маску «bo_id пуст или NaN»
+    mask_empty_bo = df["bo_id"].isna() | (df["bo_id"].astype(str).str.strip() == "")
+    
+    # 2) очищаем сразу все три period_*
+    df.loc[mask_empty_bo, ["period_1", "period_2", "period_3"]] = ""
+
     # удаляем временные колонки
     df.drop(columns=["ov1","ov2","ov3"], inplace=True)
 
