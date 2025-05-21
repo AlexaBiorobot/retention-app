@@ -178,10 +178,13 @@ def load_data_from_gsheet():
     ov3 = tech_df.iloc[:, 6:9].copy(); ov3.columns = ["teacher_id","bo_id","ov3"]
     
     for df_ov, col in [(ov1,"ov1"), (ov2,"ov2"), (ov3,"ov3")]:
+        # 2.1) числа
         df_ov[col] = pd.to_numeric(df_ov[col], errors="coerce")
-        # чистим teacher_id и bo_id
+        # 2.2) чистим ключи
         df_ov["teacher_id"] = df_ov["teacher_id"].astype(str).str.strip()
         df_ov["bo_id"]      = df_ov["bo_id"].astype(str).str.strip()
+        # 2.3) переводим любые пустые или "None" → pd.NA
+        df_ov["bo_id"] = df_ov["bo_id"].replace({"": pd.NA, "None": pd.NA})
     
     # 3) сразу же чистим в основном df ключи (до merge)
     df["teacher_id"] = df["teacher_id"].astype(str).str.strip()
@@ -198,10 +201,9 @@ def load_data_from_gsheet():
     df["period_3"] = np.where(df["ov3"].isna(), df["period_3"], df["ov3"])
     
     # 5) ---- НОВЫЙ БЛОК: очищаем периоды по пустому bo_id из override-таблицы ----
-    # Получаем списки teacher_id, у которых в ov1/ov2/ov3 bo_id == ""
-    blank1 = ov1.loc[ov1["bo_id"] == "", "teacher_id"]
-    blank2 = ov2.loc[ov2["bo_id"] == "", "teacher_id"]
-    blank3 = ov3.loc[ov3["bo_id"] == "", "teacher_id"]
+    blank1 = ov1.loc[ov1["bo_id"].isna(), "teacher_id"]
+    blank2 = ov2.loc[ov2["bo_id"].isna(), "teacher_id"]
+    blank3 = ov3.loc[ov3["bo_id"].isna(), "teacher_id"]
     
     # Объединяем и оставляем уникальные
     blank_teachers = pd.Index(blank1.tolist() + blank2.tolist() + blank3.tolist()).unique()
