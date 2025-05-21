@@ -191,15 +191,40 @@ def load_data_from_gsheet():
 
     # мерж + override period_1
     df = df.merge(ov1, on=["teacher_id","bo_id"], how="left")
-    df["period_1"] = np.where(df["ov1"].isna(), df["period_1"], df["ov1"])
+    df["period_1"] = np.where(
+        df["bo_id"] == "",                # если bo_id пустой
+        "",                               # — ставим пустую строку
+        np.where(
+            df["ov1"].isna(),             # если override нет
+            df["period_1"],               # — оставляем старое значение
+            df["ov1"]                     # — иначе берем ov1
+        )
+    )
 
     # period_2
     df = df.merge(ov2, on=["teacher_id","bo_id"], how="left")
-    df["period_2"] = np.where(df["ov2"].isna(), df["period_2"], df["ov2"])
+    df["period_2"] = np.where(
+        df["bo_id"] == "",
+        "",
+        np.where(
+            df["ov2"].isna(),
+            df["period_2"],
+            df["ov2"]
+        )
+    )
 
     # period_3
     df = df.merge(ov3, on=["teacher_id","bo_id"], how="left")
-    df["period_3"] = np.where(df["ov3"].isna(), df["period_3"], df["ov3"])
+    df = df.merge(ov3, on=["teacher_id", "bo_id"], how="left")
+    df["period_3"] = np.where(
+        df["bo_id"] == "",
+        "",
+        np.where(
+            df["ov3"].isna(),
+            df["period_3"],
+            df["ov3"]
+        )
+    )
 
     # удаляем временные колонки
     df.drop(columns=["ov1","ov2","ov3"], inplace=True)
