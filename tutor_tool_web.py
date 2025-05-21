@@ -164,55 +164,55 @@ def load_data_from_gsheet():
     import numpy as np
     
     TECH_SS_ID = "1wJvMIf62izX10-r_-B1QtfKWRzobZHCH8dufVsCCVko"
-    TECH_SHEET  = "tech"
+    TECH_SHEET = "tech"
     ws3 = client.open_by_key(TECH_SS_ID).worksheet(TECH_SHEET)
     
     # 1) загружаем исходную тех.таблицу
-    all_vals  = ws3.get_all_values()
-    headers   = all_vals[0]
-    tech_df   = pd.DataFrame(all_vals[1:], columns=headers).fillna("")
+    all_vals = ws3.get_all_values()
+    headers  = all_vals[0]
+    tech_df  = pd.DataFrame(all_vals[1:], columns=headers).fillna("")
     
-    # 2) разбиваем на три блока и конвертим оверрайды в числа
-    ov1 = tech_df.iloc[:, 0:3].copy(); ov1.columns = ["teacher_id","bo_id","ov1"]
-    ov2 = tech_df.iloc[:, 3:6].copy(); ov2.columns = ["teacher_id","bo_id","ov2"]
-    ov3 = tech_df.iloc[:, 6:9].copy(); ov3.columns = ["teacher_id","bo_id","ov3"]
+    # 2) разбиваем на три блока и ставим флаги наличия записи
+    ov1 = tech_df.iloc[:, 0:3].copy(); ov1.columns = ["teacher_id","bo_id","ov1"]; ov1["has_ov1"] = True
+    ov2 = tech_df.iloc[:, 3:6].copy(); ov2.columns = ["teacher_id","bo_id","ov2"]; ov2["has_ov2"] = True
+    ov3 = tech_df.iloc[:, 6:9].copy(); ov3.columns = ["teacher_id","bo_id","ov3"]; ov3["has_ov3"] = True
     
-    for df_ov, col in [(ov1,"ov1"), (ov2,"ov2"), (ov3,"ov3")]:
-        # 2.1) числа
+    # 3) приводим override-колонки к числам и чистим ключи
+    for df_ov, col, flag in [(ov1,"ov1","has_ov1"), (ov2,"ov2","has_ov2"), (ov3,"ov3","has_ov3")]:
         df_ov[col] = pd.to_numeric(df_ov[col], errors="coerce")
-        # 2.2) чистим ключи
         df_ov["teacher_id"] = df_ov["teacher_id"].astype(str).str.strip()
         df_ov["bo_id"]      = df_ov["bo_id"].astype(str).str.strip()
-        # 2.3) переводим любые пустые или "None" → pd.NA
-        df_ov["bo_id"] = df_ov["bo_id"].replace({"": pd.NA, "None": pd.NA})
     
-    # 3) сразу же чистим в основном df ключи (до merge)
+    # 4) чистим ключи в основном df (до merge)
     df["teacher_id"] = df["teacher_id"].astype(str).str.strip()
     df["bo_id"]      = df["bo_id"].astype(str).str.strip()
     
-    # 4) делаем merge и ваш обычный override
-    df = df.merge(ov1, on=["teacher_id","bo_id"], how="left")
-    df["period_1"] = np.where(df["ov1"].isna(), df["period_1"], df["ov1"])
+    # 5) первый период
+    df = df.merge(ov1[["teacher_id","bo_id","ov1","has_ov1"]],
+                  on=["teacher_id","bo_id"], how="left")
+    # если запись есть, но ov1 пустой — очищаем
+    df.loc[df["has_ov1"] & df["ov1"].isna(), "period_1"] = ""
+    # если ov1 число — подставляем
+    df.loc[df["ov1"].notna(),        "period_1"] = df.loc[df["ov1"].notna(), "ov1"]
     
-    df = df.merge(ov2, on=["teacher_id","bo_id"], how="left")
-    df["period_2"] = np.where(df["ov2"].isna(), df["period_2"], df["ov2"])
+    # 6) второй период
+    df = df.merge(ov2[["teacher_id","bo_id","ov2","has_ov2"]],
+                  on=["teacher_id","bo_id"], how="left")
+    df.loc[df["has_ov2"] & df["ov2"].isna(), "period_2"] = ""
+    df.loc[df["ov2"].notna(),        "period_2"] = df.loc[df["ov2"].notna(), "ov2"]
     
-    df = df.merge(ov3, on=["teacher_id","bo_id"], how="left")
-    df["period_3"] = np.where(df["ov3"].isna(), df["period_3"], df["ov3"])
+    # 7) третий период
+    df = df.merge(ov3[["teacher_id","bo_id","ov3","has_ov3"]],
+                  on=["teacher_id","bo_id"], how="left")
+    df.loc[df["has_ov3"] & df["ov3"].isna(), "period_3"] = ""
+    df.loc[df["ov3"].notna(),        "period_3"] = df.loc[df["ov3"].notna(), "ov3"]
     
-    # 5) ---- НОВЫЙ БЛОК: очищаем периоды по пустому bo_id из override-таблицы ----
-    blank1 = ov1.loc[ov1["bo_id"].isna(), "teacher_id"]
-    blank2 = ov2.loc[ov2["bo_id"].isna(), "teacher_id"]
-    blank3 = ov3.loc[ov3["bo_id"].isna(), "teacher_id"]
-    
-    # Объединяем и оставляем уникальные
-    blank_teachers = pd.Index(blank1.tolist() + blank2.tolist() + blank3.tolist()).unique()
-    
-    # Для этих учителей очищаем всё, что нужно
-    df.loc[df["teacher_id"].isin(blank_teachers), ["period_1","period_2","period_3"]] = ""
-    
-    # 6) удаляем временные колонки
-    df.drop(columns=["ov1","ov2","ov3"], inplace=True)
+    # 8) удаляем вспомогательные столбцы
+    df.drop(columns=[
+        "ov1","has_ov1",
+        "ov2","has_ov2",
+        "ov3","has_ov3"
+    ], inplace=True)
 
     # 7) подтягиваем team_lead
     ws2 = client.open_by_key(LEADS_SS_ID).worksheet(LEADS_SHEET)
