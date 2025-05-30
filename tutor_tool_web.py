@@ -8,6 +8,7 @@ st.set_page_config(
 )
 import pandas as pd
 import gspread
+import io
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import timedelta, datetime
 
@@ -296,7 +297,10 @@ st.dataframe(
 
 @st.cache_data
 def to_excel(data: pd.DataFrame):
-    return data.to_excel(index=False)
+    output = io.BytesIO()
+    data.to_excel(output, index=False)
+    output.seek(0)
+    return output
 
 if st.button("Export to Excel"):
     tmp = to_excel(dff)
