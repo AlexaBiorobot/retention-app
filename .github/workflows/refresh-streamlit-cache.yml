@@ -1,0 +1,17 @@
+name: Refresh Streamlit Cache
+
+on:
+  schedule:
+    # каждый день в полночь UTC
+    - cron: '0 0 * * *'
+
+jobs:
+  ping-streamlit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Streamlit app to refresh cache
+        env:
+          STREAMLIT_URL: ${{ secrets.STREAMLIT_URL }}
+        run: |
+          echo "🔄 hitting $STREAMLIT_URL to warm cache…"
+          curl --fail --silent --show-error "$STREAMLIT_URL"
