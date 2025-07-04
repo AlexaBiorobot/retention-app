@@ -1,6 +1,7 @@
 name: Refresh Streamlit Cache
 
 on:
+  workflow_dispatch:      # ручной запуск из UI
   schedule:
     # каждый день в полночь UTC
     - cron: '0 0 * * *'
