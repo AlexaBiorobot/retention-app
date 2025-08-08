@@ -64,3 +64,17 @@ except WorksheetNotFound:
 
 # запись с помощью set_with_dataframe
 set_with_dataframe(ws, df)
+
+# === второй экспорт ===
+SS_ID_2      = "1QbdVTacl2UdSYI5PSHuFOxEXYdRXjh0hc5Q9I5zP0fU"
+SHEET_NAME_2 = "data"
+
+sh2 = api_retry_open(client, SS_ID_2)
+
+try:
+    ws2 = api_retry_worksheet(sh2, SHEET_NAME_2)
+    ws2.clear()
+except WorksheetNotFound:
+    ws2 = sh2.add_worksheet(SHEET_NAME_2, rows=1000, cols=50)
+
+set_with_dataframe(ws2, df)
