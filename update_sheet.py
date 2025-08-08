@@ -67,7 +67,7 @@ set_with_dataframe(ws, df)
 
 # === второй экспорт ===
 SS_ID_2      = "1QbdVTacl2UdSYI5PSHuFOxEXYdRXjh0hc5Q9I5zP0fU"
-SHEET_NAME_2 = "data"
+SHEET_NAME_2 = "data2"
 
 sh2 = api_retry_open(client, SS_ID_2)
 
