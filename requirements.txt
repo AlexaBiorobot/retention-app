@@ -4,5 +4,5 @@ gspread
 oauth2client
 openpyxl
 tk
-streamlit
 streamlit-aggrid
+streamlit>=1.36
