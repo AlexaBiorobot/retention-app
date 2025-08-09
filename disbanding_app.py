@@ -165,7 +165,7 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
 
-    # A:R -> 18 колонок; нужны D, K, L, M, P, Q, R
+    # A:R -> 18 колонок; нам нужны D, K, L, M, P, Q, R
     if len(df.columns) < 18:
         st.error("Ожидалось минимум 18 колонок (до R). Проверь диапазон A:R и заголовки.")
         st.stop()
@@ -178,7 +178,7 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     colQ = df.columns[16]   # Q
     colR = df.columns[17]   # R
 
-    # D == "active"
+    # D == "active" (case-insensitive)
     d_active = df[colD].astype(str).str.strip().str.lower() == "active"
 
     # K не пустое и < 32
@@ -188,19 +188,28 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     # R пусто
     r_blank = df[colR].isna() | (df[colR].astype(str).str.strip() == "")
 
-    # P/Q != TRUE
+    # P/Q не TRUE
     p_true = df[colP].astype(str).str.strip().str.lower() == "true"
     q_true = df[colQ].astype(str).str.strip().str.lower() == "true"
 
-    # НЕ пускать строки, где M > 0 И L > 2  → оставляем всё, что НЕ (M>0 & L>2)
-    l_num = pd.to_numeric(df[colL], errors="coerce")
-    m_num = pd.to_numeric(df[colM], errors="coerce")
+    # --- Надёжное парсирование L/M ---
+    # 1) оставляем только цифры/знаки/разделители, 2) ',' -> '.', 3) в число
+    def _coerce_num(series: pd.Series) -> pd.Series:
+        s = series.astype(str).str.strip()
+        s = s.str.replace(r"[^\d,.\-]+", "", regex=True)
+        s = s.str.replace(",", ".", regex=False)
+        return pd.to_numeric(s, errors="coerce")
+
+    l_num = _coerce_num(df[colL])
+    m_num = _coerce_num(df[colM])
+
+    # НЕ показываем строки, где (M > 0 И L > 2)
     not_bad_lm = ~((m_num > 0) & (l_num > 2))
 
     mask = d_active & k_ok & r_blank & ~p_true & ~q_true & not_bad_lm
 
     out = df.loc[mask].copy()
-    out[colK] = k_num.loc[out.index]  # вернуть числовое K (как раньше)
+    out[colK] = k_num.loc[out.index]  # вернуть K как число
     return out
 
 def to_excel_bytes(data: pd.DataFrame) -> io.BytesIO | None:
