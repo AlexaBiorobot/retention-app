@@ -49,7 +49,12 @@ def load_sheet_df(sheet_id: str, worksheet_name: str = "data") -> pd.DataFrame:
     ws = sh.worksheet(worksheet_name)
 
     # A:R (18 колонок). Первая строка — заголовки.
-    values = ws.get("A:R")
+    values = ws.get(
+    "A:R",
+    value_render_option="UNFORMATTED_VALUE",     # ← числа вернутся числами
+    date_time_render_option="FORMATTED_STRING"   # даты/время пусть останутся строками
+    )
+
     if not values:
         return pd.DataFrame()
 
@@ -164,52 +169,39 @@ def replace_group_age_from_map(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
 def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
-
-    # A:R -> 18 колонок; нам нужны D, K, L, M, P, Q, R
     if len(df.columns) < 18:
         st.error("Ожидалось минимум 18 колонок (до R). Проверь диапазон A:R и заголовки.")
         st.stop()
 
-    colD = df.columns[3]    # D
-    colK = df.columns[10]   # K
-    colL = df.columns[11]   # L
-    colM = df.columns[12]   # M
-    colP = df.columns[15]   # P
-    colQ = df.columns[16]   # Q
-    colR = df.columns[17]   # R
+    colD, colK = df.columns[3], df.columns[10]
+    colL, colM = df.columns[11], df.columns[12]
+    colP, colQ, colR = df.columns[15], df.columns[16], df.columns[17]
 
-    # D == "active" (case-insensitive)
+    # D == active
     d_active = df[colD].astype(str).str.strip().str.lower() == "active"
 
-    # K не пустое и < 32
+    # K < 32
     k_num = pd.to_numeric(df[colK], errors="coerce")
     k_ok = k_num.notna() & (k_num < 32)
 
     # R пусто
     r_blank = df[colR].isna() | (df[colR].astype(str).str.strip() == "")
 
-    # P/Q не TRUE
-    p_true = df[colP].astype(str).str.strip().str.lower() == "true"
-    q_true = df[colQ].astype(str).str.strip().str.lower() == "true"
+    # P/Q не TRUE (работает и для логических True, и для строк "TRUE")
+    p_true = (df[colP] == True) | (df[colP].astype(str).str.strip().str.lower() == "true")
+    q_true = (df[colQ] == True) | (df[colQ].astype(str).str.strip().str.lower() == "true")
 
-    # --- Надёжное парсирование L/M ---
-    # 1) оставляем только цифры/знаки/разделители, 2) ',' -> '.', 3) в число
-    def _coerce_num(series: pd.Series) -> pd.Series:
-        s = series.astype(str).str.strip()
-        s = s.str.replace(r"[^\d,.\-]+", "", regex=True)
-        s = s.str.replace(",", ".", regex=False)
-        return pd.to_numeric(s, errors="coerce")
+    # L/M как числа
+    l_num = pd.to_numeric(df[colL], errors="coerce")
+    m_num = pd.to_numeric(df[colM], errors="coerce")
 
-    l_num = _coerce_num(df[colL])
-    m_num = _coerce_num(df[colM])
+    # исключаем строки, где (M > 0 И L > 2)
+    exclude_lm = (m_num > 0) & (l_num > 2)
 
-    # НЕ показываем строки, где (M > 0 И L > 2)
-    not_bad_lm = ~((m_num > 0) & (l_num > 2))
-
-    mask = d_active & k_ok & r_blank & ~p_true & ~q_true & not_bad_lm
+    mask = d_active & k_ok & r_blank & ~p_true & ~q_true & ~exclude_lm
 
     out = df.loc[mask].copy()
-    out[colK] = k_num.loc[out.index]  # вернуть K как число
+    out[colK] = k_num.loc[out.index]
     return out
 
 def to_excel_bytes(data: pd.DataFrame) -> io.BytesIO | None:
@@ -256,12 +248,12 @@ def main():
     with st.spinner("Loading data from Google Sheets…"):
         df = load_sheet_df(sheet_id, ws_name)
 
-    with st.expander("🔎 Debug columns L/M"):
-        st.write("Колонки (A..R):", list(df.columns))
+    with st.expander("🔎 Debug L/M"):
         st.write("L header:", df.columns[11] if len(df.columns) > 11 else "нет")
         st.write("M header:", df.columns[12] if len(df.columns) > 12 else "нет")
-        st.write("Примеры L (первые 10):", df.iloc[:10, 11].tolist() if len(df.columns) > 11 else "нет")
-        st.write("Примеры M (первые 10):", df.iloc[:10, 12].tolist() if len(df.columns) > 12 else "нет")
+        st.write("L unique sample:", pd.Series(df.iloc[:50, 11]).unique() if len(df.columns) > 11 else "нет")
+        st.write("M unique sample:", pd.Series(df.iloc[:50, 12]).unique() if len(df.columns) > 12 else "нет")
+
 
     if df.empty:
         st.warning(f"Пусто: проверь вкладку '{ws_name}' и доступ сервисного аккаунта (Viewer/Editor).")
