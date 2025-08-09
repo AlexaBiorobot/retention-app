@@ -540,6 +540,113 @@ def add_alt_matches_column(df: pd.DataFrame,
     out[count_name] = counts_alt
     return out
 
+    def add_wide_matches_column(df: pd.DataFrame,
+                            good_set=("Good","Amazing","New tutor (Good)"),
+                            bad_set=("Bad","New tutor (Bad)"),
+                            new_col_name="WideMatches") -> pd.DataFrame:
+    """Матчи без условия I и без суффикса, не дублируем пары,
+       исключаем, что уже были в Matches/AltMatches."""
+    if df.empty:
+        return df
+
+    # базовые колонки A:R
+    colB, colE, colF, colG, colI, colJ, colK = (
+        df.columns[1], df.columns[4], df.columns[5], df.columns[6],
+        df.columns[8], df.columns[9], df.columns[10]
+    )
+    rating_col = _find_rating_col(df)  # 'Rating_BP' или любая с 'rating' в названии
+
+    f_vals = df[colF].astype(str).str.strip()
+    g_vals = df[colG].astype(str).str.strip()
+    k_num  = pd.to_numeric(df[colK], errors="coerce")
+    r_vals = df[rating_col].astype(str).str.strip() if rating_col else pd.Series("", index=df.index)
+
+    b_vals   = df[colB].astype(str).fillna("").str.upper()
+    b_is_prm = b_vals.str.contains("PRM", na=False)
+
+    # для вычисления "обычных" и "альтернативных" матчей, чтобы их исключить
+    i_vals = df[colI].astype(str).str.strip()
+    i_mins = i_vals.apply(_time_to_minutes)
+    b_suf3 = b_vals.apply(_b_suffix3)
+
+    good_l = {x.lower() for x in good_set}
+    bad_l  = {x.lower() for x in bad_set}
+    r_low  = r_vals.str.lower()
+
+    # позиция строки (чтобы не дублировать пары: показываем только j > i)
+    pos = pd.Series(range(len(df)), index=df.index)
+
+    lines, counts = [], []
+    n = len(df)
+    for i in range(n):
+        # F=F, G=G
+        mF = (f_vals == f_vals.iloc[i])
+        mG = (g_vals == g_vals.iloc[i])
+
+        # K ±1
+        base_k = k_num.iloc[i]
+        mK = pd.Series(False, index=df.index)
+        if not pd.isna(base_k):
+            mK = (k_num.sub(base_k).abs() <= 1)
+
+        # рейтинг: не bad; равен моему или из good-набора
+        ri = r_low.iloc[i] if rating_col else ""
+        mR = (~r_low.isin(bad_l)) & ((r_low == ri) | (r_low.isin(good_l)))
+
+        # PRM совпадает
+        mPRM = (b_is_prm == b_is_prm.iloc[i])
+
+        # --- «обычные» матчи (чтобы исключить их здесь)
+        base_t = i_mins.iloc[i]
+        mI = pd.Series(False, index=df.index)
+        if not pd.isna(base_t):
+            mI = (i_mins.sub(base_t).abs() <= 120)  # ±2 часа
+        mask_regular = mF & mG & mI & mK & mR & mPRM
+
+        # --- «альтернативные» (с суффиксом; тоже исключим)
+        mask_alt = mF & mG & mK & mR & mPRM & (b_suf3 == b_suf3.iloc[i])
+
+        # --- «широкие»: без I и без суффикса
+        mask_wide = mF & mG & mK & mR & mPRM
+
+        # убрать саму строку и дубль-пары (оставляем только j > i)
+        mask_regular.iloc[i] = False
+        mask_alt.iloc[i]     = False
+        mask_wide.iloc[i]    = False
+        mask_wide = mask_wide & (pos > pos.iloc[i])
+
+        # исключить уже найденные в Matches/AltMatches
+        mask_final = mask_wide & ~mask_regular & ~mask_alt
+
+        if mask_final.any():
+            sub = df.loc[mask_final, [colB, colI, colJ, colK, colE]]
+            if rating_col and rating_col in df.columns:
+                sub = sub.assign(_rating=df.loc[mask_final, rating_col].values)
+            else:
+                sub = sub.assign(_rating="")
+            lst = [
+                f"{row[colB]}, {row[colI]}, {row[colJ]}, K: {row[colK]}, E: {row[colE]}, Rating: {row['_rating']}"
+                for _, row in sub.iterrows()
+            ]
+            lines.append("\n".join(lst))
+            counts.append(len(lst))
+        else:
+            lines.append("")
+            counts.append(0)
+
+    out = df.copy()
+    name = new_col_name
+    while name in out.columns:
+        name += "_x"
+    cnt = f"{new_col_name}_count"
+    while cnt in out.columns:
+        cnt += "_x"
+
+    out[name] = lines
+    out[cnt]  = counts
+    return out
+
+
 def main():
     st.title("Initial export (A:R, D='active', K < 32, R empty, P/Q != TRUE)")
 
@@ -594,6 +701,7 @@ def main():
     # --- Подбор совпадений (B, I, J, K, E, Rating) по правилам ---
     filtered = add_matches_column(filtered, new_col_name="Matches")
     filtered = add_alt_matches_column(filtered, new_col_name="AltMatches")
+    filtered = add_wide_matches_column(filtered, new_col_name="WideMatches")
 
     # --- Верхняя панель метрик ---
     c1, c2 = st.columns(2)
