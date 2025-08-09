@@ -187,7 +187,7 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     # R пусто
     r_blank = df[colR].isna() | (df[colR].astype(str).str.strip() == "")
 
-    # P/Q не TRUE (работает и для логических True, и для строк "TRUE")
+    # P/Q не TRUE (ловим и bool, и строки)
     p_true = (df[colP] == True) | (df[colP].astype(str).str.strip().str.lower() == "true")
     q_true = (df[colQ] == True) | (df[colQ].astype(str).str.strip().str.lower() == "true")
 
@@ -195,9 +195,11 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     l_num = pd.to_numeric(df[colL], errors="coerce")
     m_num = pd.to_numeric(df[colM], errors="coerce")
 
-    # исключаем строки, где (M > 0 И L > 2)
-    exclude_lm = (m_num > 0) & (l_num > 2)
-    mask = d_active & k_ok & r_blank & ~p_true & ~q_true & ~exclude_lm
+    # исключаем отдельно: M>0 ИЛИ L>2
+    exclude_m = (m_num > 0)
+    exclude_l = (l_num > 2)
+
+    mask = d_active & k_ok & r_blank & ~p_true & ~q_true & ~exclude_m & ~exclude_l
 
     out = df.loc[mask].copy()
     out[colK] = k_num.loc[out.index]
