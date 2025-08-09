@@ -446,69 +446,32 @@ def main():
     c1.caption(f"Rows total: {len(df)}")
     c2.success(f"Filtered rows: {len(filtered)}")
 
-    # --- Таблица + все варианты матчей ---
-    matches_col = "Matches"  # имя столбца, который вернула add_matches_column
+    # --- Только exploded view: один матч = одна строка ---
+    matches_col = "Matches"
     
     if matches_col in filtered.columns:
-        # нормализуем текст и посчитаем количество вариантов
-        filtered[matches_col] = filtered[matches_col].fillna("").astype(str)
-        filtered["Matches_count"] = (
-            (filtered[matches_col] != "").astype(int) +
-            filtered[matches_col].str.count(r"\n")
+        long = filtered.copy()
+        long[matches_col] = long[matches_col].fillna("").astype(str)
+        long["Match"] = long[matches_col].str.split("\n")
+        long = long.explode("Match", ignore_index=True)
+        long = long[long["Match"].str.strip() != ""]  # убрать пустые
+    
+        # Колонки: все исходные (без Matches) + колонка Match в конце
+        cols = [c for c in filtered.columns if c != matches_col] + ["Match"]
+        long = long[cols]
+    
+        st.dataframe(long, use_container_width=True, height=700)
+    
+        # Экспорт именно exploded-версии
+        st.download_button(
+            "⬇️ Download exploded CSV",
+            long.to_csv(index=False).encode("utf-8"),
+            file_name="matches_exploded.csv",
+            mime="text/csv",
         )
-    
-        tab1, tab2 = st.tabs(["Compact view", "Exploded view (all variants)"])
-    
-        with tab1:
-            # компактный вид (в ячейке; сколько влезет — остальное со скроллом/эллипсисом)
-            try:
-                # если есть ListColumn — покажем списком
-                filtered_display = filtered.copy()
-                filtered_display["Matches_list"] = filtered_display[matches_col].str.split("\n")
-                filtered_display = filtered_display.drop(columns=[matches_col])
-    
-                st.data_editor(
-                    filtered_display,
-                    use_container_width=True,
-                    disabled=True,
-                    height=700,
-                    column_config={
-                        "Matches_list": st.column_config.ListColumn(
-                            "Matches (all variants)", width="large",
-                            help="Каждый элемент — один вариант"
-                        )
-                    },
-                )
-            except Exception:
-                # фолбэк на обычный редактор
-                st.data_editor(filtered, use_container_width=True, disabled=True, height=700)
-    
-        with tab2:
-            # длинный вид: ОДИН матч = ОДНА строка (ничего не спрячется)
-            long = filtered.copy()
-            long["__one_match__"] = long[matches_col].str.split("\n")
-            long = long.explode("__one_match__")
-            long = long[long["__one_match__"].str.strip() != ""]
-            # опционально: оставить только исходные поля + сам матч
-            # long = long[[colB, colI, colJ, colK, colE, rating_col, "__one_match__"]]  # если хочешь короче
-            st.dataframe(long, use_container_width=True, height=700)
-    
-            # скачать «в длинном виде»
-            st.download_button(
-                "⬇️ Download exploded CSV",
-                long.to_csv(index=False).encode("utf-8"),
-                file_name="matches_exploded.csv",
-                mime="text/csv",
-            )
     else:
         st.dataframe(filtered, use_container_width=True, height=700)
 
-
-    # --- Экспорт ---
-    export_col1, export_col2 = st.columns(2)
-    csv_bytes = filtered.to_csv(index=False).encode("utf-8")
-    with export_col1:
-        st.download_button("⬇️ Download CSV", data=csv_bytes, file_name="filtered_export.csv", mime="text/csv")
 
     xlsx_buf = to_excel_bytes(filtered)
     with export_col2:
