@@ -319,21 +319,28 @@ def add_matches_column(df: pd.DataFrame,
                        good_set=("Good","Amazing","New tutor (Good)"),
                        bad_set=("Bad","New tutor (Bad)"),
                        new_col_name="Matches") -> pd.DataFrame:
-    """Для каждой строки собирает совпадения (B, I, J, K, E, Rating) и считает их количество."""
+    """Собирает совпадения (B,I,J,K,E,Rating) + считает их количество.
+       Условия: F=F, G=G, I±2ч, K±1, рейтинг совпадает или в {Good, Amazing, New tutor (Good)},
+       НО не берём {Bad, New tutor (Bad)}. Доп.: B имеет PRM <=> кандидат тоже имеет PRM.
+    """
     if df.empty:
         return df
 
-    # индексы колонок по A:R
+    # колонки по A:R
     colB, colE, colF, colG, colI, colJ, colK = df.columns[1], df.columns[4], df.columns[5], df.columns[6], df.columns[8], df.columns[9], df.columns[10]
     rating_col = _find_rating_col(df)
 
-    # подготовим векторы
+    # подготовка векторов
     f_vals = df[colF].astype(str).str.strip()
     g_vals = df[colG].astype(str).str.strip()
     i_vals = df[colI].astype(str).str.strip()
     i_mins = i_vals.apply(_time_to_minutes)
     k_num  = pd.to_numeric(df[colK], errors="coerce")
     r_vals = df[rating_col].astype(str).str.strip() if rating_col else pd.Series("", index=df.index)
+
+    # PRM-флаг по B (регистр игнорируем)
+    b_vals   = df[colB].astype(str).str.upper().fillna("")
+    b_is_prm = b_vals.str.contains("PRM", na=False)
 
     good_l = {x.lower() for x in good_set}
     bad_l  = {x.lower() for x in bad_set}
@@ -343,9 +350,8 @@ def add_matches_column(df: pd.DataFrame,
     n = len(df)
 
     for i in range(n):
-        # условия
-        mF = f_vals == f_vals.iloc[i]
-        mG = g_vals == g_vals.iloc[i]
+        mF = (f_vals == f_vals.iloc[i])
+        mG = (g_vals == g_vals.iloc[i])
 
         base_t = i_mins.iloc[i]
         mI = pd.Series(False, index=df.index)
@@ -360,8 +366,11 @@ def add_matches_column(df: pd.DataFrame,
         ri = r_low.iloc[i] if rating_col else ""
         mR = (~r_low.isin(bad_l)) & ((r_low == ri) | (r_low.isin(good_l)))
 
-        mask = mF & mG & mI & mK & mR
-        mask.iloc[i] = False  # ← исключаем саму строку
+        # новый фильтр: PRM-признак должен совпадать
+        mPRM = (b_is_prm == b_is_prm.iloc[i])
+
+        mask = mF & mG & mI & mK & mR & mPRM
+        mask.iloc[i] = False  # исключаем саму строку
 
         if mask.any():
             sub = df.loc[mask, [colB, colI, colJ, colK, colE]]
@@ -385,7 +394,6 @@ def add_matches_column(df: pd.DataFrame,
     name = new_col_name
     while name in out.columns:
         name += "_x"
-
     count_name = f"{new_col_name}_count"
     while count_name in out.columns:
         count_name += "_x"
