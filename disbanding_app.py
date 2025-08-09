@@ -21,6 +21,10 @@ DEFAULT_WS_NAME  = "data"
 EXT_GROUPS_SS_ID = "1u_NwMt3CVVgozm04JGmccyTsNZnZGiHjG5y0Ko3YdaY"
 EXT_GROUPS_WS    = "Groups & Teachers"
 
+# внешний шит с рейтингом (их A -> колонка BP)
+RATING_SS_ID = "1HItT2-PtZWoldYKL210hCQOLg3rh6U1Qj6NWkBjDjzk"
+RATING_WS    = "Rating"
+
 SHEET_ID = os.getenv("GSHEET_ID") or st.secrets.get("GSHEET_ID", DEFAULT_SHEET_ID)
 WS_NAME  = os.getenv("GSHEET_WS") or st.secrets.get("GSHEET_WS", DEFAULT_WS_NAME)
 
@@ -166,6 +170,45 @@ def replace_group_age_from_map(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
     dff[colG] = new_vals.where(new_vals.notna() & (new_vals.astype(str).str.strip() != ""), dff[colG])
     return dff
 
+@st.cache_data(show_spinner=False, ttl=300)
+def load_rating_bp_map(sheet_id: str = RATING_SS_ID, worksheet_name: str = RATING_WS) -> dict:
+    """Грузит соответствие: их A -> их BP из внешнего шита 'Rating'."""
+    client = _authorize_client()
+    ws = client.open_by_key(sheet_id).worksheet(worksheet_name)
+    vals = ws.get(
+        "A:BP",
+        value_render_option="UNFORMATTED_VALUE",
+        date_time_render_option="FORMATTED_STRING",
+    )
+    if not vals or len(vals) < 2:
+        return {}
+    mapping = {}
+    for r in vals[1:]:
+        a  = str(r[0]).strip() if len(r) >= 1  else ""
+        bp = r[67]              if len(r) >= 68 else None  # BP = 68-я колонка
+        if a:
+            mapping[a] = bp
+    return mapping
+
+def add_rating_bp_by_O(df: pd.DataFrame, mapping: dict, new_col_name: str = "Rating_BP") -> pd.DataFrame:
+    """Добавляет столбец с BP-оценкой, где ключ = наша колонка O (их A)."""
+    if df.empty or not mapping:
+        return df.copy()
+    if len(df.columns) < 15:
+        st.info("Колонка O отсутствует — Rating_BP не добавлен.")
+        return df.copy()
+
+    colO = df.columns[14]  # O
+    keys = df[colO].astype(str).str.strip()
+
+    out = df.copy()
+    # добавляем В КОНЕЦ, чтобы не сдвигать P/Q/R
+    name = new_col_name
+    while name in out.columns:
+        name += "_x"
+    out[name] = keys.map(lambda k: mapping.get(k, pd.NA))
+    return out
+
 def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
@@ -286,6 +329,10 @@ def main():
     mapping = load_group_age_map()
     df = replace_group_age_from_map(df, mapping)
 
+    # --- Подтянуть BP-рейтинг по нашему O (их A -> BP) ---
+    rating_map = load_rating_bp_map()
+    df = add_rating_bp_by_O(df, rating_map, new_col_name="Rating_BP")
+
     # --- Фильтр по условиям задачи ---
     filtered = filter_df(df)
 
@@ -314,6 +361,7 @@ def main():
     if st.button("Refresh"):
         load_sheet_df.clear()
         load_group_age_map.clear()
+        load_rating_bp_map.clear()
         st.rerun()
 
 if __name__ == "__main__":
