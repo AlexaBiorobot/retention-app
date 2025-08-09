@@ -600,15 +600,19 @@ def main():
     c1.caption(f"Rows total: {len(df)}")
     c2.success(f"Filtered rows: {len(filtered)}")
 
-    # --- Только exploded view: один матч = одна строка ---
+    # --- Только exploded view: показывать ВСЕ строки (в т.ч. без совпадений) ---
     matches_col = "Matches"
     
     if matches_col in filtered.columns:
         long = filtered.copy()
         long[matches_col] = long[matches_col].fillna("").astype(str)
-        long["Match"] = long[matches_col].str.split("\n")
+    
+        # если матчей нет, кладём маркер "—", чтобы строка не потерялась
+        long["Match"] = long[matches_col].apply(
+            lambda s: [x for x in s.split("\n") if x.strip()] or ["—"]
+        )
+    
         long = long.explode("Match", ignore_index=True)
-        long = long[long["Match"].str.strip() != ""]  # убрать пустые
     
         # Колонки: все исходные (без Matches) + колонка Match в конце
         cols = [c for c in filtered.columns if c != matches_col] + ["Match"]
@@ -616,26 +620,15 @@ def main():
     
         st.dataframe(long, use_container_width=True, height=700)
     
-        # Кнопки скачивания в две колонки (без export_col2)
-        c1, c2 = st.columns(2)
-        with c1:
-            st.download_button(
-                "⬇️ Download exploded CSV",
-                long.to_csv(index=False).encode("utf-8"),
-                file_name="matches_exploded.csv",
-                mime="text/csv",
-            )
-        with c2:
-            xlsx_long = to_excel_bytes(long)
-            if xlsx_long:
-                st.download_button(
-                    "⬇️ Download exploded XLSX",
-                    xlsx_long,
-                    file_name="matches_exploded.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                )
+        st.download_button(
+            "⬇️ Download exploded CSV (all rows)",
+            long.to_csv(index=False).encode("utf-8"),
+            file_name="matches_exploded_all_rows.csv",
+            mime="text/csv",
+        )
     else:
         st.dataframe(filtered, use_container_width=True, height=700)
+
 
 
     # --- Обновить (сброс кеша) ---
