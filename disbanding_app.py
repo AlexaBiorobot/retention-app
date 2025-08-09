@@ -249,13 +249,6 @@ def main():
     with st.spinner("Loading data from Google Sheets…"):
         df = load_sheet_df(sheet_id, ws_name)
 
-    with st.expander("🔎 Debug L/M"):
-        st.write("L header:", df.columns[11] if len(df.columns) > 11 else "нет")
-        st.write("M header:", df.columns[12] if len(df.columns) > 12 else "нет")
-        st.write("L unique sample:", pd.Series(df.iloc[:50, 11]).unique() if len(df.columns) > 11 else "нет")
-        st.write("M unique sample:", pd.Series(df.iloc[:50, 12]).unique() if len(df.columns) > 12 else "нет")
-
-
     if df.empty:
         st.warning(f"Пусто: проверь вкладку '{ws_name}' и доступ сервисного аккаунта (Viewer/Editor).")
         st.stop()
