@@ -284,6 +284,106 @@ def to_excel_bytes(data: pd.DataFrame) -> io.BytesIO | None:
         return buf
     except Exception:
         return None
+import numpy as np
+
+def _time_to_minutes(v: str) -> float:
+    """HH:MM или YYYY-MM-DD HH:MM -> минуты от начала суток. Если не парсится — NaN."""
+    if v is None or str(v).strip() == "" or pd.isna(v):
+        return np.nan
+    s = str(v).strip()
+    # чистое время?
+    if pd.Series([s]).str.match(r"^\d{1,2}:\d{2}(:\d{2})?$", na=False).iloc[0]:
+        parts = s.split(":")
+        h = int(parts[0]); m = int(parts[1])
+        return h * 60 + m
+    # дата+время
+    dt = pd.to_datetime(s, errors="coerce", dayfirst=False)
+    if pd.isna(dt):
+        dt = pd.to_datetime(s, errors="coerce", dayfirst=True)
+    if pd.isna(dt):
+        return np.nan
+    return dt.hour * 60 + dt.minute
+
+def _find_rating_col(df: pd.DataFrame) -> str | None:
+    if "Rating_BP" in df.columns:
+        return "Rating_BP"
+    for c in df.columns:
+        n = str(c).strip().lower()
+        if "rating" in n:
+            return c
+    return None
+
+def add_matches_column(df: pd.DataFrame,
+                       good_set=("Good","Amazing","New tutor (Good)"),
+                       bad_set=("Bad","New tutor (Bad)"),
+                       new_col_name="Matches") -> pd.DataFrame:
+    """Для каждой строки собирает совпадения и пишет их в столбец new_col_name."""
+    if df.empty:
+        return df
+
+    # индексы колонок по A:R
+    colB, colE, colF, colG, colI, colJ, colK = df.columns[1], df.columns[4], df.columns[5], df.columns[6], df.columns[8], df.columns[9], df.columns[10]
+    rating_col = _find_rating_col(df)
+
+    # подготовим векторы
+    f_vals = df[colF].astype(str).str.strip()
+    g_vals = df[colG].astype(str).str.strip()
+    i_vals = df[colI].astype(str).str.strip()
+    i_mins = i_vals.apply(_time_to_minutes)
+    k_num  = pd.to_numeric(df[colK], errors="coerce")
+    r_vals = df[rating_col].astype(str).str.strip() if rating_col else pd.Series("", index=df.index)
+
+    good_l = set(x.lower() for x in good_set)
+    bad_l  = set(x.lower() for x in bad_set)
+    r_low  = r_vals.str.lower()
+
+    lines = []
+    n = len(df)
+
+    for i in range(n):
+        # маски условий
+        mF = f_vals == f_vals.iloc[i]
+        mG = g_vals == g_vals.iloc[i]
+
+        base_t = i_mins.iloc[i]
+        mI = pd.Series(False, index=df.index)
+        if not np.isnan(base_t):
+            mI = (i_mins.sub(base_t).abs() <= 120)  # ±2 часа
+
+        base_k = k_num.iloc[i]
+        mK = pd.Series(False, index=df.index)
+        if not np.isnan(base_k):
+            mK = (k_num.sub(base_k).abs() <= 1)
+
+        # рейтинг
+        ri = r_low.iloc[i] if rating_col else ""
+        mR = (~r_low.isin(bad_l)) & ( (r_low == ri) | (r_low.isin(good_l)) )
+
+        mask = mF & mG & mI & mK & mR
+        mask.iloc[i] = False  # не включаем саму строку
+
+        if mask.any():
+            sub = df.loc[mask, [colB, colI, colJ, colK, colE]]
+            if rating_col and rating_col in df.columns:
+                sub = sub.assign(_rating=df.loc[mask, rating_col].values)
+            else:
+                sub = sub.assign(_rating="")
+
+            # формируем строки
+            lst = []
+            for _, row in sub.iterrows():
+                lst.append(f"{row[colB]}, {row[colI]}, {row[colJ]}, K: {row[colK]}, E: {row[colE]}, Rating: {row['_rating']}")
+            lines.append("\n".join(lst))
+        else:
+            lines.append("")
+
+    out = df.copy()
+    # безопасное имя столбца
+    name = new_col_name
+    while name in out.columns:
+        name += "_x"
+    out[name] = lines
+    return out
 
 def main():
     st.title("Initial export (A:R, D='active', K < 32, R empty, P/Q != TRUE)")
@@ -335,6 +435,9 @@ def main():
 
     # --- Фильтр по условиям задачи ---
     filtered = filter_df(df)
+    
+    # --- Подбор совпадений (B, I, J, K, E, Rating) по правилам ---
+    filtered = add_matches_column(filtered, new_col_name="Matches")
 
     # --- Верхняя панель метрик ---
     c1, c2 = st.columns(2)
