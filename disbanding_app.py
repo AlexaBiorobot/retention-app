@@ -447,33 +447,7 @@ def main():
     c2.success(f"Filtered rows: {len(filtered)}")
 
     # --- Таблица ---
-    # --- Показ с полной выдачей матчей ---
-    if "Matches" in filtered.columns:
-        # превратим строку с \n в список строк
-        filtered_display = filtered.copy()
-        filtered_display["Matches_list"] = (
-            filtered_display["Matches"].fillna("").astype(str).str.split("\n")
-        )
-        # скрыть исходную строковую колонку
-        filtered_display = filtered_display.drop(columns=["Matches"])
-    
-        try:
-            st.data_editor(
-                filtered_display,
-                use_container_width=True,
-                disabled=True,
-                height=700,
-                column_config={
-                    "Matches_list": st.column_config.ListColumn(
-                        "Matches (all variants)", width="large", help="Каждый элемент — один вариант"
-                    )
-                },
-            )
-        except Exception:
-            # на всякий случай фолбэк, если даже ListColumn отсутствует
-            st.data_editor(filtered_display, use_container_width=True, disabled=True, height=700)
-    else:
-        st.data_editor(filtered, use_container_width=True, disabled=True, height=700)
+    st.data_editor(filtered, use_container_width=True, disabled=True)
 
     # --- Экспорт ---
     export_col1, export_col2 = st.columns(2)
