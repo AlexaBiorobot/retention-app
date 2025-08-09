@@ -180,9 +180,9 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     # D == active
     d_active = df[colD].astype(str).str.strip().str.lower() == "active"
 
-    # K < 32
+    # K > 3 и < 32
     k_num = pd.to_numeric(df[colK], errors="coerce")
-    k_ok = k_num.notna() & (k_num < 32)
+    k_ok = k_num.notna() & (k_num > 3) & (k_num < 32)
 
     # R пусто
     r_blank = df[colR].isna() | (df[colR].astype(str).str.strip() == "")
