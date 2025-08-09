@@ -5,6 +5,8 @@ import streamlit as st
 import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+import streamlit as st
+st.sidebar.write("Streamlit version:", st.__version__)
 
 # ==== Page / UX ====
 st.set_page_config(
