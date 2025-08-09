@@ -402,6 +402,111 @@ def add_matches_column(df: pd.DataFrame,
     out[count_name] = counts
     return out
 
+import re
+
+def _b_suffix3(s: str) -> str:
+    """Возвращает три буквы после '_' в B (например 'ENG_ABC' -> 'ABC'), иначе ''."""
+    if s is None or pd.isna(s):
+        return ""
+    m = re.search(r"_(\w{3})", str(s).upper())
+    return m.group(1) if m else ""
+
+def add_alt_matches_column(df: pd.DataFrame,
+                           good_set=("Good","Amazing","New tutor (Good)"),
+                           bad_set=("Bad","New tutor (Bad)"),
+                           new_col_name="AltMatches") -> pd.DataFrame:
+    """Варианты, которых нет в Matches, и которые соответствуют всем условиям,
+       кроме I±2ч; вместо него — совпадение 3-буквенного суффикса в B после '_'."""
+    if df.empty:
+        return df
+
+    # колонки A:R
+    colB, colE, colF, colG, colI, colJ, colK = df.columns[1], df.columns[4], df.columns[5], df.columns[6], df.columns[8], df.columns[9], df.columns[10]
+    rating_col = _find_rating_col(df)
+
+    f_vals = df[colF].astype(str).str.strip()
+    g_vals = df[colG].astype(str).str.strip()
+    k_num  = pd.to_numeric(df[colK], errors="coerce")
+    r_vals = df[rating_col].astype(str).str.strip() if rating_col else pd.Series("", index=df.index)
+
+    # PRM и суффикс в B
+    b_vals    = df[colB].astype(str).fillna("").str.upper()
+    b_is_prm  = b_vals.str.contains("PRM", na=False)
+    b_suffix3 = b_vals.apply(_b_suffix3)
+
+    good_l = {x.lower() for x in good_set}
+    bad_l  = {x.lower() for x in bad_set}
+    r_low  = r_vals.str.lower()
+
+    # чтобы исключать то, что уже попало в Matches, пересчитаем «обычные» матчи (как в add_matches_column)
+    # (I±2 часа)
+    i_vals = df[colI].astype(str).str.strip()
+    i_mins = i_vals.apply(_time_to_minutes)
+
+    lines_alt, counts_alt = [], []
+    n = len(df)
+
+    for i in range(n):
+        # базовые условия
+        mF   = (f_vals == f_vals.iloc[i])
+        mG   = (g_vals == g_vals.iloc[i])
+        # K ±1
+        base_k = k_num.iloc[i]
+        mK = pd.Series(False, index=df.index)
+        if not pd.isna(base_k):
+            mK = (k_num.sub(base_k).abs() <= 1)
+        # рейтинг
+        ri = r_low.iloc[i] if rating_col else ""
+        mR = (~r_low.isin(bad_l)) & ((r_low == ri) | (r_low.isin(good_l)))
+        # PRM совпадает
+        mPRM = (b_is_prm == b_is_prm.iloc[i])
+        # суффикс в B совпадает (новое вместо I)
+        mSUF = (b_suffix3 == b_suffix3.iloc[i])
+
+        # «обычные» матчи (для исключения) — те же, что в add_matches_column
+        base_t = i_mins.iloc[i]
+        mI = pd.Series(False, index=df.index)
+        if not pd.isna(base_t):
+            mI = (i_mins.sub(base_t).abs() <= 120)  # ±2 часа
+        mask_regular = mF & mG & mI & mK & mR & mPRM
+
+        # альтернативные матчи: как обычные, но БЕЗ I и С суффиксом
+        mask_alt = mF & mG & mK & mR & mPRM & mSUF
+        # исключаем текущую строку
+        mask_regular.iloc[i] = False
+        mask_alt.iloc[i]     = False
+        # убираем те, кто уже были в Matches
+        mask_alt = mask_alt & ~mask_regular
+
+        if mask_alt.any():
+            sub = df.loc[mask_alt, [colB, colI, colJ, colK, colE]]
+            if rating_col and rating_col in df.columns:
+                sub = sub.assign(_rating=df.loc[mask_alt, rating_col].values)
+            else:
+                sub = sub.assign(_rating="")
+            lst = [
+                f"{row[colB]}, {row[colI]}, {row[colJ]}, K: {row[colK]}, E: {row[colE]}, Rating: {row['_rating']}"
+                for _, row in sub.iterrows()
+            ]
+            lines_alt.append("\n".join(lst))
+            counts_alt.append(len(lst))
+        else:
+            lines_alt.append("")
+            counts_alt.append(0)
+
+    out = df.copy()
+    # безопасные имена
+    name = new_col_name
+    while name in out.columns:
+        name += "_x"
+    count_name = f"{new_col_name}_count"
+    while count_name in out.columns:
+        count_name += "_x"
+
+    out[name] = lines_alt
+    out[count_name] = counts_alt
+    return out
+
 def main():
     st.title("Initial export (A:R, D='active', K < 32, R empty, P/Q != TRUE)")
 
@@ -455,6 +560,7 @@ def main():
     
     # --- Подбор совпадений (B, I, J, K, E, Rating) по правилам ---
     filtered = add_matches_column(filtered, new_col_name="Matches")
+    filtered = add_alt_matches_column(filtered, new_col_name="AltMatches")
 
     # --- Верхняя панель метрик ---
     c1, c2 = st.columns(2)
