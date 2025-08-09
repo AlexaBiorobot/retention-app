@@ -187,7 +187,7 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     # R пусто
     r_blank = df[colR].isna() | (df[colR].astype(str).str.strip() == "")
 
-    # P/Q не TRUE (ловим и bool, и строки)
+    # P/Q не TRUE (ловим и bool, и строки "TRUE")
     p_true = (df[colP] == True) | (df[colP].astype(str).str.strip().str.lower() == "true")
     q_true = (df[colQ] == True) | (df[colQ].astype(str).str.strip().str.lower() == "true")
 
@@ -195,11 +195,37 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     l_num = pd.to_numeric(df[colL], errors="coerce")
     m_num = pd.to_numeric(df[colM], errors="coerce")
 
-    # исключаем отдельно: M>0 ИЛИ L>2
+    # исключаем отдельно: M>0 и L>2
     exclude_m = (m_num > 0)
     exclude_l = (l_num > 2)
 
     mask = d_active & k_ok & r_blank & ~p_true & ~q_true & ~exclude_m & ~exclude_l
+
+    # --- Доп. фильтр: Paid students / Capacity < 50% ---
+    def _norm(s: str) -> str:
+        return str(s).strip().lower().replace("_", " ").replace("-", " ")
+
+    paid_aliases = {"paid students", "paid student", "paid"}
+    cap_aliases  = {"capacity", "cap"}
+
+    colPaid = None
+    colCap  = None
+    for c in df.columns:
+        n = _norm(c)
+        if (colPaid is None) and (n in paid_aliases):
+            colPaid = c
+        if (colCap is None) and (n in cap_aliases):
+            colCap = c
+        if colPaid is not None and colCap is not None:
+            break
+
+    if colPaid is not None and colCap is not None:
+        paid_num = pd.to_numeric(df[colPaid], errors="coerce")
+        cap_num  = pd.to_numeric(df[colCap],  errors="coerce")
+        ratio_ge_50 = (cap_num > 0) & ((paid_num / cap_num) >= 0.5)
+        mask = mask & ~ratio_ge_50
+    else:
+        st.info("⚠️ Не нашёл колонки 'Paid students' и/или 'Capacity' — фильтр по 50% пропущен.")
 
     out = df.loc[mask].copy()
     out[colK] = k_num.loc[out.index]
