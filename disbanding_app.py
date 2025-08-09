@@ -208,7 +208,7 @@ def to_excel_bytes(data: pd.DataFrame) -> io.BytesIO | None:
         return None
 
 def main():
-    st.title("Initial export (A:R, D='active', K < 32, R empty)")
+    st.title("Initial export (A:R, D='active', K < 32, R empty, P/Q != TRUE)")
 
     # --- Sidebar: источник, выбор вкладки, ссылки ---
     with st.sidebar:
