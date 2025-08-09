@@ -445,8 +445,7 @@ def main():
     c2.success(f"Filtered rows: {len(filtered)}")
 
     # --- Таблица ---
-    st.dataframe(filtered, use_container_width=True)
-
+    st.data_editor(filtered, use_container_width=True, disabled=True)
 
     # --- Экспорт ---
     export_col1, export_col2 = st.columns(2)
