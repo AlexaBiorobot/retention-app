@@ -445,7 +445,22 @@ def main():
     c2.success(f"Filtered rows: {len(filtered)}")
 
     # --- Таблица ---
-    st.dataframe(filtered, use_container_width=True)
+    # показываем все варианты в ячейке Matches (многострочно со скроллом)
+    st.data_editor(
+        filtered,
+        use_container_width=True,
+        disabled=True,             # чтобы нельзя было редактировать
+        height=650,                # по вкусу
+        column_config={
+            "Matches": st.column_config.TextAreaColumn(
+                "Matches",
+                width="large",
+                max_chars=None,
+                help="Каждый вариант на новой строке: B, I, J, K, E, Rating",
+            )
+        },
+    )
+
 
     # --- Экспорт ---
     export_col1, export_col2 = st.columns(2)
