@@ -57,6 +57,57 @@ def load_sheet_df(sheet_id: str, worksheet_name: str = "data") -> pd.DataFrame:
     df = df.replace({"": pd.NA})
     return df
 
+def adjust_local_time_minus_3(df: pd.DataFrame) -> pd.DataFrame:
+    """Сдвигает колонку I (Local time) на -3 часа. Если только время — возвращаем HH:MM,
+    если дата+время — YYYY-MM-DD HH:MM. Находит колонку по названию или берёт 9-ю (I)."""
+    if df.empty:
+        return df
+
+    # попытка найти по названию
+    col = None
+    for c in df.columns:
+        name = str(c).strip().lower().replace("_", " ")
+        if name == "local time":
+            col = c
+            break
+    # fallback: колонка I (индекс 8)
+    if col is None:
+        if len(df.columns) >= 9:
+            col = df.columns[8]
+        else:
+            st.info("Колонка I (Local time) не найдена — сдвиг времени пропущен.")
+            return df
+
+    s = df[col].astype(str).str.strip()
+    # маска "только время" вида HH:MM или HH:MM:SS
+    time_only_mask = s.str.match(r"^\d{1,2}:\d{2}(:\d{2})?$", na=False)
+
+    # обработка time-only: вручную крутим часы (мод 24)
+    def _shift_time_str(v: str) -> str:
+        parts = v.split(":")
+        h = int(parts[0]); m = int(parts[1]); sec = int(parts[2]) if len(parts) > 2 else None
+        h = (h - 3) % 24
+        return f"{h:02d}:{m:02d}" + (f":{sec:02d}" if sec is not None else "")
+
+    out = pd.Series(pd.NA, index=df.index, dtype="object")
+    out.loc[time_only_mask] = s.loc[time_only_mask].apply(_shift_time_str)
+
+    # обработка дата+время
+    dt_mask = (~time_only_mask) & s.ne("")
+    if dt_mask.any():
+        dt = pd.to_datetime(s[dt_mask], errors="coerce", dayfirst=False)
+        miss = dt.isna()
+        if miss.any():
+            # пробуем европейский порядок
+            dt2 = pd.to_datetime(s[dt_mask][miss], errors="coerce", dayfirst=True)
+            dt.loc[miss] = dt2
+        dt = dt - pd.Timedelta(hours=3)
+        out.loc[dt_mask] = dt.dt.strftime("%Y-%m-%d %H:%M")
+
+    df = df.copy()
+    df[col] = out.where(out.notna(), df[col])  # оставим исходные, если парсинг не удался
+    return df
+
 def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
@@ -128,6 +179,9 @@ def main():
     if df.empty:
         st.warning(f"Пусто: проверь вкладку '{ws_name}' и доступ сервисного аккаунта (Viewer/Editor).")
         st.stop()
+
+    # --- Сдвиг времени I (Local time) на -3 часа ---
+    df = adjust_local_time_minus_3(df)
 
     # --- Фильтр по условиям задачи ---
     filtered = filter_df(df)
