@@ -165,13 +165,15 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
 
-    # A:R -> 18 колонок; нам нужны D, K, R
+    # A:R -> 18 колонок; нам нужны D, K, P, Q, R
     if len(df.columns) < 18:
         st.error("Ожидалось минимум 18 колонок (до R). Проверь диапазон A:R и заголовки.")
         st.stop()
 
     colD = df.columns[3]    # D
     colK = df.columns[10]   # K
+    colP = df.columns[15]   # P
+    colQ = df.columns[16]   # Q
     colR = df.columns[17]   # R
 
     # D == "active" (case-insensitive)
@@ -184,7 +186,13 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     # R пусто
     r_blank = df[colR].isna() | (df[colR].astype(str).str.strip() == "")
 
-    out = df.loc[d_active & k_ok & r_blank].copy()
+    # P/Q не TRUE
+    p_true = df[colP].astype(str).str.strip().str.lower() == "true"
+    q_true = df[colQ].astype(str).str.strip().str.lower() == "true"
+
+    mask = d_active & k_ok & r_blank & ~p_true & ~q_true
+
+    out = df.loc[mask].copy()
     out[colK] = k_num.loc[out.index]  # вернуть числовое K
     return out
 
