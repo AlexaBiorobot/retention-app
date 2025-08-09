@@ -17,6 +17,10 @@ st.set_page_config(
 DEFAULT_SHEET_ID = "1Jbb4p1cZCo67ZRiW5cmFUq-c9ijo5VMH_hFFMVYeJk4"
 DEFAULT_WS_NAME  = "data"
 
+# внешний шит для Group age
+EXT_GROUPS_SS_ID = "1u_NwMt3CVVgozm04JGmccyTsNZnZGiHjG5y0Ko3YdaY"
+EXT_GROUPS_WS    = "Groups & Teachers"
+
 SHEET_ID = os.getenv("GSHEET_ID") or st.secrets.get("GSHEET_ID", DEFAULT_SHEET_ID)
 WS_NAME  = os.getenv("GSHEET_WS") or st.secrets.get("GSHEET_WS", DEFAULT_WS_NAME)
 
@@ -58,8 +62,7 @@ def load_sheet_df(sheet_id: str, worksheet_name: str = "data") -> pd.DataFrame:
     return df
 
 def adjust_local_time_minus_3(df: pd.DataFrame) -> pd.DataFrame:
-    """Сдвигает колонку I (Local time) на -3 часа. Если только время — возвращаем HH:MM,
-    если дата+время — YYYY-MM-DD HH:MM. Находит колонку по названию или берёт 9-ю (I)."""
+    """Сдвигает колонку I (Local time) на -3 часа. Если только время — HH:MM, иначе YYYY-MM-DD HH:MM."""
     if df.empty:
         return df
 
@@ -98,7 +101,6 @@ def adjust_local_time_minus_3(df: pd.DataFrame) -> pd.DataFrame:
         dt = pd.to_datetime(s[dt_mask], errors="coerce", dayfirst=False)
         miss = dt.isna()
         if miss.any():
-            # пробуем европейский порядок
             dt2 = pd.to_datetime(s[dt_mask][miss], errors="coerce", dayfirst=True)
             dt.loc[miss] = dt2
         dt = dt - pd.Timedelta(hours=3)
@@ -107,6 +109,60 @@ def adjust_local_time_minus_3(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df[col] = out.where(out.notna(), df[col])  # оставим исходные, если парсинг не удался
     return df
+
+@st.cache_data(show_spinner=False, ttl=300)
+def load_group_age_map(sheet_id: str = EXT_GROUPS_SS_ID, worksheet_name: str = EXT_GROUPS_WS) -> dict:
+    """Грузит соответствие: их A -> их E из внешнего шита."""
+    client = _authorize_client()
+    ws = client.open_by_key(sheet_id).worksheet(worksheet_name)
+    vals = ws.get("A:E")
+    if not vals or len(vals) < 2:
+        return {}
+    rows = vals[1:]  # без заголовка
+    mapping = {}
+    for r in rows:
+        # r может быть короче 5 элементов, проверим
+        if len(r) >= 5:
+            key = str(r[0]).strip()
+            val = r[4]
+            if key:
+                mapping[key] = val
+    return mapping
+
+def replace_group_age_from_map(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
+    """Заменяет нашу G (Group age) на значение из mapping, где key = наша B."""
+    if df.empty or not mapping:
+        return df.copy()
+
+    dff = df.copy()
+
+    # найдём B и G: сперва по именам, иначе по индексам (B=1, G=6)
+    colB = None
+    for c in dff.columns:
+        if str(c).strip().lower().replace("_", " ") in ("b", "group id", "group", "group title", "group_name", "group name"):
+            colB = c
+            break
+    if colB is None:
+        colB = dff.columns[1] if len(dff.columns) >= 2 else None
+
+    colG = None
+    for c in dff.columns:
+        if str(c).strip().lower().replace("_", " ") == "group age":
+            colG = c
+            break
+    if colG is None:
+        colG = dff.columns[6] if len(dff.columns) >= 7 else None
+
+    if colB is None or colG is None:
+        st.info("Не удалось определить колонки B или G — замена Group age пропущена.")
+        return dff
+
+    # применяем маппинг
+    keys = dff[colB].astype(str).str.strip()
+    new_vals = keys.map(lambda k: mapping.get(k, pd.NA))
+    # если маппинг дал значение — заменяем, иначе оставляем старое
+    dff[colG] = new_vals.where(new_vals.notna() & (new_vals.astype(str).str.strip() != ""), dff[colG])
+    return dff
 
 def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
@@ -183,6 +239,10 @@ def main():
     # --- Сдвиг времени I (Local time) на -3 часа ---
     df = adjust_local_time_minus_3(df)
 
+    # --- Подмена Group age (G) из внешнего шита: их A -> наша B, берём их E ---
+    mapping = load_group_age_map()
+    df = replace_group_age_from_map(df, mapping)
+
     # --- Фильтр по условиям задачи ---
     filtered = filter_df(df)
 
@@ -210,6 +270,7 @@ def main():
     # --- Обновить (сброс кеша) ---
     if st.button("Refresh"):
         load_sheet_df.clear()
+        load_group_age_map.clear()
         st.rerun()
 
 if __name__ == "__main__":
