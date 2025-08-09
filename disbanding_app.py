@@ -479,17 +479,6 @@ def main():
             )
     else:
         st.dataframe(filtered, use_container_width=True, height=700)
-    
-    
-        # Экспорт именно exploded-версии
-        st.download_button(
-            "⬇️ Download exploded CSV",
-            long.to_csv(index=False).encode("utf-8"),
-            file_name="matches_exploded.csv",
-            mime="text/csv",
-        )
-    else:
-        st.dataframe(filtered, use_container_width=True, height=700)
 
 
     xlsx_buf = to_excel_bytes(filtered)
