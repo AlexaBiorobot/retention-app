@@ -48,8 +48,8 @@ def load_sheet_df(sheet_id: str, worksheet_name: str = "data") -> pd.DataFrame:
     sh = client.open_by_key(sheet_id)
     ws = sh.worksheet(worksheet_name)
 
-    # A:Q (17 колонок). Первая строка — заголовки.
-    values = ws.get("A:Q")
+    # A:R (18 колонок). Первая строка — заголовки.
+    values = ws.get("A:R")
     if not values:
         return pd.DataFrame()
 
@@ -121,7 +121,6 @@ def load_group_age_map(sheet_id: str = EXT_GROUPS_SS_ID, worksheet_name: str = E
     rows = vals[1:]  # без заголовка
     mapping = {}
     for r in rows:
-        # r может быть короче 5 элементов, проверим
         if len(r) >= 5:
             key = str(r[0]).strip()
             val = r[4]
@@ -157,10 +156,8 @@ def replace_group_age_from_map(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
         st.info("Не удалось определить колонки B или G — замена Group age пропущена.")
         return dff
 
-    # применяем маппинг
     keys = dff[colB].astype(str).str.strip()
     new_vals = keys.map(lambda k: mapping.get(k, pd.NA))
-    # если маппинг дал значение — заменяем, иначе оставляем старое
     dff[colG] = new_vals.where(new_vals.notna() & (new_vals.astype(str).str.strip() != ""), dff[colG])
     return dff
 
@@ -168,13 +165,14 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
 
-    # A:Q -> 17 колонок; кол-во столбцов может отличаться, но D и K должны существовать
-    if len(df.columns) < 11:
-        st.error("Ожидалось минимум 11 колонок (до K). Проверь диапазон A:Q и заголовки.")
+    # A:R -> 18 колонок; нам нужны D, K, R
+    if len(df.columns) < 18:
+        st.error("Ожидалось минимум 18 колонок (до R). Проверь диапазон A:R и заголовки.")
         st.stop()
 
-    colD = df.columns[3]   # D
-    colK = df.columns[10]  # K
+    colD = df.columns[3]    # D
+    colK = df.columns[10]   # K
+    colR = df.columns[17]   # R
 
     # D == "active" (case-insensitive)
     d_active = df[colD].astype(str).str.strip().str.lower() == "active"
@@ -183,7 +181,10 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     k_num = pd.to_numeric(df[colK], errors="coerce")
     k_ok = k_num.notna() & (k_num < 32)
 
-    out = df.loc[d_active & k_ok].copy()
+    # R пусто
+    r_blank = df[colR].isna() | (df[colR].astype(str).str.strip() == "")
+
+    out = df.loc[d_active & k_ok & r_blank].copy()
     out[colK] = k_num.loc[out.index]  # вернуть числовое K
     return out
 
@@ -199,7 +200,7 @@ def to_excel_bytes(data: pd.DataFrame) -> io.BytesIO | None:
         return None
 
 def main():
-    st.title("Initial export from Google Sheets (A:Q, D='active', K < 32)")
+    st.title("Initial export (A:R, D='active', K < 32, R empty)")
 
     # --- Sidebar: источник, выбор вкладки, ссылки ---
     with st.sidebar:
@@ -212,7 +213,6 @@ def main():
             client = _authorize_client()
             sh = client.open_by_key(sheet_id)
             ws_names = [ws.title for ws in sh.worksheets()]
-            # селект, если таб существует
             if ws_name in ws_names:
                 ws_name = st.selectbox("Select worksheet", ws_names, index=ws_names.index(ws_name))
             else:
