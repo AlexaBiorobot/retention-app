@@ -165,18 +165,20 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
 
-    # A:R -> 18 колонок; нам нужны D, K, P, Q, R
+    # A:R -> 18 колонок; нужны D, K, L, M, P, Q, R
     if len(df.columns) < 18:
         st.error("Ожидалось минимум 18 колонок (до R). Проверь диапазон A:R и заголовки.")
         st.stop()
 
     colD = df.columns[3]    # D
     colK = df.columns[10]   # K
+    colL = df.columns[11]   # L
+    colM = df.columns[12]   # M
     colP = df.columns[15]   # P
     colQ = df.columns[16]   # Q
     colR = df.columns[17]   # R
 
-    # D == "active" (case-insensitive)
+    # D == "active"
     d_active = df[colD].astype(str).str.strip().str.lower() == "active"
 
     # K не пустое и < 32
@@ -186,14 +188,19 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     # R пусто
     r_blank = df[colR].isna() | (df[colR].astype(str).str.strip() == "")
 
-    # P/Q не TRUE
+    # P/Q != TRUE
     p_true = df[colP].astype(str).str.strip().str.lower() == "true"
     q_true = df[colQ].astype(str).str.strip().str.lower() == "true"
 
-    mask = d_active & k_ok & r_blank & ~p_true & ~q_true
+    # НЕ пускать строки, где M > 0 И L > 2  → оставляем всё, что НЕ (M>0 & L>2)
+    l_num = pd.to_numeric(df[colL], errors="coerce")
+    m_num = pd.to_numeric(df[colM], errors="coerce")
+    not_bad_lm = ~((m_num > 0) & (l_num > 2))
+
+    mask = d_active & k_ok & r_blank & ~p_true & ~q_true & not_bad_lm
 
     out = df.loc[mask].copy()
-    out[colK] = k_num.loc[out.index]  # вернуть числовое K
+    out[colK] = k_num.loc[out.index]  # вернуть числовое K (как раньше)
     return out
 
 def to_excel_bytes(data: pd.DataFrame) -> io.BytesIO | None:
