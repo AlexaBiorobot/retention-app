@@ -411,17 +411,44 @@ def _b_suffix3(s: str) -> str:
     m = re.search(r"_(\w{3})", str(s).upper())
     return m.group(1) if m else ""
 
+import re
+
+def _b_suffix3(s: str) -> str:
+    """
+    Возвращает 3 буквы:
+      - если в B есть >= 2 подчёркиваний — берём 3 буквы после второго '_'
+      - если ровно 1 подчёркивание — берём 3 буквы после первого '_'
+      - иначе возвращаем "" (нет кода)
+    Небуквенные символы отбрасываем.
+    """
+    if s is None or pd.isna(s):
+        return ""
+    s = str(s).upper()
+    parts = s.split("_")
+    if len(parts) >= 3:      # два и более "_"
+        tail = parts[2]
+    elif len(parts) == 2:    # один "_"
+        tail = parts[1]
+    else:
+        return ""
+    letters = "".join(ch for ch in tail if ch.isalpha())
+    return letters[:3] if len(letters) >= 3 else ""
+
 def add_alt_matches_column(df: pd.DataFrame,
                            good_set=("Good","Amazing","New tutor (Good)"),
                            bad_set=("Bad","New tutor (Bad)"),
                            new_col_name="AltMatches") -> pd.DataFrame:
     """Варианты, которых нет в Matches, и которые соответствуют всем условиям,
-       кроме I±2ч; вместо него — совпадение 3-буквенного суффикса в B после '_'."""
+       кроме I±2ч; вместо него — совпадение 3-буквенного суффикса в B
+       после второго '_' (если он один — после первого)."""
     if df.empty:
         return df
 
     # колонки A:R
-    colB, colE, colF, colG, colI, colJ, colK = df.columns[1], df.columns[4], df.columns[5], df.columns[6], df.columns[8], df.columns[9], df.columns[10]
+    colB, colE, colF, colG, colI, colJ, colK = (
+        df.columns[1], df.columns[4], df.columns[5], df.columns[6],
+        df.columns[8], df.columns[9], df.columns[10]
+    )
     rating_col = _find_rating_col(df)
 
     f_vals = df[colF].astype(str).str.strip()
@@ -450,20 +477,24 @@ def add_alt_matches_column(df: pd.DataFrame,
         # базовые условия
         mF   = (f_vals == f_vals.iloc[i])
         mG   = (g_vals == g_vals.iloc[i])
+
         # K ±1
         base_k = k_num.iloc[i]
         mK = pd.Series(False, index=df.index)
         if not pd.isna(base_k):
             mK = (k_num.sub(base_k).abs() <= 1)
+
         # рейтинг
         ri = r_low.iloc[i] if rating_col else ""
         mR = (~r_low.isin(bad_l)) & ((r_low == ri) | (r_low.isin(good_l)))
+
         # PRM совпадает
         mPRM = (b_is_prm == b_is_prm.iloc[i])
+
         # суффикс в B совпадает (новое вместо I)
         mSUF = (b_suffix3 == b_suffix3.iloc[i])
 
-        # «обычные» матчи (для исключения) — те же, что в add_matches_column
+        # «обычные» матчи (для исключения) — те же, что в add_matches_column (I±2 часа)
         base_t = i_mins.iloc[i]
         mI = pd.Series(False, index=df.index)
         if not pd.isna(base_t):
@@ -472,9 +503,11 @@ def add_alt_matches_column(df: pd.DataFrame,
 
         # альтернативные матчи: как обычные, но БЕЗ I и С суффиксом
         mask_alt = mF & mG & mK & mR & mPRM & mSUF
+
         # исключаем текущую строку
         mask_regular.iloc[i] = False
         mask_alt.iloc[i]     = False
+
         # убираем те, кто уже были в Matches
         mask_alt = mask_alt & ~mask_regular
 
