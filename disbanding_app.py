@@ -462,6 +462,25 @@ def main():
     
         st.dataframe(long, use_container_width=True, height=700)
     
+        # Экспорт exploded-версии (CSV и XLSX, без export_col2)
+        st.download_button(
+            "⬇️ Download exploded CSV",
+            long.to_csv(index=False).encode("utf-8"),
+            file_name="matches_exploded.csv",
+            mime="text/csv",
+        )
+        xlsx_long = to_excel_bytes(long)
+        if xlsx_long:
+            st.download_button(
+                "⬇️ Download exploded XLSX",
+                xlsx_long,
+                file_name="matches_exploded.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+    else:
+        st.dataframe(filtered, use_container_width=True, height=700)
+    
+    
         # Экспорт именно exploded-версии
         st.download_button(
             "⬇️ Download exploded CSV",
