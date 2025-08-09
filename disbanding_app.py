@@ -197,7 +197,6 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
 
     # исключаем строки, где (M > 0 И L > 2)
     exclude_lm = (m_num > 0) & (l_num > 2)
-
     mask = d_active & k_ok & r_blank & ~p_true & ~q_true & ~exclude_lm
 
     out = df.loc[mask].copy()
