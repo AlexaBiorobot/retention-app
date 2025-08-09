@@ -257,11 +257,11 @@ def main():
         df = load_sheet_df(sheet_id, ws_name)
 
     with st.expander("🔎 Debug columns L/M"):
-    st.write("Колонки (A..R):", list(df.columns))
-    st.write("L header:", df.columns[11] if len(df.columns) > 11 else "нет")
-    st.write("M header:", df.columns[12] if len(df.columns) > 12 else "нет")
-    st.write("Примеры L (первые 10):", df.iloc[:10, 11].tolist() if len(df.columns) > 11 else "нет")
-    st.write("Примеры M (первые 10):", df.iloc[:10, 12].tolist() if len(df.columns) > 12 else "нет")
+        st.write("Колонки (A..R):", list(df.columns))
+        st.write("L header:", df.columns[11] if len(df.columns) > 11 else "нет")
+        st.write("M header:", df.columns[12] if len(df.columns) > 12 else "нет")
+        st.write("Примеры L (первые 10):", df.iloc[:10, 11].tolist() if len(df.columns) > 11 else "нет")
+        st.write("Примеры M (первые 10):", df.iloc[:10, 12].tolist() if len(df.columns) > 12 else "нет")
 
     if df.empty:
         st.warning(f"Пусто: проверь вкладку '{ws_name}' и доступ сервисного аккаунта (Viewer/Editor).")
