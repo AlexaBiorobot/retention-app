@@ -319,7 +319,7 @@ def add_matches_column(df: pd.DataFrame,
                        good_set=("Good","Amazing","New tutor (Good)"),
                        bad_set=("Bad","New tutor (Bad)"),
                        new_col_name="Matches") -> pd.DataFrame:
-    """Для каждой строки собирает совпадения и пишет их в столбец new_col_name."""
+    """Для каждой строки собирает совпадения (B, I, J, K, E, Rating) и считает их количество."""
     if df.empty:
         return df
 
@@ -335,34 +335,33 @@ def add_matches_column(df: pd.DataFrame,
     k_num  = pd.to_numeric(df[colK], errors="coerce")
     r_vals = df[rating_col].astype(str).str.strip() if rating_col else pd.Series("", index=df.index)
 
-    good_l = set(x.lower() for x in good_set)
-    bad_l  = set(x.lower() for x in bad_set)
+    good_l = {x.lower() for x in good_set}
+    bad_l  = {x.lower() for x in bad_set}
     r_low  = r_vals.str.lower()
 
-    lines = []
+    lines, counts = [], []
     n = len(df)
 
     for i in range(n):
-        # маски условий
+        # условия
         mF = f_vals == f_vals.iloc[i]
         mG = g_vals == g_vals.iloc[i]
 
         base_t = i_mins.iloc[i]
         mI = pd.Series(False, index=df.index)
-        if not np.isnan(base_t):
+        if not pd.isna(base_t):
             mI = (i_mins.sub(base_t).abs() <= 120)  # ±2 часа
 
         base_k = k_num.iloc[i]
         mK = pd.Series(False, index=df.index)
-        if not np.isnan(base_k):
+        if not pd.isna(base_k):
             mK = (k_num.sub(base_k).abs() <= 1)
 
-        # рейтинг
         ri = r_low.iloc[i] if rating_col else ""
-        mR = (~r_low.isin(bad_l)) & ( (r_low == ri) | (r_low.isin(good_l)) )
+        mR = (~r_low.isin(bad_l)) & ((r_low == ri) | (r_low.isin(good_l)))
 
         mask = mF & mG & mI & mK & mR
-        mask.iloc[i] = False  # не включаем саму строку
+        mask.iloc[i] = False  # ← исключаем саму строку
 
         if mask.any():
             sub = df.loc[mask, [colB, colI, colJ, colK, colE]]
@@ -371,20 +370,28 @@ def add_matches_column(df: pd.DataFrame,
             else:
                 sub = sub.assign(_rating="")
 
-            # формируем строки
-            lst = []
-            for _, row in sub.iterrows():
-                lst.append(f"{row[colB]}, {row[colI]}, {row[colJ]}, K: {row[colK]}, E: {row[colE]}, Rating: {row['_rating']}")
+            lst = [
+                f"{row[colB]}, {row[colI]}, {row[colJ]}, K: {row[colK]}, E: {row[colE]}, Rating: {row['_rating']}"
+                for _, row in sub.iterrows()
+            ]
             lines.append("\n".join(lst))
+            counts.append(len(lst))
         else:
             lines.append("")
+            counts.append(0)
 
     out = df.copy()
-    # безопасное имя столбца
+    # безопасные имена
     name = new_col_name
     while name in out.columns:
         name += "_x"
+
+    count_name = f"{new_col_name}_count"
+    while count_name in out.columns:
+        count_name += "_x"
+
     out[name] = lines
+    out[count_name] = counts
     return out
 
 def main():
