@@ -540,7 +540,7 @@ def add_alt_matches_column(df: pd.DataFrame,
     out[count_name] = counts_alt
     return out
 
-    def add_wide_matches_column(df: pd.DataFrame,
+def add_wide_matches_column(df: pd.DataFrame,
                             good_set=("Good","Amazing","New tutor (Good)"),
                             bad_set=("Bad","New tutor (Bad)"),
                             new_col_name="WideMatches") -> pd.DataFrame:
@@ -564,7 +564,7 @@ def add_alt_matches_column(df: pd.DataFrame,
     b_vals   = df[colB].astype(str).fillna("").str.upper()
     b_is_prm = b_vals.str.contains("PRM", na=False)
 
-    # для вычисления "обычных" и "альтернативных" матчей, чтобы их исключить
+    # для исключения уже найденных «обычных» и «альтернативных» матчей
     i_vals = df[colI].astype(str).str.strip()
     i_mins = i_vals.apply(_time_to_minutes)
     b_suf3 = b_vals.apply(_b_suffix3)
@@ -596,17 +596,17 @@ def add_alt_matches_column(df: pd.DataFrame,
         # PRM совпадает
         mPRM = (b_is_prm == b_is_prm.iloc[i])
 
-        # --- «обычные» матчи (чтобы исключить их здесь)
+        # «обычные» матчи (для исключения) — как в add_matches_column (I ±2ч)
         base_t = i_mins.iloc[i]
         mI = pd.Series(False, index=df.index)
         if not pd.isna(base_t):
-            mI = (i_mins.sub(base_t).abs() <= 120)  # ±2 часа
+            mI = (i_mins.sub(base_t).abs() <= 120)
         mask_regular = mF & mG & mI & mK & mR & mPRM
 
-        # --- «альтернативные» (с суффиксом; тоже исключим)
+        # «альтернативные» (по суффиксу; тоже исключим)
         mask_alt = mF & mG & mK & mR & mPRM & (b_suf3 == b_suf3.iloc[i])
 
-        # --- «широкие»: без I и без суффикса
+        # «широкие»: без I и без суффикса
         mask_wide = mF & mG & mK & mR & mPRM
 
         # убрать саму строку и дубль-пары (оставляем только j > i)
@@ -645,7 +645,6 @@ def add_alt_matches_column(df: pd.DataFrame,
     out[name] = lines
     out[cnt]  = counts
     return out
-
 
 def main():
     st.title("Initial export (A:R, D='active', K < 32, R empty, P/Q != TRUE)")
