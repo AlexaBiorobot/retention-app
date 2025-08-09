@@ -445,7 +445,14 @@ def main():
     c2.success(f"Filtered rows: {len(filtered)}")
 
     # --- Таблица ---
-    st.data_editor(filtered, use_container_width=True, disabled=True)
+    st.data_editor(
+        filtered,
+        use_container_width=True,
+        disabled=True,
+        column_config={
+            "Matches": st.column_config.TextAreaColumn("Matches", width="large", max_chars=None)
+        },
+    )
 
     # --- Экспорт ---
     export_col1, export_col2 = st.columns(2)
