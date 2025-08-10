@@ -712,6 +712,8 @@ def main():
                     cnt = cnt.add(pd.to_numeric(dff[col], errors="coerce").fillna(0).astype(int), fill_value=0)
             dff = dff[cnt > 0]
 
+    st.success(f"Filtered rows: {len(dff)}")
+
     # --- Причесанный вывод в заданном порядке ---
     cols_all = list(dff.columns)
     def col(idx):
