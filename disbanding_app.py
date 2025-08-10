@@ -19,7 +19,7 @@ st.set_page_config(
 DEFAULT_SHEET_ID = "1Jbb4p1cZCo67ZRiW5cmFUq-c9ijo5VMH_hFFMVYeJk4"
 DEFAULT_WS_NAME  = "data"
 
-EXT_GROUPS_SS_ID = "1u_NwMt3CVVgozm04JGmccyTsNZnZGiHjG5y0Ko3YdaY"
+EXT_GROUPS_SS_ID = "1u_NwMt3CVVgozm04JGmccyTsNZnЗGiHjG5y0Ko3YdaY".replace("З","z")  # safety
 EXT_GROUPS_WS    = "Groups & Teachers"
 
 RATING_SS_ID = "1HItT2-PtZWoldYKL210hCQOLg3rh6U1Qj6NWkBjDjzk"
@@ -219,7 +219,7 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     exclude_m = (m_num > 0)
     exclude_l = (l_num > 2)
 
-    # Итоговая маска (без r_blank и без преждевременных ссылок)
+    # Итоговая маска
     mask = d_active & k_ok & r_ok & ~p_true & ~q_true & ~exclude_m & ~exclude_l
 
     # --- ДОП. ФИЛЬТР: есть свободные места (Capacity - Paid >= 1) ---
@@ -239,6 +239,7 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
             break
 
     free_slots = None
+    paid_pct_series = None
     if colPaid is not None and colCap is not None:
         paid_num = pd.to_numeric(df[colPaid], errors="coerce")
         cap_num  = pd.to_numeric(df[colCap],  errors="coerce")
@@ -246,12 +247,21 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
         have_free  = (cap_num.notna() & paid_num.notna()) & (free_slots >= 1)
         mask = mask & have_free
 
+        # Paid % = round(Paid/Capacity*100), формат строкой "NN%"
+        with np.errstate(divide="ignore", invalid="ignore"):
+            pct = np.where(cap_num > 0, (paid_num / cap_num) * 100.0, np.nan)
+        paid_pct_series = pd.Series(pct, index=df.index)
+        paid_pct_series = paid_pct_series.apply(lambda x: f"{int(round(x))}%"
+                                                if pd.notna(x) else pd.NA)
+
     out = df.loc[mask].copy()
     out[colK] = k_num.loc[out.index]
 
-    # Добавим колонку Free slots (если нашли Paid/Capacity)
+    # Добавим колонки Free slots и Paid % (если нашли Paid/Capacity)
     if (colPaid is not None) and (colCap is not None) and (free_slots is not None):
         out["Free slots"] = free_slots.loc[out.index]
+        if paid_pct_series is not None:
+            out["Paid %"] = paid_pct_series.loc[out.index]
 
     return out
 
@@ -515,7 +525,7 @@ def _pick_col(df: pd.DataFrame, candidates: set[str], fallback_idx: int | None =
 
 
 def main():
-    st.title("Initial export (A:R, D='active', K < 32, R empty, P/Q != TRUE)")
+    st.title("Initial export (A:R, D='active', K < 32, R empty/0, P/Q != TRUE, Free slots >= 1)")
 
     # --- Source (hidden, no UI) ---
     sheet_id = SHEET_ID
@@ -569,6 +579,7 @@ def main():
     col_capacity   = _pick_col(dff, {"capacity", "cap"})                                                  # по имени
     col_paid       = _pick_col(dff, {"paid students", "paid student", "paid"})                            # по имени
     col_transfer1  = _pick_col(dff, {"students transferred 1 time", "transferred 1 time"}, fallback_idx=11) # L
+    col_paid_pct   = _pick_col(dff, {"paid %", "paid percent", "paid percentage", "paid pct"})
 
     # колонки matches
     col_m_text  = "Matches"           if "Matches"           in dff.columns else None
@@ -600,6 +611,7 @@ def main():
         dff = _apply_ms(dff, col_lesson_num, st.multiselect("Lesson number",             _ms_options(dff, col_lesson_num)))
         dff = _apply_ms(dff, col_capacity,   st.multiselect("Capacity",                  _ms_options(dff, col_capacity)))
         dff = _apply_ms(dff, col_paid,       st.multiselect("Paid students",             _ms_options(dff, col_paid)))
+        dff = _apply_ms(dff, col_paid_pct,   st.multiselect("Paid %",                    _ms_options(dff, col_paid_pct)))
         dff = _apply_ms(dff, col_transfer1,  st.multiselect("Students transferred 1 time", _ms_options(dff, col_transfer1)))
 
         # пороги по количеству матчей
@@ -643,11 +655,11 @@ def main():
     
     # найдём колонку рейтинга и поставим её сразу после Tutor ID
     rating_colname = _find_rating_col(dff)  # "Rating_BP" или "Rating"
-    # добавим Free slots в dff уже есть (если нашлись Paid/Capacity)
+    # добавим Free slots и Paid % (они появились в dff, если нашлись Paid/Capacity)
     desired = [
         colA, colB, colE, colO, rating_colname,
         colF, colG, colI,             # базовые поля
-        col_capacity, col_paid, "Free slots",  # Capacity / Paid / Free
+        col_capacity, col_paid, "Free slots", "Paid %",  # Capacity / Paid / Free / Paid %
         colK, colC, colN, colL,       # прочее
         "Matches_count", "Matches",
         "WideMatches_count", "WideMatches",
@@ -705,7 +717,7 @@ def main():
     for c in ["BO", "Group", "Tutor", "Course", "Matches", "WideMatches"]:
         if c in curated.columns:
             cfg[c] = st.column_config.TextColumn(label=c, width="large")
-    for c in ["Lesson number", "Capacity", "Paid students", "Free slots", "Students transferred 1 time",
+    for c in ["Lesson number", "Capacity", "Paid students", "Free slots", "Paid %", "Students transferred 1 time",
               "Module", "Group age", "Local time",
               "Matches_count", "WideMatches_count"]:
         if c in curated.columns:
