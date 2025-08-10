@@ -770,18 +770,29 @@ def main():
     curated = curated[ has_base | has_text | has_counts ].reset_index(drop=True)
 
     
-    # --- без «висячих» пустых строк ---
-    nrows = len(curated)
+    # --- Рендер: широкая таблица без «висячих» пустых рядов ---
+    ROW, HEADER, PAD = 34, 39, 8
+    table_h = min(700, HEADER + ROW * max(1, len(curated)))
     
-    if nrows <= 25:
-        # Для небольших выборок таблица сама подгоняет высоту без пустых рядов
-        st.table(curated)
-    else:
-        # Точная высота под nrows строк
-        ROW, HEADER, PADDING = 34, 39, 8  # при необходимости подправь на 33/38/6
-        table_h = HEADER + ROW * nrows + PADDING
-        st.dataframe(curated, use_container_width=True, height=table_h)
-
+    # Настроим ширины колонок
+    cfg = {}
+    for c in ["BO", "Group", "Tutor", "Course", "Matches", "AltMatches", "WideMatches"]:
+        if c in curated.columns:
+            cfg[c] = st.column_config.TextColumn(label=c, width="large")
+    for c in ["Lesson number", "Capacity", "Paid students", "Students transferred 1 time",
+              "Module", "Group age", "Local time",
+              "Matches_count", "AltMatches_count", "WideMatches_count"]:
+        if c in curated.columns:
+            cfg[c] = st.column_config.TextColumn(label=c, width="small")
+    
+    # ВАЖНО: только dataframe (table не растягивается по ширине)
+    st.dataframe(
+        curated,
+        use_container_width=True,
+        height=table_h,
+        column_config=cfg,
+    )
+    
     st.download_button(
         "⬇️ Download CSV (curated)",
         curated.to_csv(index=False).encode("utf-8"),
