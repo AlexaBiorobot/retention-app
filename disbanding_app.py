@@ -288,14 +288,26 @@ def add_matches_column(df: pd.DataFrame,
     i_vals = df[colI].astype(str).str.strip()
     i_mins = i_vals.apply(_time_to_minutes)
     k_num  = pd.to_numeric(df[colK], errors="coerce")
-    r_vals = df[rating_col].astype(str).str.strip() if rating_col else pd.Series("", index=df.index)
 
+    # --- рейтинг ---
+    if rating_col:
+        r_vals = df[rating_col].astype(str).str.strip()
+        r_low  = r_vals.str.lower()
+        good_l = {x.lower() for x in good_set}
+        bad_l  = {x.lower() for x in bad_set}
+        cand_is_bad = r_low.isin(bad_l)
+        cand_is_good = r_low.isin(good_l)
+        cand_is_new  = r_low.str.contains("new tutor", na=False)
+    else:
+        r_vals = pd.Series("", index=df.index)
+        r_low  = r_vals
+        cand_is_bad  = pd.Series(False, index=df.index)
+        cand_is_good = pd.Series(False, index=df.index)
+        cand_is_new  = pd.Series(False, index=df.index)
+
+    # PRM по B
     b_vals   = df[colB].astype(str).str.upper().fillna("")
     b_is_prm = b_vals.str.contains("PRM", na=False)
-
-    good_l = {x.lower() for x in good_set}
-    bad_l  = {x.lower() for x in bad_set}
-    r_low  = r_vals.str.lower()
 
     lines, counts = [], []
     n = len(df)
@@ -313,8 +325,14 @@ def add_matches_column(df: pd.DataFrame,
         if not pd.isna(base_k):
             mK = (k_num.sub(base_k).abs() <= 1)
 
-        ri = r_low.iloc[i] if rating_col else ""
-        mR = (~r_low.isin(bad_l)) & ((r_low == ri) | (r_low.isin(good_l)))
+        # рейтинг: не bad И (равен моему ИЛИ кандидат из good ИЛИ
+        # если у меня "new tutor", то и у кандидата должен быть "new tutor")
+        if rating_col:
+            my_r  = r_low.iloc[i]
+            my_is_new = "new tutor" in my_r
+            mR = (~cand_is_bad) & ((r_low == my_r) | cand_is_good | (my_is_new & cand_is_new))
+        else:
+            mR = pd.Series(True, index=df.index)
 
         mPRM = (b_is_prm == b_is_prm.iloc[i])
 
@@ -378,22 +396,33 @@ def add_alt_matches_column(df: pd.DataFrame,
     f_vals = df[colF].astype(str).str.strip()
     g_vals = df[colG].astype(str).str.strip()
     k_num  = pd.to_numeric(df[colK], errors="coerce")
-    r_vals = df[rating_col].astype(str).str.strip() if rating_col else pd.Series("", index=df.index)
 
+    # рейтинг
+    if rating_col:
+        r_vals = df[rating_col].astype(str).str.strip()
+        r_low  = r_vals.str.lower()
+        good_l = {x.lower() for x in good_set}
+        bad_l  = {x.lower() for x in bad_set}
+        cand_is_bad = r_low.isin(bad_l)
+        cand_is_good = r_low.isin(good_l)
+        cand_is_new  = r_low.str.contains("new tutor", na=False)
+    else:
+        r_low = pd.Series("", index=df.index)
+        cand_is_bad = pd.Series(False, index=df.index)
+        cand_is_good = pd.Series(False, index=df.index)
+        cand_is_new  = pd.Series(False, index=df.index)
+
+    # PRM и суффикс
     b_vals    = df[colB].astype(str).fillna("").str.upper()
     b_is_prm  = b_vals.str.contains("PRM", na=False)
     b_suffix3 = b_vals.apply(_b_suffix3)
 
-    good_l = {x.lower() for x in good_set}
-    bad_l  = {x.lower() for x in bad_set}
-    r_low  = r_vals.str.lower()
-
+    # для исключения обычных матчей
     i_vals = df[colI].astype(str).str.strip()
     i_mins = i_vals.apply(_time_to_minutes)
 
     lines_alt, counts_alt = [], []
     n = len(df)
-
     for i in range(n):
         mF = (f_vals == f_vals.iloc[i])
         mG = (g_vals == g_vals.iloc[i])
@@ -403,8 +432,12 @@ def add_alt_matches_column(df: pd.DataFrame,
         if not pd.isna(base_k):
             mK = (k_num.sub(base_k).abs() <= 1)
 
-        ri = r_low.iloc[i] if rating_col else ""
-        mR = (~r_low.isin(bad_l)) & ((r_low == ri) | (r_low.isin(good_l)))
+        if rating_col:
+            my_r  = r_low.iloc[i]
+            my_is_new = "new tutor" in my_r
+            mR = (~cand_is_bad) & ((r_low == my_r) | cand_is_good | (my_is_new & cand_is_new))
+        else:
+            mR = pd.Series(True, index=df.index)
 
         mPRM = (b_is_prm == b_is_prm.iloc[i])
         mSUF = (b_suffix3 == b_suffix3.iloc[i])
@@ -419,7 +452,6 @@ def add_alt_matches_column(df: pd.DataFrame,
 
         mask_regular.iloc[i] = False
         mask_alt.iloc[i]     = False
-
         mask_alt = mask_alt & ~mask_regular
 
         if mask_alt.any():
@@ -458,7 +490,21 @@ def add_wide_matches_column(df: pd.DataFrame,
     f_vals = df[colF].astype(str).str.strip()
     g_vals = df[colG].astype(str).str.strip()
     k_num  = pd.to_numeric(df[colK], errors="coerce")
-    r_vals = df[rating_col].astype(str).str.strip() if rating_col else pd.Series("", index=df.index)
+
+    # рейтинг
+    if rating_col:
+        r_vals = df[rating_col].astype(str).str.strip()
+        r_low  = r_vals.str.lower()
+        good_l = {x.lower() for x in good_set}
+        bad_l  = {x.lower() for x in bad_set}
+        cand_is_bad = r_low.isin(bad_l)
+        cand_is_good = r_low.isin(good_l)
+        cand_is_new  = r_low.str.contains("new tutor", na=False)
+    else:
+        r_low = pd.Series("", index=df.index)
+        cand_is_bad = pd.Series(False, index=df.index)
+        cand_is_good = pd.Series(False, index=df.index)
+        cand_is_new  = pd.Series(False, index=df.index)
 
     b_vals   = df[colB].astype(str).fillna("").str.upper()
     b_is_prm = b_vals.str.contains("PRM", na=False)
@@ -466,10 +512,6 @@ def add_wide_matches_column(df: pd.DataFrame,
     i_vals = df[colI].astype(str).str.strip()
     i_mins = i_vals.apply(_time_to_minutes)
     b_suf3 = b_vals.apply(_b_suffix3)
-
-    good_l = {x.lower() for x in good_set}
-    bad_l  = {x.lower() for x in bad_set}
-    r_low  = r_vals.str.lower()
 
     pos = pd.Series(range(len(df)), index=df.index)
 
@@ -484,21 +526,24 @@ def add_wide_matches_column(df: pd.DataFrame,
         if not pd.isna(base_k):
             mK = (k_num.sub(base_k).abs() <= 1)
 
-        ri = r_low.iloc[i] if rating_col else ""
-        mR = (~r_low.isin(bad_l)) & ((r_low == ri) | (r_low.isin(good_l)))
+        if rating_col:
+            my_r  = r_low.iloc[i]
+            my_is_new = "new tutor" in my_r
+            mR = (~cand_is_bad) & ((r_low == my_r) | cand_is_good | (my_is_new & cand_is_new))
+        else:
+            mR = pd.Series(True, index=df.index)
 
         mPRM = (b_is_prm == b_is_prm.iloc[i])
 
+        # исключаем «обычные» и «альтернативные»
         base_t = i_mins.iloc[i]
         mI = pd.Series(False, index=df.index)
         if not pd.isna(base_t):
             mI = (i_mins.sub(base_t).abs() <= 120)
         mask_regular = mF & mG & mI & mK & mR & mPRM
-
-        mask_alt = mF & mG & mK & mR & mPRM & (b_suf3 == b_suf3.iloc[i])
+        mask_alt     = mF & mG & mK & mR & mPRM & (b_suf3 == b_suf3.iloc[i])
 
         mask_wide = mF & mG & mK & mR & mPRM
-
         mask_regular.iloc[i] = False
         mask_alt.iloc[i]     = False
         mask_wide.iloc[i]    = False
@@ -527,7 +572,6 @@ def add_wide_matches_column(df: pd.DataFrame,
     out[name] = lines
     out[cnt]  = counts
     return out
-
 
 # ---- Нормализатор имён и выбор колонок по синонимам ----
 def _norm_name(s: str) -> str:
@@ -670,21 +714,33 @@ def main():
 
     # --- Причесанный вывод в заданном порядке ---
     cols_all = list(dff.columns)
-    def col(idx):
+    def col(idx): 
         return cols_all[idx] if idx < len(cols_all) else None
+    
     colA, colB, colC = col(0), col(1), col(2)
     colE, colF, colG = col(4), col(5), col(6)
     colI, colJ, colK = col(8), col(9), col(10)
     colL, colN, colO = col(11), col(13), col(14)
-
+    
+    # найдём колонку рейтинга и поставим её сразу после Tutor ID
+    rating_colname = _find_rating_col(dff)  # например "Rating_BP" или "Rating"
     desired = [
-        colA, colB, colE, colO, colF, colG, colI, colJ, colK, colC, colN, colL,
+        colA, colB, colE, colO, rating_colname,  # <- Rating сразу после Tutor ID
+        colF, colG, colI, colJ, colK, colC, colN, colL,
         "Matches_count", "Matches",
         "AltMatches_count", "AltMatches",
         "WideMatches_count", "WideMatches",
     ]
     display_cols = [c for c in desired if (c is not None and c in dff.columns)]
     curated = dff.loc[:, display_cols].copy()
+    
+    # переименуем заголовок рейтинга для красоты
+    if rating_colname and rating_colname in curated.columns and "Rating" not in curated.columns:
+        curated = curated.rename(columns={rating_colname: "Rating"})
+    
+    # убрать полностью пустые строки ('' тоже считаем пустым)
+    curated = curated.replace(r"^\s*$", pd.NA, regex=True).dropna(how="all")
+
 
     st.dataframe(curated, use_container_width=True, height=700)
     st.download_button(
