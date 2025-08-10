@@ -201,11 +201,13 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     k_num = pd.to_numeric(df[colK], errors="coerce")
     k_ok = k_num.notna() & (k_num > 3) & (k_num < 32)
 
-        # --- R пустая/ноль: берём если NaN, "" или 0 ---
-    r_raw   = df[colR]
-    r_zero  = pd.to_numeric(r_raw, errors="coerce").eq(0)
-    r_empty = r_raw.astype(str).str.strip().eq("")
-    r_blank = r_raw.isna() | r_empty | r_zero
+    # R: берём, если пусто / NaN / 0 (числом) / "0" (строкой)
+    r_str = df[colR].astype(str).str.strip().str.lower()
+    r_num = pd.to_numeric(df[colR], errors="coerce")
+    r_ok  = df[colR].isna() | (r_str == "") | (r_str == "0") | (r_num == 0)
+    
+    mask = d_active & k_ok & r_ok & ~p_true & ~q_true & ~exclude_m & ~exclude_l
+
 
     p_true = (df[colP] == True) | (df[colP].astype(str).str.strip().str.lower() == "true")
     q_true = (df[colQ] == True) | (df[colQ].astype(str).str.strip().str.lower() == "true")
