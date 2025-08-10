@@ -530,13 +530,63 @@ def add_wide_matches_column(df: pd.DataFrame,
     out[cnt]  = counts
     return out
 
-import re
 
+# ---- Безопасный числовой слайдер-диапазон ----
+def num_range_filter(df: pd.DataFrame, col: str, label: str, step=1, key: str | None=None) -> pd.DataFrame:
+    """Диапазон по числовому столбцу с защитой от NaN/вырожденных диапазонов."""
+    if not col or col not in df.columns:
+        return df
+    s = pd.to_numeric(df[col], errors="coerce")
+    s_valid = s.dropna()
+    if s_valid.empty:
+        st.caption(f"{label}: нет числовых значений для фильтра.")
+        return df
+
+    vmin = float(s_valid.min())
+    vmax = float(s_valid.max())
+
+    if not np.isfinite(vmin) or not np.isfinite(vmax) or vmin >= vmax:
+        # показываем disabled-слайдер, но не фильтруем
+        st.slider(
+            label,
+            min_value=float(vmin if np.isfinite(vmin) else 0.0),
+            max_value=float((vmin if np.isfinite(vmin) else 0.0) + 1.0),
+            value=(float(vmin if np.isfinite(vmin) else 0.0),
+                   float(vmin if np.isfinite(vmin) else 0.0)),
+            step=step,
+            key=key or f"{label}_disabled",
+            disabled=True
+        )
+        return df
+
+    # integer-слайдер если подходит
+    if step == 1 and vmin.is_integer() and vmax.is_integer():
+        lo, hi = st.slider(
+            label,
+            min_value=int(vmin),
+            max_value=int(vmax),
+            value=(int(vmin), int(vmax)),
+            step=1,
+            key=key or f"{label}_int"
+        )
+    else:
+        lo, hi = st.slider(
+            label,
+            min_value=vmin,
+            max_value=vmax,
+            value=(vmin, vmax),
+            step=step,
+            key=key or f"{label}_float"
+        )
+
+    return df[(s >= lo) & (s <= hi)]
+
+
+# ---- Нормализатор имён и выбор колонок по синонимам ----
 def _norm_name(s: str) -> str:
     return re.sub(r"\s+", " ", str(s).strip().lower())
 
 def _pick_col(df: pd.DataFrame, candidates: set[str], fallback_idx: int | None = None) -> str | None:
-    """Находит колонку по набору синонимов (без регистра/лишних пробелов). Иначе — fallback по индексу."""
     norm = {_norm_name(c): c for c in df.columns}
     for key in candidates:
         if key in norm:
@@ -597,7 +647,7 @@ def main():
     c1.caption(f"Rows total: {len(df)}")
     c2.success(f"Filtered rows: {len(filtered)}")
 
-        # --- Sidebar Filters ---
+    # --- Sidebar Filters ---
     dff = filtered.copy()
 
     # маппим нужные поля по именам, с fallback на позиции A:R (0-based)
@@ -622,11 +672,11 @@ def main():
     col_w_cnt   = "WideMatches_count" if "WideMatches_count" in dff.columns else None
 
     with st.sidebar.expander("Filters", expanded=True):
-        # — текстовые мультиселекты —
+        # текстовые мультиселекты
         def _multi(df, label, col):
             if not col: return df
             vals = sorted(df[col].dropna().astype(str).unique())
-            sel = st.multiselect(label, vals)
+            sel = st.multiselect(label, vals, key=f"ms_{label}")
             if sel:
                 df = df[df[col].astype(str).isin(sel)]
             return df
@@ -639,36 +689,25 @@ def main():
         dff = _multi(dff, "Local time", col_local_time)
         dff = _multi(dff, "Module",     col_module)
 
-        # — числовые диапазоны —
-        def _range(df, label, col):
-            if not col: return df
-            s = pd.to_numeric(df[col], errors="coerce")
-            if s.notna().any():
-                vmin = int(s.min())
-                vmax = int(s.max())
-                lo, hi = st.slider(label, vmin, vmax, (vmin, vmax))
-                df = df[(pd.to_numeric(df[col], errors="coerce") >= lo) &
-                        (pd.to_numeric(df[col], errors="coerce") <= hi)]
-            return df
+        # числовые диапазоны (безопасные)
+        dff = num_range_filter(dff, col_lesson_num, "Lesson number",          step=1, key="rng_lesson")
+        dff = num_range_filter(dff, col_capacity,   "Capacity",               step=1, key="rng_cap")
+        dff = num_range_filter(dff, col_paid,       "Paid students",          step=1, key="rng_paid")
+        dff = num_range_filter(dff, col_transfer1,  "Students transferred 1 time", step=1, key="rng_tr1")
 
-        dff = _range(dff, "Lesson number",          col_lesson_num)
-        dff = _range(dff, "Capacity",               col_capacity)
-        dff = _range(dff, "Paid students",          col_paid)
-        dff = _range(dff, "Students transferred 1 time", col_transfer1)
-
-        # — фильтры по matches —
-        def _count_slider(df, label, col_cnt):
+        # фильтры по matches
+        def _count_slider(df, label, col_cnt, key):
             if not col_cnt: return df
             s = pd.to_numeric(df[col_cnt], errors="coerce").fillna(0).astype(int)
             mx = int(s.max()) if len(s) else 0
-            v  = st.slider(label, 0, max(1, mx), 0)
+            v  = st.slider(label, 0, max(1, mx), 0, key=key)
             return df[s >= v]
 
-        dff = _count_slider(dff, "Min Matches",      col_m_cnt)
-        dff = _count_slider(dff, "Min Alt matches",  col_a_cnt)
-        dff = _count_slider(dff, "Min Wide matches", col_w_cnt)
+        dff = _count_slider(dff, "Min Matches",      col_m_cnt, key="cnt_m")
+        dff = _count_slider(dff, "Min Alt matches",  col_a_cnt, key="cnt_a")
+        dff = _count_slider(dff, "Min Wide matches", col_w_cnt, key="cnt_w")
 
-        q = st.text_input("Search in matches text")
+        q = st.text_input("Search in matches text", key="q_match")
         if q:
             qrx = re.escape(q)
             mask = pd.Series(False, index=dff.index)
@@ -677,7 +716,7 @@ def main():
                     mask |= dff[col].astype(str).str.contains(qrx, case=False, na=False)
             dff = dff[mask]
 
-        only_any = st.checkbox("Only rows with any matches", value=False)
+        only_any = st.checkbox("Only rows with any matches", value=False, key="only_any")
         if only_any:
             cnt = pd.Series(0, index=dff.index)
             for col in [col_m_cnt, col_a_cnt, col_w_cnt]:
@@ -687,7 +726,7 @@ def main():
 
     # --- Причесанный вывод в заданном порядке ---
     cols_all = list(dff.columns)
-    def col(idx): 
+    def col(idx):
         return cols_all[idx] if idx < len(cols_all) else None
     colA, colB, colC = col(0), col(1), col(2)
     colE, colF, colG = col(4), col(5), col(6)
@@ -704,51 +743,6 @@ def main():
     curated = dff.loc[:, display_cols].copy()
 
     st.dataframe(curated, use_container_width=True, height=700)
-    st.download_button(
-        "⬇️ Download CSV (curated)",
-        curated.to_csv(index=False).encode("utf-8"),
-        file_name="curated_view.csv",
-        mime="text/csv",
-    )
-
-
-    # --- Причесанный вывод в заданном порядке ---
-    # Берём имена колонок по позициям A..R (как в исходном листе)
-    cols = list(filtered.columns)
-    # защитимся, если колонок меньше ожидаемого
-    def col(idx): 
-        return cols[idx] if idx < len(cols) else None
-
-    colA = col(0)   # A
-    colB = col(1)   # B
-    colC = col(2)   # C
-    # D = col(3)
-    colE = col(4)   # E
-    colF = col(5)   # F
-    colG = col(6)   # G
-    # H = col(7)
-    colI = col(8)   # I
-    colJ = col(9)   # J
-    colK = col(10)  # K
-    colL = col(11)  # L
-    # M = col(12)
-    colN = col(13)  # N
-    colO = col(14)  # O
-
-    desired = [
-        colA, colB, colE, colO, colF, colG, colI, colJ, colK, colC, colN, colL,
-        "Matches_count", "Matches",
-        "AltMatches_count", "AltMatches",
-        "WideMatches_count", "WideMatches",
-    ]
-
-    # убираем None и оставляем только реально существующие колонki
-    display_cols = [c for c in desired if (c is not None and c in filtered.columns)]
-
-    curated = filtered.loc[:, display_cols].copy()
-
-    st.dataframe(curated, use_container_width=True, height=700)
-
     st.download_button(
         "⬇️ Download CSV (curated)",
         curated.to_csv(index=False).encode("utf-8"),
