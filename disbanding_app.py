@@ -738,9 +738,32 @@ def main():
     if rating_colname and rating_colname in curated.columns and "Rating" not in curated.columns:
         curated = curated.rename(columns={rating_colname: "Rating"})
     
-    # убрать полностью пустые строки ('' тоже считаем пустым)
-    curated = curated.replace(r"^\s*$", pd.NA, regex=True).dropna(how="all")
-
+    # переименуем заголовок рейтинга для красоты
+    if rating_colname and rating_colname in curated.columns and "Rating" not in curated.columns:
+        curated = curated.rename(columns={rating_colname: "Rating"})
+    
+    # --- убрать «визуально пустые» строки и сбросить индекс ---
+    # непустые значения считаем по всем колонкам, КРОМЕ счётчиков матчей
+    non_count_cols = [c for c in curated.columns
+                      if c not in {"Matches_count", "AltMatches_count", "WideMatches_count"}]
+    
+    if non_count_cols:
+        has_any_text = curated[non_count_cols].applymap(
+            lambda x: (x is not None) and (not pd.isna(x)) and (str(x).strip() != "")
+        ).any(axis=1)
+    else:
+        has_any_text = pd.Series(False, index=curated.index)
+    
+    count_cols = [c for c in ["Matches_count", "AltMatches_count", "WideMatches_count"]
+                  if c in curated.columns]
+    if count_cols:
+        total_counts = sum(pd.to_numeric(curated[c], errors="coerce").fillna(0).astype(int)
+                           for c in count_cols)
+    else:
+        total_counts = pd.Series(0, index=curated.index)
+    
+    keep_mask = has_any_text | (total_counts > 0)
+    curated = curated[keep_mask].reset_index(drop=True)
 
     st.dataframe(curated, use_container_width=True, height=700)
     st.download_button(
