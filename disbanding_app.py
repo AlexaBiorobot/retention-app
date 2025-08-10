@@ -590,7 +590,7 @@ def main():
     - Same **Course** and same **Group age**
     - **Lesson number** within **±1**
     - Same **PRM** marker (both PRM or both not)
-    - **Either** same local start time within **±120 minutes** **or** the same 3-letter suffix in **Group ID**
+    - **Either** same local start time within **±120 minutes** **or** the same **day**
     - Rating pairing allowed:
       - **Bad** / **New tutor (Bad)** → never
       - **OK** / **New tutor (OK)** → not with **Amazing/Good/New tutor (Good)** and not with **New tutor**
