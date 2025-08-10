@@ -581,8 +581,8 @@ def main():
     **Which rows are included**
     - Status: **Active**
     - **Lesson number**: 4–31 (inclusive)
-    - **Alter**: blank/empty/NaN or **0**
-    - **Flag P** and **Flag Q**: **not TRUE**
+    - **No 0-2 lessons left**
+    - **Not flagged as "Do not disband" or "Do not merge"**
     - **Students transferred 1 time** ≤ 2; **Students transferred 2+ times** ≤ 0
     - **Free slots** ≥ 1 (Capacity − Paid), when both **Capacity** & **Paid** exist
 
