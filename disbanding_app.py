@@ -397,7 +397,7 @@ def add_matches_combined(df: pd.DataFrame, new_col_name="Matches") -> pd.DataFra
             sub["_slots"]  = df.loc[sub.index, slots_col].values if slots_col else ""
 
             lst = [
-                f"{row[colB]}, "
+                f"- {row[colB]}, "
                 f"Tutor: {row[colE]}, "
                 f"Rating: {row['_rating']}, "
                 f"lesson: {row[colK]}, "
@@ -407,8 +407,6 @@ def add_matches_combined(df: pd.DataFrame, new_col_name="Matches") -> pd.DataFra
                 for _, row in sub.iterrows()
             ]
             lines.append("\n".join(lst)); counts.append(len(lst))
-        else:
-            lines.append(""); counts.append(0)
 
     out = df.copy()
     name = new_col_name
@@ -469,7 +467,7 @@ def add_wide_matches_column(df: pd.DataFrame, new_col_name="WideMatches", exclud
             sub["_slots"]  = df.loc[sub.index, slots_col].values if slots_col else ""
 
             lst = [
-                f"{row[colB]}, "
+                f"- {row[colB]}, "
                 f"Tutor: {row[colE]}, "
                 f"Rating: {row['_rating']}, "
                 f"lesson: {row[colK]}, "
@@ -479,8 +477,6 @@ def add_wide_matches_column(df: pd.DataFrame, new_col_name="WideMatches", exclud
                 for _, row in sub.iterrows()
             ]
             lines.append("\n".join(lst)); counts.append(len(lst))
-        else:
-            lines.append(""); counts.append(0)
 
     out = df.copy()
     name = new_col_name
