@@ -577,7 +577,6 @@ def _pick_col(df: pd.DataFrame, candidates: set[str], fallback_idx: int | None =
 
 
 def main():
-    st.title("Disbanding Brazil")
 
     # --- Source (hidden, no UI) ---
     sheet_id = SHEET_ID
