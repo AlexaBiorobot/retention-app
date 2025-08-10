@@ -6,6 +6,7 @@ import numpy as np
 import streamlit as st
 import pandas as pd
 import gspread
+import textwrap
 from oauth2client.service_account import ServiceAccountCredentials
 from gspread.exceptions import SpreadsheetNotFound, WorksheetNotFound
 
@@ -138,7 +139,6 @@ def load_group_age_map(sheet_id: str = EXT_GROUPS_SS_ID, worksheet_name: str = E
     return mapping
 
 
-# >>> ВОТ ЭТА ФУНКЦИЯ БЫЛА ОТСУТСТВУЮЩЕЙ <<<
 def replace_group_age_from_map(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
     """Подставляем Group age из внешней карты по колонке B (Group/ID/Title).
        Если в mapping нет значения — оставляем исходное.
@@ -177,7 +177,6 @@ def replace_group_age_from_map(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
     # подставляем только непустые значения из mapping
     dff[colG] = new_vals.where(new_vals.notna() & (new_vals.astype(str).str.strip() != ""), dff[colG])
     return dff
-# <<< КОНЕЦ ДОБАВЛЕННОГО БЛОКА >>>
 
 
 @st.cache_data(show_spinner=False, ttl=300)
@@ -481,7 +480,7 @@ def add_matches_combined(df: pd.DataFrame, new_col_name="Matches") -> pd.DataFra
     return out
 
 
-# --- WideMatches: «широкая сетка» без времени/суффикса, только вперед и не дублируем Matches ---
+# --- WideMatches: без времени/суффикса, смотрим и вверх, и вниз; не исключаем тех, у кого уже есть Matches ---
 def add_wide_matches_column(df: pd.DataFrame, new_col_name="WideMatches", exclude_col="Matches") -> pd.DataFrame:
     """
     WideMatches: без времени и без суффикса, теперь смотрим и вверх, и вниз;
@@ -504,9 +503,7 @@ def add_wide_matches_column(df: pd.DataFrame, new_col_name="WideMatches", exclud
     r_vals = df[rating_col].astype(str) if rating_col else pd.Series("", index=df.index)
     slots_col = _find_free_slots_col(df)
 
-    # Раньше мы исключали те, у кого уже есть Matches; теперь — нет.
-    # already = df[exclude_col].astype(str).str.strip().ne("") if exclude_col in df.columns else pd.Series(False, index=df.index)
-    # Теперь просто:
+    # Теперь не исключаем строки, у которых уже есть Matches
     already = pd.Series(False, index=df.index)
 
     lines, counts = [], []
@@ -525,7 +522,6 @@ def add_wide_matches_column(df: pd.DataFrame, new_col_name="WideMatches", exclud
         my_r = r_vals.iloc[i]
         ok_by_rating = r_vals.apply(lambda rr: can_pair(my_r, rr))
 
-        # Больше не ограничиваемся pos > pos[i] и не вычёркиваем already
         mask = same_course & same_age & close_k & same_prm & ok_by_rating
         mask.iloc[i] = False  # не матчим сами на себя
         mask = mask & ~already
@@ -577,40 +573,40 @@ def _pick_col(df: pd.DataFrame, candidates: set[str], fallback_idx: int | None =
 
 
 def main():
+    st.title("Disbanding Brazil")
 
-st.markdown("""
-### Legend
+    st.markdown(textwrap.dedent("""\
+    ### Legend
 
-**Which rows are included**
-- Status: **Active**
-- **Lesson number**: 4–31 (inclusive)
-- **Alter**: blank/empty/NaN or **0**
-- **Flag P** and **Flag Q**: **not TRUE**
-- **Students transferred 1 time** ≤ 2; **Students transferred 2+ times** ≤ 0
-- **Free slots** ≥ 1 (Capacity − Paid), when both **Capacity** & **Paid** exist
+    **Which rows are included**
+    - Status: **Active**
+    - **Lesson number**: 4–31 (inclusive)
+    - **Alter**: blank/empty/NaN or **0**
+    - **Flag P** and **Flag Q**: **not TRUE**
+    - **Students transferred 1 time** ≤ 2; **Students transferred 2+ times** ≤ 0
+    - **Free slots** ≥ 1 (Capacity − Paid), when both **Capacity** & **Paid** exist
 
-**Matches (strict)**
-- Same **Course** and same **Group age**
-- **Lesson number** within **±1**
-- Same **PRM** marker (both PRM or both not)
-- **Either** same local start time within **±120 minutes** **or** the same 3-letter suffix in **Group ID**
-- Rating pairing allowed:
-  - **Bad** / **New tutor (Bad)** → never
-  - **OK** / **New tutor (OK)** → not with **Amazing/Good/New tutor (Good)** and not with **New tutor**
-  - **New tutor** → not with **Amazing/Good/New tutor (Good)**
-  - **Amazing/Good/New tutor (Good)** → allowed with anyone
-- Excludes the current row itself
+    **Matches (strict)**
+    - Same **Course** and same **Group age**
+    - **Lesson number** within **±1**
+    - Same **PRM** marker (both PRM or both not)
+    - **Either** same local start time within **±120 minutes** **or** the same 3-letter suffix in **Group ID**
+    - Rating pairing allowed:
+      - **Bad** / **New tutor (Bad)** → never
+      - **OK** / **New tutor (OK)** → not with **Amazing/Good/New tutor (Good)** and not with **New tutor**
+      - **New tutor** → not with **Amazing/Good/New tutor (Good)**
+      - **Amazing/Good/New tutor (Good)** → allowed with anyone
+    - Excludes the current row itself
 
-**WideMatches (broad)**
-- Same **Course** and **Group age**
-- **Lesson number** within **±1**
-- Same **PRM**
-- Rating pairing allowed (same rules as above)
-- **No** time/suffix requirement
-- Looks **both directions** and **can include** rows already listed in **Matches**
-""")
-st.divider()
-
+    **WideMatches (broad)**
+    - Same **Course** and **Group age**
+    - **Lesson number** within **±1**
+    - Same **PRM**
+    - Rating pairing allowed (same rules as above)
+    - **No** time/suffix requirement
+    - Looks **both directions** and **can include** rows already listed in **Matches**
+    """))
+    st.divider()
 
     # --- Source (hidden, no UI) ---
     sheet_id = SHEET_ID
