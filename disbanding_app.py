@@ -714,7 +714,7 @@ def main():
 
     # --- Причесанный вывод в заданном порядке ---
     cols_all = list(dff.columns)
-    def col(idx): 
+    def col(idx):
         return cols_all[idx] if idx < len(cols_all) else None
     
     colA, colB, colC = col(0), col(1), col(2)
@@ -723,9 +723,9 @@ def main():
     colL, colN, colO = col(11), col(13), col(14)
     
     # найдём колонку рейтинга и поставим её сразу после Tutor ID
-    rating_colname = _find_rating_col(dff)  # например "Rating_BP" или "Rating"
+    rating_colname = _find_rating_col(dff)  # "Rating_BP" или "Rating"
     desired = [
-        colA, colB, colE, colO, rating_colname,  # <- Rating сразу после Tutor ID
+        colA, colB, colE, colO, rating_colname,  # Rating сразу после Tutor ID
         colF, colG, colI, colJ, colK, colC, colN, colL,
         "Matches_count", "Matches",
         "AltMatches_count", "AltMatches",
@@ -734,9 +734,11 @@ def main():
     display_cols = [c for c in desired if (c is not None and c in dff.columns)]
     curated = dff.loc[:, display_cols].copy()
     
-    # --- агрессивно нормализуем «пустоты» и убираем визуально пустые строки ---
+    # жёстко переименуем рейтинг
+    if rating_colname and rating_colname in curated.columns:
+        curated.rename(columns={rating_colname: "Rating"}, inplace=True)
     
-    # 1) приводим пустые строки/пробелы/строки 'nan' к NaN
+    # агрессивная нормализация пустот
     def _empty_to_na(x):
         if x is None or pd.isna(x):
             return pd.NA
@@ -745,29 +747,22 @@ def main():
     
     curated = curated.applymap(_empty_to_na)
     
-    # 2) колонки счётчиков/текста матчей
-    count_cols = [c for c in ["Matches_count", "AltMatches_count", "WideMatches_count"] if c in curated.columns]
-    text_match_cols = [c for c in ["Matches", "AltMatches", "WideMatches"] if c in curated.columns]
+    # выбросим визуально пустые строки (во всех видимых колонках NaN)
+    curated = curated.dropna(how="all")
     
-    # 3) считаем «что-то есть в данных»
-    #    (любая НЕпустая ячейка в «обычных» колонках ИЛИ есть текст матчей ИЛИ счётчики > 0)
-    key_cols = [c for c in curated.columns if c not in (count_cols + text_match_cols)]
-    has_any_key  = curated[key_cols].notna().any(axis=1) if key_cols else pd.Series(False, index=curated.index)
-    has_any_text = curated[text_match_cols].notna().any(axis=1) if text_match_cols else pd.Series(False, index=curated.index)
-    total_counts = sum(pd.to_numeric(curated[c], errors="coerce").fillna(0).astype(int) for c in count_cols) if count_cols else pd.Series(0, index=curated.index)
+    # --- динамическая высота таблицы, чтобы не было «пустых строк»-заполнителя ---
+    row_px = 36  # примерная высота строки
+    min_h, max_h = 140, 700
+    table_h = min(max_h, max(min_h, 36 + row_px * max(1, len(curated))))
     
-    keep_mask = has_any_key | has_any_text | (total_counts > 0)
-    
-    curated = curated[keep_mask].reset_index(drop=True)
-
-
-    st.dataframe(curated, use_container_width=True, height=700)
+    st.dataframe(curated, use_container_width=True, height=table_h)
     st.download_button(
         "⬇️ Download CSV (curated)",
         curated.to_csv(index=False).encode("utf-8"),
         file_name="curated_view.csv",
         mime="text/csv",
     )
+
 
     if st.button("Refresh"):
         load_sheet_df.clear()
