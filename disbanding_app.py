@@ -739,17 +739,36 @@ def main():
     if rating_colname and rating_colname in curated.columns:
         curated.rename(columns={rating_colname: "Rating"}, inplace=True)
     
-    # агрессивная нормализация пустот
-    def _empty_to_na(x):
-        if x is None or pd.isna(x):
+    # --- чистим невидимые символы и скрытые "пустоты", затем убираем пустые строки ---
+    def _to_na(v):
+        if v is None or pd.isna(v):
             return pd.NA
-        s = str(x).strip()
-        return pd.NA if (s == "" or s.lower() in {"nan", "none", "na"}) else x
+        if isinstance(v, str):
+            # убираем NBSP/zero-width и BOM
+            s = (v.replace("\u00A0", " ")
+                   .replace("\u200B", "")
+                   .replace("\u200C", "")
+                   .replace("\u200D", "")
+                   .replace("\uFEFF", "")
+                   .strip())
+            if s == "" or s.lower() in {"nan", "none", "null", "na"}:
+                return pd.NA
+            return s
+        return v
     
-    curated = curated.applymap(_empty_to_na)
+    curated = curated.applymap(_to_na)
     
-    # выбросим визуально пустые строки (во всех видимых колонках NaN)
-    curated = curated.dropna(how="all")
+    # если все видимые значения пустые — строку удаляем (ноль в счётчиках не считается «данными»)
+    count_cols = [c for c in ["Matches_count","AltMatches_count","WideMatches_count"] if c in curated.columns]
+    text_cols  = [c for c in ["Matches","AltMatches","WideMatches"] if c in curated.columns]
+    base_cols  = [c for c in curated.columns if c not in (count_cols + text_cols)]
+    
+    has_base   = curated[base_cols].notna().any(axis=1) if base_cols else False
+    has_text   = curated[text_cols].notna().any(axis=1) if text_cols else False
+    has_counts = (sum(pd.to_numeric(curated[c], errors="coerce").fillna(0).astype(int) for c in count_cols) > 0) if count_cols else False
+    
+    curated = curated[ has_base | has_text | has_counts ].reset_index(drop=True)
+
     
     # --- динамическая высота таблицы, чтобы не было «пустых строк»-заполнителя ---
     row_px = 36  # примерная высота строки
