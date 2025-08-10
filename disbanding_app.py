@@ -578,38 +578,38 @@ def _pick_col(df: pd.DataFrame, candidates: set[str], fallback_idx: int | None =
 
 def main():
 
-        st.markdown("""
-    ### Legend
-    
-    **Which rows are included**
-    - Status: **Active**
-    - **Lesson number**: 4–31 (inclusive)
-    - **Alter**: blank/empty/NaN or **0**
-    - **Flag P** and **Flag Q**: **not TRUE**
-    - **Students transferred 1 time** ≤ 2; **Students transferred 2+ times** ≤ 0
-    - **Free slots** ≥ 1 (Capacity − Paid), when both **Capacity** & **Paid** exist
-    
-    **Matches (strict)**
-    - Same **Course** and same **Group age**
-    - **Lesson number** within **±1**
-    - Same **PRM** marker (both PRM or both not)
-    - **Either** same local start time within **±120 minutes** **or** the same 3-letter suffix in **Group ID**
-    - Rating pairing allowed:
-      - **Bad** / **New tutor (Bad)** → never
-      - **OK** / **New tutor (OK)** → not with **Amazing/Good/New tutor (Good)** and not with **New tutor**
-      - **New tutor** → not with **Amazing/Good/New tutor (Good)**
-      - **Amazing/Good/New tutor (Good)** → allowed with anyone
-    - Excludes the current row itself
-    
-    **WideMatches (broad)**
-    - Same **Course** and **Group age**
-    - **Lesson number** within **±1**
-    - Same **PRM**
-    - Rating pairing allowed (same rules as above)
-    - **No** time/suffix requirement
-    - Looks **both directions** and **can include** rows already listed in **Matches**
-    """)
-    st.divider()
+st.markdown("""
+### Legend
+
+**Which rows are included**
+- Status: **Active**
+- **Lesson number**: 4–31 (inclusive)
+- **Alter**: blank/empty/NaN or **0**
+- **Flag P** and **Flag Q**: **not TRUE**
+- **Students transferred 1 time** ≤ 2; **Students transferred 2+ times** ≤ 0
+- **Free slots** ≥ 1 (Capacity − Paid), when both **Capacity** & **Paid** exist
+
+**Matches (strict)**
+- Same **Course** and same **Group age**
+- **Lesson number** within **±1**
+- Same **PRM** marker (both PRM or both not)
+- **Either** same local start time within **±120 minutes** **or** the same 3-letter suffix in **Group ID**
+- Rating pairing allowed:
+  - **Bad** / **New tutor (Bad)** → never
+  - **OK** / **New tutor (OK)** → not with **Amazing/Good/New tutor (Good)** and not with **New tutor**
+  - **New tutor** → not with **Amazing/Good/New tutor (Good)**
+  - **Amazing/Good/New tutor (Good)** → allowed with anyone
+- Excludes the current row itself
+
+**WideMatches (broad)**
+- Same **Course** and **Group age**
+- **Lesson number** within **±1**
+- Same **PRM**
+- Rating pairing allowed (same rules as above)
+- **No** time/suffix requirement
+- Looks **both directions** and **can include** rows already listed in **Matches**
+""")
+st.divider()
 
 
     # --- Source (hidden, no UI) ---
