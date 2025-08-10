@@ -363,19 +363,20 @@ def add_matches_combined(df: pd.DataFrame, new_col_name="Matches") -> pd.DataFra
     r_vals = df[rating_col].astype(str) if rating_col else pd.Series("", index=df.index)
     slots_col = _find_free_slots_col(df)
 
-    # Результаты как Series с тем же индексом — чтобы не ловить ValueError по длине
-    lines  = pd.Series("", index=df.index, dtype="object")
-    counts = pd.Series(0,  index=df.index, dtype="int64")
-
+    lines, counts = [], []
     for i in range(len(df)):
         same_course = (f_vals == f_vals.iloc[i])
         same_age    = (g_vals == g_vals.iloc[i])
 
-        base_k   = k_num.iloc[i]
-        close_k  = (k_num.sub(base_k).abs() <= 1) if not pd.isna(base_k) else pd.Series(False, index=df.index)
+        base_k = k_num.iloc[i]
+        close_k = pd.Series(False, index=df.index)
+        if not pd.isna(base_k):
+            close_k = (k_num.sub(base_k).abs() <= 1)
 
-        base_t     = i_mins.iloc[i]
-        close_time = (i_mins.sub(base_t).abs() <= 120) if not pd.isna(base_t) else pd.Series(False, index=df.index)
+        base_t = i_mins.iloc[i]
+        close_time = pd.Series(False, index=df.index)
+        if not pd.isna(base_t):
+            close_time = (i_mins.sub(base_t).abs() <= 120)
 
         same_suf = (suf3 == suf3.iloc[i])
         same_prm = (b_is_prm == b_is_prm.iloc[i])
@@ -387,7 +388,8 @@ def add_matches_combined(df: pd.DataFrame, new_col_name="Matches") -> pd.DataFra
         mask.iloc[i] = False
 
         if mask.any():
-            cols_take = [colB, colE, colF, colG, colK]
+            # Для вывода берём только B, E, K (+ Rating и Free slots)
+            cols_take = [colB, colE, colK]
             cols_take = [c for c in cols_take if c in df.columns]
             sub = df.loc[mask, cols_take].copy()
 
@@ -399,13 +401,12 @@ def add_matches_combined(df: pd.DataFrame, new_col_name="Matches") -> pd.DataFra
                 f"Tutor: {row[colE]}, "
                 f"Rating: {row['_rating']}, "
                 f"lesson: {row[colK]}, "
-                f"slots: {row['_slots']}, "
-                f"age: {row[colG]}, "
-                f"course: {row[colF]}"
+                f"slots: {row['_slots']}"
                 for _, row in sub.iterrows()
             ]
-            lines.iloc[i]  = "\n".join(lst)
-            counts.iloc[i] = len(lst)
+            lines.append("\n".join(lst)); counts.append(len(lst))
+        else:
+            lines.append(""); counts.append(0)
 
     out = df.copy()
     name = new_col_name
@@ -423,30 +424,29 @@ def add_wide_matches_column(df: pd.DataFrame, new_col_name="WideMatches", exclud
         return df
 
     colB, colE, colF, colG = df.columns[1], df.columns[4], df.columns[5], df.columns[6]
-    colK                   = df.columns[10]
+    colI, colK             = df.columns[8], df.columns[10]
     rating_col             = _find_rating_col(df)
 
-    f_vals  = df[colF].astype(str).str.strip()
-    g_vals  = df[colG].astype(str).str.strip()
-    b_vals  = df[colB].astype(str).fillna("").str.upper()
-    k_num   = pd.to_numeric(df[colK], errors="coerce")
+    f_vals = df[colF].astype(str).str.strip()
+    g_vals = df[colG].astype(str).str.strip()
+    b_vals = df[colB].astype(str).fillna("").str.upper()
+    k_num  = pd.to_numeric(df[colK], errors="coerce")
     b_is_prm = b_vals.str.contains("PRM", na=False)
-
     r_vals = df[rating_col].astype(str) if rating_col else pd.Series("", index=df.index)
     slots_col = _find_free_slots_col(df)
 
-    pos     = pd.Series(range(len(df)), index=df.index)
-    already = df[exclude_col].astype(str).str.strip().ne("") if exclude_col in df.columns else pd.Series(False, index=df.index)
+    pos = pd.Series(range(len(df)), index=df.index)
+    already = df[exclude_col].astype(str).str.strip().ne("")
 
-    lines  = pd.Series("", index=df.index, dtype="object")
-    counts = pd.Series(0,  index=df.index, dtype="int64")
-
+    lines, counts = [], []
     for i in range(len(df)):
         same_course = (f_vals == f_vals.iloc[i])
         same_age    = (g_vals == g_vals.iloc[i])
 
-        base_k  = k_num.iloc[i]
-        close_k = (k_num.sub(base_k).abs() <= 1) if not pd.isna(base_k) else pd.Series(False, index=df.index)
+        base_k = k_num.iloc[i]
+        close_k = pd.Series(False, index=df.index)
+        if not pd.isna(base_k):
+            close_k = (k_num.sub(base_k).abs() <= 1)
 
         same_prm = (b_is_prm == b_is_prm.iloc[i])
 
@@ -459,7 +459,7 @@ def add_wide_matches_column(df: pd.DataFrame, new_col_name="WideMatches", exclud
         mask = mask & ~already             # исключаем то, что уже в Matches
 
         if mask.any():
-            cols_take = [colB, colE, colF, colG, colK]
+            cols_take = [colB, colE, colK]
             cols_take = [c for c in cols_take if c in df.columns]
             sub = df.loc[mask, cols_take].copy()
 
@@ -471,13 +471,12 @@ def add_wide_matches_column(df: pd.DataFrame, new_col_name="WideMatches", exclud
                 f"Tutor: {row[colE]}, "
                 f"Rating: {row['_rating']}, "
                 f"lesson: {row[colK]}, "
-                f"slots: {row['_slots']}, "
-                f"age: {row[colG]}, "
-                f"course: {row[colF]}"
+                f"slots: {row['_slots']}"
                 for _, row in sub.iterrows()
             ]
-            lines.iloc[i]  = "\n".join(lst)
-            counts.iloc[i] = len(lst)
+            lines.append("\n".join(lst)); counts.append(len(lst))
+        else:
+            lines.append(""); counts.append(0)
 
     out = df.copy()
     name = new_col_name
