@@ -531,57 +531,6 @@ def add_wide_matches_column(df: pd.DataFrame,
     return out
 
 
-# ---- Безопасный числовой слайдер-диапазон ----
-def num_range_filter(df: pd.DataFrame, col: str, label: str, step=1, key: str | None=None) -> pd.DataFrame:
-    """Диапазон по числовому столбцу с защитой от NaN/вырожденных диапазонов."""
-    if not col or col not in df.columns:
-        return df
-    s = pd.to_numeric(df[col], errors="coerce")
-    s_valid = s.dropna()
-    if s_valid.empty:
-        st.caption(f"{label}: нет числовых значений для фильтра.")
-        return df
-
-    vmin = float(s_valid.min())
-    vmax = float(s_valid.max())
-
-    if not np.isfinite(vmin) or not np.isfinite(vmax) or vmin >= vmax:
-        # показываем disabled-слайдер, но не фильтруем
-        st.slider(
-            label,
-            min_value=float(vmin if np.isfinite(vmin) else 0.0),
-            max_value=float((vmin if np.isfinite(vmin) else 0.0) + 1.0),
-            value=(float(vmin if np.isfinite(vmin) else 0.0),
-                   float(vmin if np.isfinite(vmin) else 0.0)),
-            step=step,
-            key=key or f"{label}_disabled",
-            disabled=True
-        )
-        return df
-
-    # integer-слайдер если подходит
-    if step == 1 and vmin.is_integer() and vmax.is_integer():
-        lo, hi = st.slider(
-            label,
-            min_value=int(vmin),
-            max_value=int(vmax),
-            value=(int(vmin), int(vmax)),
-            step=1,
-            key=key or f"{label}_int"
-        )
-    else:
-        lo, hi = st.slider(
-            label,
-            min_value=vmin,
-            max_value=vmax,
-            value=(vmin, vmax),
-            step=step,
-            key=key or f"{label}_float"
-        )
-
-    return df[(s >= lo) & (s <= hi)]
-
-
 # ---- Нормализатор имён и выбор колонок по синонимам ----
 def _norm_name(s: str) -> str:
     return re.sub(r"\s+", " ", str(s).strip().lower())
@@ -647,7 +596,7 @@ def main():
     c1.caption(f"Rows total: {len(df)}")
     c2.success(f"Filtered rows: {len(filtered)}")
 
-    # --- Sidebar Filters ---
+    # --- Sidebar Filters (multiselect-only, без слайдеров по тексту) ---
     dff = filtered.copy()
 
     # маппим нужные поля по именам, с fallback на позиции A:R (0-based)
@@ -671,43 +620,45 @@ def main():
     col_w_text  = "WideMatches"       if "WideMatches"       in dff.columns else None
     col_w_cnt   = "WideMatches_count" if "WideMatches_count" in dff.columns else None
 
+    def _ms_options(df_, col):
+        if not col or col not in df_.columns:
+            return []
+        return sorted(df_[col].dropna().astype(str).unique())
+
+    def _apply_ms(df_, col, sel):
+        if not col or not sel:
+            return df_
+        return df_[df_[col].astype(str).isin(sel)]
+
     with st.sidebar.expander("Filters", expanded=True):
         # текстовые мультиселекты
-        def _multi(df, label, col):
-            if not col: return df
-            vals = sorted(df[col].dropna().astype(str).unique())
-            sel = st.multiselect(label, vals, key=f"ms_{label}")
-            if sel:
-                df = df[df[col].astype(str).isin(sel)]
-            return df
+        dff = _apply_ms(dff, col_group,      st.multiselect("Group",      _ms_options(dff, col_group)))
+        dff = _apply_ms(dff, col_tutor,      st.multiselect("Tutor",      _ms_options(dff, col_tutor)))
+        dff = _apply_ms(dff, col_tutor_id,   st.multiselect("Tutor ID",   _ms_options(dff, col_tutor_id)))
+        dff = _apply_ms(dff, col_course,     st.multiselect("Course",     _ms_options(dff, col_course)))
+        dff = _apply_ms(dff, col_group_age,  st.multiselect("Group age",  _ms_options(dff, col_group_age)))
+        dff = _apply_ms(dff, col_local_time, st.multiselect("Local time", _ms_options(dff, col_local_time)))
+        dff = _apply_ms(dff, col_module,     st.multiselect("Module",     _ms_options(dff, col_module)))
 
-        dff = _multi(dff, "Group",      col_group)
-        dff = _multi(dff, "Tutor",      col_tutor)
-        dff = _multi(dff, "Tutor ID",   col_tutor_id)
-        dff = _multi(dff, "Course",     col_course)
-        dff = _multi(dff, "Group age",  col_group_age)
-        dff = _multi(dff, "Local time", col_local_time)
-        dff = _multi(dff, "Module",     col_module)
+        # тоже как текст — никаких слайдеров
+        dff = _apply_ms(dff, col_lesson_num, st.multiselect("Lesson number",             _ms_options(dff, col_lesson_num)))
+        dff = _apply_ms(dff, col_capacity,   st.multiselect("Capacity",                  _ms_options(dff, col_capacity)))
+        dff = _apply_ms(dff, col_paid,       st.multiselect("Paid students",             _ms_options(dff, col_paid)))
+        dff = _apply_ms(dff, col_transfer1,  st.multiselect("Students transferred 1 time", _ms_options(dff, col_transfer1)))
 
-        # числовые диапазоны (безопасные)
-        dff = num_range_filter(dff, col_lesson_num, "Lesson number",          step=1, key="rng_lesson")
-        dff = num_range_filter(dff, col_capacity,   "Capacity",               step=1, key="rng_cap")
-        dff = num_range_filter(dff, col_paid,       "Paid students",          step=1, key="rng_paid")
-        dff = num_range_filter(dff, col_transfer1,  "Students transferred 1 time", step=1, key="rng_tr1")
+        # пороги по количеству матчей
+        if col_m_cnt: 
+            min_m = st.number_input("Min Matches",      min_value=0, value=0, step=1)
+            dff = dff[pd.to_numeric(dff[col_m_cnt], errors="coerce").fillna(0).astype(int) >= min_m]
+        if col_a_cnt:
+            min_a = st.number_input("Min Alt matches",  min_value=0, value=0, step=1)
+            dff = dff[pd.to_numeric(dff[col_a_cnt], errors="coerce").fillna(0).astype(int) >= min_a]
+        if col_w_cnt:
+            min_w = st.number_input("Min Wide matches", min_value=0, value=0, step=1)
+            dff = dff[pd.to_numeric(dff[col_w_cnt], errors="coerce").fillna(0).astype(int) >= min_w]
 
-        # фильтры по matches
-        def _count_slider(df, label, col_cnt, key):
-            if not col_cnt: return df
-            s = pd.to_numeric(df[col_cnt], errors="coerce").fillna(0).astype(int)
-            mx = int(s.max()) if len(s) else 0
-            v  = st.slider(label, 0, max(1, mx), 0, key=key)
-            return df[s >= v]
-
-        dff = _count_slider(dff, "Min Matches",      col_m_cnt, key="cnt_m")
-        dff = _count_slider(dff, "Min Alt matches",  col_a_cnt, key="cnt_a")
-        dff = _count_slider(dff, "Min Wide matches", col_w_cnt, key="cnt_w")
-
-        q = st.text_input("Search in matches text", key="q_match")
+        # поиск по тексту матчей
+        q = st.text_input("Search in matches text")
         if q:
             qrx = re.escape(q)
             mask = pd.Series(False, index=dff.index)
@@ -716,12 +667,13 @@ def main():
                     mask |= dff[col].astype(str).str.contains(qrx, case=False, na=False)
             dff = dff[mask]
 
-        only_any = st.checkbox("Only rows with any matches", value=False, key="only_any")
+        # оставить только строки, где есть любые матчи
+        only_any = st.checkbox("Only rows with any matches", value=False)
         if only_any:
             cnt = pd.Series(0, index=dff.index)
             for col in [col_m_cnt, col_a_cnt, col_w_cnt]:
                 if col:
-                    cnt = cnt.add(pd.to_numeric(dff[col], errors="coerce").fillna(0), fill_value=0)
+                    cnt = cnt.add(pd.to_numeric(dff[col], errors="coerce").fillna(0).astype(int), fill_value=0)
             dff = dff[cnt > 0]
 
     # --- Причесанный вывод в заданном порядке ---
