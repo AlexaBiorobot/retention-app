@@ -630,7 +630,6 @@ def main():
 
     c1, c2 = st.columns(2)
     c1.caption(f"Rows total: {len(df)}")
-    c2.success(f"Filtered rows: {len(filtered)}")
 
     # --- Sidebar Filters (multiselect-only, без слайдеров по тексту) ---
     dff = filtered.copy()
