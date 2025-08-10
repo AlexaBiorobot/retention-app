@@ -770,12 +770,18 @@ def main():
     curated = curated[ has_base | has_text | has_counts ].reset_index(drop=True)
 
     
-    # --- динамическая высота таблицы, чтобы не было «пустых строк»-заполнителя ---
-    row_px = 36  # примерная высота строки
-    min_h, max_h = 140, 700
-    table_h = min(max_h, max(min_h, 36 + row_px * max(1, len(curated))))
+    # --- без «висячих» пустых строк ---
+    nrows = len(curated)
     
-    st.dataframe(curated, use_container_width=True, height=table_h)
+    if nrows <= 25:
+        # Для небольших выборок таблица сама подгоняет высоту без пустых рядов
+        st.table(curated)
+    else:
+        # Точная высота под nrows строк
+        ROW, HEADER, PADDING = 34, 39, 8  # при необходимости подправь на 33/38/6
+        table_h = HEADER + ROW * nrows + PADDING
+        st.dataframe(curated, use_container_width=True, height=table_h)
+
     st.download_button(
         "⬇️ Download CSV (curated)",
         curated.to_csv(index=False).encode("utf-8"),
