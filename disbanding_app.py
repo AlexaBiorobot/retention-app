@@ -363,20 +363,19 @@ def add_matches_combined(df: pd.DataFrame, new_col_name="Matches") -> pd.DataFra
     r_vals = df[rating_col].astype(str) if rating_col else pd.Series("", index=df.index)
     slots_col = _find_free_slots_col(df)
 
-    lines, counts = [], []
+    # Результаты как Series с тем же индексом — чтобы не ловить ValueError по длине
+    lines  = pd.Series("", index=df.index, dtype="object")
+    counts = pd.Series(0,  index=df.index, dtype="int64")
+
     for i in range(len(df)):
         same_course = (f_vals == f_vals.iloc[i])
         same_age    = (g_vals == g_vals.iloc[i])
 
-        base_k = k_num.iloc[i]
-        close_k = pd.Series(False, index=df.index)
-        if not pd.isna(base_k):
-            close_k = (k_num.sub(base_k).abs() <= 1)
+        base_k   = k_num.iloc[i]
+        close_k  = (k_num.sub(base_k).abs() <= 1) if not pd.isna(base_k) else pd.Series(False, index=df.index)
 
-        base_t = i_mins.iloc[i]
-        close_time = pd.Series(False, index=df.index)
-        if not pd.isna(base_t):
-            close_time = (i_mins.sub(base_t).abs() <= 120)
+        base_t     = i_mins.iloc[i]
+        close_time = (i_mins.sub(base_t).abs() <= 120) if not pd.isna(base_t) else pd.Series(False, index=df.index)
 
         same_suf = (suf3 == suf3.iloc[i])
         same_prm = (b_is_prm == b_is_prm.iloc[i])
@@ -392,7 +391,6 @@ def add_matches_combined(df: pd.DataFrame, new_col_name="Matches") -> pd.DataFra
             cols_take = [c for c in cols_take if c in df.columns]
             sub = df.loc[mask, cols_take].copy()
 
-            # добавим рейтинг и свободные слоты
             sub["_rating"] = r_vals.loc[sub.index].values
             sub["_slots"]  = df.loc[sub.index, slots_col].values if slots_col else ""
 
@@ -406,7 +404,8 @@ def add_matches_combined(df: pd.DataFrame, new_col_name="Matches") -> pd.DataFra
                 f"course: {row[colF]}"
                 for _, row in sub.iterrows()
             ]
-            lines.append("\n".join(lst)); counts.append(len(lst))
+            lines.iloc[i]  = "\n".join(lst)
+            counts.iloc[i] = len(lst)
 
     out = df.copy()
     name = new_col_name
@@ -424,29 +423,30 @@ def add_wide_matches_column(df: pd.DataFrame, new_col_name="WideMatches", exclud
         return df
 
     colB, colE, colF, colG = df.columns[1], df.columns[4], df.columns[5], df.columns[6]
-    colI, colK             = df.columns[8], df.columns[10]
+    colK                   = df.columns[10]
     rating_col             = _find_rating_col(df)
 
-    f_vals = df[colF].astype(str).str.strip()
-    g_vals = df[colG].astype(str).str.strip()
-    b_vals = df[colB].astype(str).fillna("").str.upper()
-    k_num  = pd.to_numeric(df[colK], errors="coerce")
+    f_vals  = df[colF].astype(str).str.strip()
+    g_vals  = df[colG].astype(str).str.strip()
+    b_vals  = df[colB].astype(str).fillna("").str.upper()
+    k_num   = pd.to_numeric(df[colK], errors="coerce")
     b_is_prm = b_vals.str.contains("PRM", na=False)
+
     r_vals = df[rating_col].astype(str) if rating_col else pd.Series("", index=df.index)
     slots_col = _find_free_slots_col(df)
 
-    pos = pd.Series(range(len(df)), index=df.index)
-    already = df[exclude_col].astype(str).str.strip().ne("")
+    pos     = pd.Series(range(len(df)), index=df.index)
+    already = df[exclude_col].astype(str).str.strip().ne("") if exclude_col in df.columns else pd.Series(False, index=df.index)
 
-    lines, counts = [], []
+    lines  = pd.Series("", index=df.index, dtype="object")
+    counts = pd.Series(0,  index=df.index, dtype="int64")
+
     for i in range(len(df)):
         same_course = (f_vals == f_vals.iloc[i])
         same_age    = (g_vals == g_vals.iloc[i])
 
-        base_k = k_num.iloc[i]
-        close_k = pd.Series(False, index=df.index)
-        if not pd.isna(base_k):
-            close_k = (k_num.sub(base_k).abs() <= 1)
+        base_k  = k_num.iloc[i]
+        close_k = (k_num.sub(base_k).abs() <= 1) if not pd.isna(base_k) else pd.Series(False, index=df.index)
 
         same_prm = (b_is_prm == b_is_prm.iloc[i])
 
@@ -476,7 +476,8 @@ def add_wide_matches_column(df: pd.DataFrame, new_col_name="WideMatches", exclud
                 f"course: {row[colF]}"
                 for _, row in sub.iterrows()
             ]
-            lines.append("\n".join(lst)); counts.append(len(lst))
+            lines.iloc[i]  = "\n".join(lst)
+            counts.iloc[i] = len(lst)
 
     out = df.copy()
     name = new_col_name
@@ -651,7 +652,6 @@ def main():
     # дополнительная страховка: если всё же где-то повторилось имя — дропаем дубликаты
     curated = curated.loc[:, ~curated.columns.duplicated()]
 
-    
     # жёстко переименуем рейтинг
     if rating_colname and rating_colname in curated.columns:
         curated.rename(columns={rating_colname: "Rating"}, inplace=True)
