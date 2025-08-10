@@ -483,11 +483,16 @@ def add_matches_combined(df: pd.DataFrame, new_col_name="Matches") -> pd.DataFra
 
 # --- WideMatches: «широкая сетка» без времени/суффикса, только вперед и не дублируем Matches ---
 def add_wide_matches_column(df: pd.DataFrame, new_col_name="WideMatches", exclude_col="Matches") -> pd.DataFrame:
+    """
+    WideMatches: без времени и без суффикса, теперь смотрим и вверх, и вниз;
+    не исключаем те строки, у которых уже есть Matches.
+    Условия: same course & same age & |K-K'| <= 1 & одинаковый PRM-статус & рейтинги совместимы.
+    """
     if df.empty:
         return df
 
     colB, colE, colF, colG = df.columns[1], df.columns[4], df.columns[5], df.columns[6]
-    colI, colK             = df.columns[8], df.columns[10]
+    colI, colK             = df.columns[8], df.columns[10]  # colI не используем, оставлен для совместимости
     rating_col             = _find_rating_col(df)
 
     f_vals = df[colF].astype(str).str.strip()
@@ -495,11 +500,14 @@ def add_wide_matches_column(df: pd.DataFrame, new_col_name="WideMatches", exclud
     b_vals = df[colB].astype(str).fillna("").str.upper()
     k_num  = pd.to_numeric(df[colK], errors="coerce")
     b_is_prm = b_vals.str.contains("PRM", na=False)
+
     r_vals = df[rating_col].astype(str) if rating_col else pd.Series("", index=df.index)
     slots_col = _find_free_slots_col(df)
 
-    pos = pd.Series(range(len(df)), index=df.index)
-    already = df[exclude_col].astype(str).str.strip().ne("")
+    # Раньше мы исключали те, у кого уже есть Matches; теперь — нет.
+    # already = df[exclude_col].astype(str).str.strip().ne("") if exclude_col in df.columns else pd.Series(False, index=df.index)
+    # Теперь просто:
+    already = pd.Series(False, index=df.index)
 
     lines, counts = [], []
     for i in range(len(df)):
@@ -507,8 +515,9 @@ def add_wide_matches_column(df: pd.DataFrame, new_col_name="WideMatches", exclud
         same_age    = (g_vals == g_vals.iloc[i])
 
         base_k = k_num.iloc[i]
-        close_k = pd.Series(False, index=df.index)
-        if not pd.isna(base_k):
+        if pd.isna(base_k):
+            close_k = pd.Series(False, index=df.index)
+        else:
             close_k = (k_num.sub(base_k).abs() <= 1)
 
         same_prm = (b_is_prm == b_is_prm.iloc[i])
@@ -516,10 +525,10 @@ def add_wide_matches_column(df: pd.DataFrame, new_col_name="WideMatches", exclud
         my_r = r_vals.iloc[i]
         ok_by_rating = r_vals.apply(lambda rr: can_pair(my_r, rr))
 
+        # Больше не ограничиваемся pos > pos[i] и не вычёркиваем already
         mask = same_course & same_age & close_k & same_prm & ok_by_rating
-        mask.iloc[i] = False
-        mask = mask & (pos > pos.iloc[i])  # пары только «вперёд»
-        mask = mask & ~already             # исключаем то, что уже в Matches
+        mask.iloc[i] = False  # не матчим сами на себя
+        mask = mask & ~already
 
         if mask.any():
             cols_take = [colB, colE, colK]
@@ -543,9 +552,11 @@ def add_wide_matches_column(df: pd.DataFrame, new_col_name="WideMatches", exclud
 
     out = df.copy()
     name = new_col_name
-    while name in out.columns: name += "_x"
+    while name in out.columns: 
+        name += "_x"
     cnt = f"{new_col_name}_count"
-    while cnt in out.columns: cnt += "_x"
+    while cnt in out.columns: 
+        cnt += "_x"
     out[name] = lines
     out[cnt]  = counts
     return out
