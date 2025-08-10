@@ -7,6 +7,7 @@ import streamlit as st
 import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+from gspread.exceptions import SpreadsheetNotFound, WorksheetNotFound
 
 # ==== Page / UX ====  (ДОЛЖНО быть самым первым вызовом Streamlit)
 st.set_page_config(
@@ -19,7 +20,8 @@ st.set_page_config(
 DEFAULT_SHEET_ID = "1Jbb4p1cZCo67ZRiW5cmFUq-c9ijo5VMH_hFFMVYeJk4"
 DEFAULT_WS_NAME  = "data"
 
-EXT_GROUPS_SS_ID = "1u_NwMt3CVVgozm04JGmccyTsNZnЗGiHjG5y0Ko3YdaY".replace("З","z")  # safety
+# правильный ID без replace
+EXT_GROUPS_SS_ID = "1u_NwMt3CVVgozm04JGmccyTsNZnZGiHjG5y0Ko3YdaY"
 EXT_GROUPS_WS    = "Groups & Teachers"
 
 RATING_SS_ID = "1HItT2-PtZWoldYKL210hCQOLg3rh6U1Qj6NWkBjDjzk"
@@ -109,9 +111,20 @@ def adjust_local_time_minus_3(df: pd.DataFrame) -> pd.DataFrame:
 
 @st.cache_data(show_spinner=False, ttl=300)
 def load_group_age_map(sheet_id: str = EXT_GROUPS_SS_ID, worksheet_name: str = EXT_GROUPS_WS) -> dict:
-    client = _authorize_client()
-    ws = client.open_by_key(sheet_id).worksheet(worksheet_name)
-    vals = ws.get("A:E")
+    try:
+        client = _authorize_client()
+        sh = client.open_by_key(sheet_id)
+        ws = sh.worksheet(worksheet_name)
+        vals = ws.get("A:E")
+    except SpreadsheetNotFound:
+        st.warning("Не могу открыть таблицу EXT_GROUPS_SS_ID. Проверь ID и доступ сервисного аккаунта.")
+        return {}
+    except WorksheetNotFound:
+        st.warning(f"Не найден лист '{worksheet_name}' в EXT_GROUPS_SS_ID.")
+        return {}
+    except Exception as e:
+        st.warning(f"Ошибка при чтении EXT_GROUPS_SS_ID: {e}")
+        return {}
     if not vals or len(vals) < 2:
         return {}
     rows = vals[1:]
@@ -125,39 +138,25 @@ def load_group_age_map(sheet_id: str = EXT_GROUPS_SS_ID, worksheet_name: str = E
     return mapping
 
 
-def replace_group_age_from_map(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
-    if df.empty or not mapping:
-        return df.copy()
-    dff = df.copy()
-    colB = None
-    for c in dff.columns:
-        if str(c).strip().lower().replace("_", " ") in ("b","group id","group","group title","group_name","group name"):
-            colB = c; break
-    if colB is None:
-        colB = dff.columns[1] if len(dff.columns) >= 2 else None
-    colG = None
-    for c in dff.columns:
-        if str(c).strip().lower().replace("_", " ") == "group age":
-            colG = c; break
-    if colG is None:
-        colG = dff.columns[6] if len(dff.columns) >= 7 else None
-    if colB is None or colG is None:
-        return dff
-    keys = dff[colB].astype(str).str.strip()
-    new_vals = keys.map(lambda k: mapping.get(k, pd.NA))
-    dff[colG] = new_vals.where(new_vals.notna() & (new_vals.astype(str).str.strip() != ""), dff[colG])
-    return dff
-
-
 @st.cache_data(show_spinner=False, ttl=300)
 def load_rating_bp_map(sheet_id: str = RATING_SS_ID, worksheet_name: str = RATING_WS) -> dict:
-    client = _authorize_client()
-    ws = client.open_by_key(sheet_id).worksheet(worksheet_name)
-    vals = ws.get(
-        "A:BP",
-        value_render_option="UNFORMATTED_VALUE",
-        date_time_render_option="FORMATTED_STRING",
-    )
+    try:
+        client = _authorize_client()
+        ws = client.open_by_key(sheet_id).worksheet(worksheet_name)
+        vals = ws.get(
+            "A:BP",
+            value_render_option="UNFORMATTED_VALUE",
+            date_time_render_option="FORMATTED_STRING",
+        )
+    except SpreadsheetNotFound:
+        st.warning("Не могу открыть таблицу RATING_SS_ID. Проверь ID и доступ сервисного аккаунта.")
+        return {}
+    except WorksheetNotFound:
+        st.warning(f"Не найден лист '{worksheet_name}' в RATING_SS_ID.")
+        return {}
+    except Exception as e:
+        st.warning(f"Ошибка при чтении RATING_SS_ID: {e}")
+        return {}
     if not vals or len(vals) < 2:
         return {}
     mapping = {}
