@@ -707,23 +707,34 @@ def main():
     c1.caption(f"Rows total: {len(df)}")
     c2.success(f"Filtered rows: {len(filtered)}")
 
-    # --- Только exploded view: показывать ВСЕ строки (в т.ч. без совпадений) ---
+    # --- Exploded view: показываем все строки (в т.ч. без совпадений),
+    #     и выносим матчи/альтернативы в начало таблицы
     matches_col = "Matches"
     
     if matches_col in filtered.columns:
         long = filtered.copy()
         long[matches_col] = long[matches_col].fillna("").astype(str)
     
-        # если матчей нет, кладём маркер "—", чтобы строка не потерялась
+        # Если матчей нет — кладём маркер "—", чтобы строка не потерялась
         long["Match"] = long[matches_col].apply(
             lambda s: [x for x in s.split("\n") if x.strip()] or ["—"]
         )
     
+        # Каждую строку-матч — в отдельную запись
         long = long.explode("Match", ignore_index=True)
     
-        # Колонки: все исходные (без Matches) + колонка Match в конце
-        cols = [c for c in filtered.columns if c != matches_col] + ["Match"]
-        long = long[cols]
+        # Вынесем важные колонки вперёд (если они есть)
+        front = [c for c in [
+            "Match",                # exploded список матчей
+            "Matches_count",        # сколько обычных матчей
+            "AltMatches_count", "AltMatches",
+            "WideMatches_count", "WideMatches"
+        ] if c in long.columns]
+    
+        # Остальные колонки (кроме исходного "Matches", который мы скрываем)
+        rest = [c for c in long.columns if c not in front + [matches_col]]
+    
+        long = long[front + rest]
     
         st.dataframe(long, use_container_width=True, height=700)
     
@@ -735,7 +746,6 @@ def main():
         )
     else:
         st.dataframe(filtered, use_container_width=True, height=700)
-
 
 
     # --- Обновить (сброс кеша) ---
