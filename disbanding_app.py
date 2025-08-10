@@ -185,7 +185,9 @@ def add_rating_bp_by_O(df: pd.DataFrame, mapping: dict, new_col_name: str = "Rat
 
 
 def filter_df(df: pd.DataFrame) -> pd.DataFrame:
-    """Базовые фильтры + дополнительный: оставляем только строки, где (Capacity - Paid) >= 1."""
+    """Базовые фильтры + дополнительный: оставляем только строки, где (Capacity - Paid) >= 1.
+       По R берём, если пусто/NaN/0/"0".
+    """
     if df.empty:
         return df
     if len(df.columns) < 18:
@@ -196,19 +198,18 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     colL, colM = df.columns[11], df.columns[12]
     colP, colQ, colR = df.columns[15], df.columns[16], df.columns[17]
 
+    # Базовые поля
     d_active = df[colD].astype(str).str.strip().str.lower() == "active"
 
     k_num = pd.to_numeric(df[colK], errors="coerce")
-    k_ok = k_num.notna() & (k_num > 3) & (k_num < 32)
+    k_ok  = k_num.notna() & (k_num > 3) & (k_num < 32)
 
-    # R: берём, если пусто / NaN / 0 (числом) / "0" (строкой)
+    # R: ок, если пусто/NaN/0/"0"
     r_str = df[colR].astype(str).str.strip().str.lower()
     r_num = pd.to_numeric(df[colR], errors="coerce")
     r_ok  = df[colR].isna() | (r_str == "") | (r_str == "0") | (r_num == 0)
-    
-    mask = d_active & k_ok & r_ok & ~p_true & ~q_true & ~exclude_m & ~exclude_l
 
-
+    # P/Q (флаги), L/M (исключения)
     p_true = (df[colP] == True) | (df[colP].astype(str).str.strip().str.lower() == "true")
     q_true = (df[colQ] == True) | (df[colQ].astype(str).str.strip().str.lower() == "true")
 
@@ -218,19 +219,24 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     exclude_m = (m_num > 0)
     exclude_l = (l_num > 2)
 
-    mask = d_active & k_ok & r_blank & ~p_true & ~q_true & ~exclude_m & ~exclude_l
+    # Итоговая маска (без r_blank и без преждевременных ссылок)
+    mask = d_active & k_ok & r_ok & ~p_true & ~q_true & ~exclude_m & ~exclude_l
 
-    # --- ДОП. ФИЛЬТР: оставляем только где есть свободные места (Capacity - Paid >= 1) ---
+    # --- ДОП. ФИЛЬТР: есть свободные места (Capacity - Paid >= 1) ---
     def _norm(s: str) -> str:
         return str(s).strip().lower().replace("_", " ").replace("-", " ")
+
     paid_aliases = {"paid students", "paid student", "paid"}
     cap_aliases  = {"capacity", "cap"}
     colPaid = colCap = None
     for c in df.columns:
         n = _norm(c)
-        if (colPaid is None) and (n in paid_aliases): colPaid = c
-        if (colCap  is None) and (n in cap_aliases):  colCap  = c
-        if colPaid is not None and colCap is not None: break
+        if colPaid is None and n in paid_aliases:
+            colPaid = c
+        if colCap  is None and n in cap_aliases:
+            colCap  = c
+        if colPaid is not None and colCap is not None:
+            break
 
     free_slots = None
     if colPaid is not None and colCap is not None:
@@ -243,7 +249,7 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     out = df.loc[mask].copy()
     out[colK] = k_num.loc[out.index]
 
-    # добавим колонку Free slots, если смогли найти Paid/Capacity
+    # Добавим колонку Free slots (если нашли Paid/Capacity)
     if (colPaid is not None) and (colCap is not None) and (free_slots is not None):
         out["Free slots"] = free_slots.loc[out.index]
 
