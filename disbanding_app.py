@@ -612,7 +612,16 @@ def main():
         "WideMatches_count", "WideMatches",
     ]
     display_cols = [c for c in desired if (c is not None and c in dff.columns)]
+    
+    # убираем дубликаты имён, сохраняя порядок
+    seen = set()
+    display_cols = [c for c in display_cols if not (c in seen or seen.add(c))]
+    
     curated = dff.loc[:, display_cols].copy()
+    
+    # дополнительная страховка: если всё же где-то повторилось имя — дропаем дубликаты
+    curated = curated.loc[:, ~curated.columns.duplicated()]
+
     
     # жёстко переименуем рейтинг
     if rating_colname and rating_colname in curated.columns:
