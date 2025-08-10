@@ -11,7 +11,7 @@ from gspread.exceptions import SpreadsheetNotFound, WorksheetNotFound
 
 # ==== Page / UX ====  (ДОЛЖНО быть самым первым вызовом Streamlit)
 st.set_page_config(
-    page_title="Disbanding | Initial Export",
+    page_title="Disbanding Brazil",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -577,7 +577,7 @@ def _pick_col(df: pd.DataFrame, candidates: set[str], fallback_idx: int | None =
 
 
 def main():
-    st.title("Initial export (A:R, D='active', K < 32, R empty/0, P/Q != TRUE, Free slots >= 1)")
+    st.title("Disbanding Brazil")
 
     # --- Source (hidden, no UI) ---
     sheet_id = SHEET_ID
