@@ -483,8 +483,8 @@ def add_matches_combined(df: pd.DataFrame, new_col_name="Matches") -> pd.DataFra
 # --- WideMatches: без времени/суффикса, смотрим и вверх, и вниз; не исключаем тех, у кого уже есть Matches ---
 def add_wide_matches_column(df: pd.DataFrame, new_col_name="WideMatches", exclude_col="Matches") -> pd.DataFrame:
     """
-    WideMatches: без времени и без суффикса, теперь смотрим и вверх, и вниз;
-    не исключаем те строки, у которых уже есть Matches.
+    WideMatches: без времени и без суффикса, смотрим и вверх, и вниз.
+    НЕ включаем те кандидаты, которые уже присутствуют в Matches этой же строки.
     Условия: same course & same age & |K-K'| <= 1 & одинаковый PRM-статус & рейтинги совместимы.
     """
     if df.empty:
@@ -503,9 +503,6 @@ def add_wide_matches_column(df: pd.DataFrame, new_col_name="WideMatches", exclud
     r_vals = df[rating_col].astype(str) if rating_col else pd.Series("", index=df.index)
     slots_col = _find_free_slots_col(df)
 
-    # Теперь не исключаем строки, у которых уже есть Matches
-    already = pd.Series(False, index=df.index)
-
     lines, counts = [], []
     for i in range(len(df)):
         same_course = (f_vals == f_vals.iloc[i])
@@ -522,9 +519,23 @@ def add_wide_matches_column(df: pd.DataFrame, new_col_name="WideMatches", exclud
         my_r = r_vals.iloc[i]
         ok_by_rating = r_vals.apply(lambda rr: can_pair(my_r, rr))
 
+        # Базовая широкая маска
         mask = same_course & same_age & close_k & same_prm & ok_by_rating
         mask.iloc[i] = False  # не матчим сами на себя
-        mask = mask & ~already
+
+        # --- НОВОЕ: исключаем то, что уже есть в Matches этой строки ---
+        if exclude_col in df.columns:
+            ex_text = df.iloc[i][exclude_col]
+            ex_set = set()
+            if pd.notna(ex_text):
+                for line in str(ex_text).splitlines():
+                    # строки вида: "- <GroupID>, Tutor: ..., Rating: ..., lesson: ..., slots: ..."
+                    m = re.match(r"^\s*-\s*(.*?),", line)
+                    if m:
+                        ex_set.add(m.group(1).strip())
+            if ex_set:
+                mask = mask & ~df[colB].astype(str).isin(ex_set)
+        # --- конец нового блока ---
 
         if mask.any():
             cols_take = [colB, colE, colK]
@@ -548,10 +559,10 @@ def add_wide_matches_column(df: pd.DataFrame, new_col_name="WideMatches", exclud
 
     out = df.copy()
     name = new_col_name
-    while name in out.columns: 
+    while name in out.columns:
         name += "_x"
     cnt = f"{new_col_name}_count"
-    while cnt in out.columns: 
+    while cnt in out.columns:
         cnt += "_x"
     out[name] = lines
     out[cnt]  = counts
@@ -603,8 +614,7 @@ def main():
     - **Lesson number** within **±1**
     - Same **PRM**
     - Rating pairing allowed (same rules as above)
-    - **No** time/suffix requirement
-    - Looks **both directions** and **can include** rows already listed in **Matches**
+    - **No** time/day requirement
     """))
     st.divider()
 
