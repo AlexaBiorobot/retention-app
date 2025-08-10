@@ -138,6 +138,48 @@ def load_group_age_map(sheet_id: str = EXT_GROUPS_SS_ID, worksheet_name: str = E
     return mapping
 
 
+# >>> ВОТ ЭТА ФУНКЦИЯ БЫЛА ОТСУТСТВУЮЩЕЙ <<<
+def replace_group_age_from_map(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
+    """Подставляем Group age из внешней карты по колонке B (Group/ID/Title).
+       Если в mapping нет значения — оставляем исходное.
+    """
+    if df.empty or not mapping:
+        return df.copy()
+
+    dff = df.copy()
+
+    # ищем колонку B (group id/title) по синонимам
+    colB = None
+    for c in dff.columns:
+        if str(c).strip().lower().replace("_", " ") in (
+            "b", "group id", "group", "group title", "group_name", "group name"
+        ):
+            colB = c
+            break
+    if colB is None:
+        colB = dff.columns[1] if len(dff.columns) >= 2 else None
+
+    # ищем колонку Group age
+    colG = None
+    for c in dff.columns:
+        if str(c).strip().lower().replace("_", " ") == "group age":
+            colG = c
+            break
+    if colG is None:
+        colG = dff.columns[6] if len(dff.columns) >= 7 else None
+
+    if colB is None or colG is None:
+        return dff
+
+    keys = dff[colB].astype(str).str.strip()
+    new_vals = keys.map(lambda k: mapping.get(k, pd.NA))
+
+    # подставляем только непустые значения из mapping
+    dff[colG] = new_vals.where(new_vals.notna() & (new_vals.astype(str).str.strip() != ""), dff[colG])
+    return dff
+# <<< КОНЕЦ ДОБАВЛЕННОГО БЛОКА >>>
+
+
 @st.cache_data(show_spinner=False, ttl=300)
 def load_rating_bp_map(sheet_id: str = RATING_SS_ID, worksheet_name: str = RATING_WS) -> dict:
     try:
