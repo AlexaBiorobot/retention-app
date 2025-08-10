@@ -582,33 +582,49 @@ def main():
     c1.caption(f"Rows total: {len(df)}")
     c2.success(f"Filtered rows: {len(filtered)}")
 
-    # exploded view всех строк
-    matches_col = "Matches"
-    if matches_col in filtered.columns:
-        long = filtered.copy()
-        long[matches_col] = long[matches_col].fillna("").astype(str)
-        long["Match"] = long[matches_col].apply(lambda s: [x for x in s.split("\n") if x.strip()] or ["—"])
-        long = long.explode("Match", ignore_index=True)
+    # --- Причесанный вывод в заданном порядке ---
+    # Берём имена колонок по позициям A..R (как в исходном листе)
+    cols = list(filtered.columns)
+    # защитимся, если колонок меньше ожидаемого
+    def col(idx): 
+        return cols[idx] if idx < len(cols) else None
 
-        front = [c for c in [
-            "Match",
-            "Matches_count",
-            "AltMatches_count", "AltMatches",
-            "WideMatches_count", "WideMatches"
-        ] if c in long.columns]
-        rest = [c for c in long.columns if c not in front + [matches_col]]
-        long = long[front + rest]
+    colA = col(0)   # A
+    colB = col(1)   # B
+    colC = col(2)   # C
+    # D = col(3)
+    colE = col(4)   # E
+    colF = col(5)   # F
+    colG = col(6)   # G
+    # H = col(7)
+    colI = col(8)   # I
+    colJ = col(9)   # J
+    colK = col(10)  # K
+    colL = col(11)  # L
+    # M = col(12)
+    colN = col(13)  # N
+    colO = col(14)  # O
 
-        st.dataframe(long, use_container_width=True, height=700)
+    desired = [
+        colA, colB, colE, colO, colF, colG, colI, colJ, colK, colC, colN, colL,
+        "Matches_count", "Matches",
+        "AltMatches_count", "AltMatches",
+        "WideMatches_count", "WideMatches",
+    ]
 
-        st.download_button(
-            "⬇️ Download exploded CSV (all rows)",
-            long.to_csv(index=False).encode("utf-8"),
-            file_name="matches_exploded_all_rows.csv",
-            mime="text/csv",
-        )
-    else:
-        st.dataframe(filtered, use_container_width=True, height=700)
+    # убираем None и оставляем только реально существующие колонki
+    display_cols = [c for c in desired if (c is not None and c in filtered.columns)]
+
+    curated = filtered.loc[:, display_cols].copy()
+
+    st.dataframe(curated, use_container_width=True, height=700)
+
+    st.download_button(
+        "⬇️ Download CSV (curated)",
+        curated.to_csv(index=False).encode("utf-8"),
+        file_name="curated_view.csv",
+        mime="text/csv",
+    )
 
     if st.button("Refresh"):
         load_sheet_df.clear()
