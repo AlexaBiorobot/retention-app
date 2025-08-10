@@ -15,8 +15,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-st.sidebar.write("Streamlit version:", st.__version__)
-
 # ==== Constants ====
 DEFAULT_SHEET_ID = "1Jbb4p1cZCo67ZRiW5cmFUq-c9ijo5VMH_hFFMVYeJk4"
 DEFAULT_WS_NAME  = "data"
@@ -548,27 +546,21 @@ def _pick_col(df: pd.DataFrame, candidates: set[str], fallback_idx: int | None =
 def main():
     st.title("Initial export (A:R, D='active', K < 32, R empty, P/Q != TRUE)")
 
-    with st.sidebar:
-        st.header("Source")
-        sheet_id = st.text_input("Google Sheet ID", value=SHEET_ID)
-        ws_name  = st.text_input("Worksheet", value=WS_NAME)
-        try:
-            client = _authorize_client()
-            sh = client.open_by_key(sheet_id)
-            ws_names = [ws.title for ws in sh.worksheets()]
-            if ws_name in ws_names:
-                ws_name = st.selectbox("Select worksheet", ws_names, index=ws_names.index(ws_name))
-            else:
-                ws_name = st.selectbox("Select worksheet", ws_names, index=0)
-            selected_ws = sh.worksheet(ws_name)
-            gid = getattr(selected_ws, "id", None) or selected_ws._properties.get("sheetId")
-            sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
-            tab_url   = f"{sheet_url}#gid={gid}"
-            st.markdown(f"[Open Google Sheet]({sheet_url})")
-            st.markdown(f"[Open tab **{ws_name}**]({tab_url})")
-            st.caption(f"Worksheets found: {len(ws_names)}")
-        except Exception as e:
-            st.warning(f"Не удалось получить список вкладок/ссылки: {e}")
+    # --- Source (hidden, no UI) ---
+    sheet_id = SHEET_ID
+    ws_name  = WS_NAME
+    
+    # Подстрахуемся: если указанной вкладки нет — возьмём первую, но ничего не показываем в UI
+    try:
+        client = _authorize_client()
+        sh = client.open_by_key(sheet_id)
+        ws_names = [ws.title for ws in sh.worksheets()]
+        if ws_name not in ws_names and ws_names:
+            ws_name = ws_names[0]
+    except Exception:
+        # молча продолжаем — ниже всё равно отработает обработка ошибок
+        pass
+
 
     with st.spinner("Loading data from Google Sheets…"):
         df = load_sheet_df(sheet_id, ws_name)
