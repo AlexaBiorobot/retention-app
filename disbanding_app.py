@@ -185,6 +185,7 @@ def add_rating_bp_by_O(df: pd.DataFrame, mapping: dict, new_col_name: str = "Rat
 
 
 def filter_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Базовые фильтры + дополнительный: оставляем только строки, где (Capacity - Paid) >= 1."""
     if df.empty:
         return df
     if len(df.columns) < 18:
@@ -213,7 +214,7 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
 
     mask = d_active & k_ok & r_blank & ~p_true & ~q_true & ~exclude_m & ~exclude_l
 
-    # доп. фильтр Paid/Capacity >= 50%
+    # --- ДОП. ФИЛЬТР: оставляем только где есть свободные места (Capacity - Paid >= 1) ---
     def _norm(s: str) -> str:
         return str(s).strip().lower().replace("_", " ").replace("-", " ")
     paid_aliases = {"paid students", "paid student", "paid"}
@@ -224,14 +225,22 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
         if (colPaid is None) and (n in paid_aliases): colPaid = c
         if (colCap  is None) and (n in cap_aliases):  colCap  = c
         if colPaid is not None and colCap is not None: break
+
+    free_slots = None
     if colPaid is not None and colCap is not None:
         paid_num = pd.to_numeric(df[colPaid], errors="coerce")
         cap_num  = pd.to_numeric(df[colCap],  errors="coerce")
-        ratio_ge_50 = (cap_num > 0) & ((paid_num / cap_num) >= 0.5)
-        mask = mask & ~ratio_ge_50
+        free_slots = (cap_num - paid_num)
+        have_free  = (cap_num.notna() & paid_num.notna()) & (free_slots >= 1)
+        mask = mask & have_free
 
     out = df.loc[mask].copy()
     out[colK] = k_num.loc[out.index]
+
+    # добавим колонку Free slots, если смогли найти Paid/Capacity
+    if (colPaid is not None) and (colCap is not None) and (free_slots is not None):
+        out["Free slots"] = free_slots.loc[out.index]
+
     return out
 
 
@@ -471,7 +480,6 @@ def main():
     sheet_id = SHEET_ID
     ws_name  = WS_NAME
     
-    # Подстрахуемся: если указанной вкладки нет — возьмём первую, но ничего не показываем в UI
     try:
         client = _authorize_client()
         sh = client.open_by_key(sheet_id)
@@ -594,9 +602,12 @@ def main():
     
     # найдём колонку рейтинга и поставим её сразу после Tutor ID
     rating_colname = _find_rating_col(dff)  # "Rating_BP" или "Rating"
+    # добавим Free slots в dff уже есть (если нашлись Paid/Capacity)
     desired = [
-        colA, colB, colE, colO, rating_colname,  # Rating сразу после Tutor ID
-        colF, colG, colI, colJ, colK, colC, colN, colL,
+        colA, colB, colE, colO, rating_colname,
+        colF, colG, colI,             # базовые поля
+        col_capacity, col_paid, "Free slots",  # Capacity / Paid / Free
+        colK, colC, colN, colL,       # прочее
         "Matches_count", "Matches",
         "WideMatches_count", "WideMatches",
     ]
@@ -645,7 +656,7 @@ def main():
     for c in ["BO", "Group", "Tutor", "Course", "Matches", "WideMatches"]:
         if c in curated.columns:
             cfg[c] = st.column_config.TextColumn(label=c, width="large")
-    for c in ["Lesson number", "Capacity", "Paid students", "Students transferred 1 time",
+    for c in ["Lesson number", "Capacity", "Paid students", "Free slots", "Students transferred 1 time",
               "Module", "Group age", "Local time",
               "Matches_count", "WideMatches_count"]:
         if c in curated.columns:
