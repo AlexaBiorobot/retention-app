@@ -734,36 +734,32 @@ def main():
     display_cols = [c for c in desired if (c is not None and c in dff.columns)]
     curated = dff.loc[:, display_cols].copy()
     
-    # переименуем заголовок рейтинга для красоты
-    if rating_colname and rating_colname in curated.columns and "Rating" not in curated.columns:
-        curated = curated.rename(columns={rating_colname: "Rating"})
+    # --- агрессивно нормализуем «пустоты» и убираем визуально пустые строки ---
     
-    # переименуем заголовок рейтинга для красоты
-    if rating_colname and rating_colname in curated.columns and "Rating" not in curated.columns:
-        curated = curated.rename(columns={rating_colname: "Rating"})
+    # 1) приводим пустые строки/пробелы/строки 'nan' к NaN
+    def _empty_to_na(x):
+        if x is None or pd.isna(x):
+            return pd.NA
+        s = str(x).strip()
+        return pd.NA if (s == "" or s.lower() in {"nan", "none", "na"}) else x
     
-    # --- убрать «визуально пустые» строки и сбросить индекс ---
-    # непустые значения считаем по всем колонкам, КРОМЕ счётчиков матчей
-    non_count_cols = [c for c in curated.columns
-                      if c not in {"Matches_count", "AltMatches_count", "WideMatches_count"}]
+    curated = curated.applymap(_empty_to_na)
     
-    if non_count_cols:
-        has_any_text = curated[non_count_cols].applymap(
-            lambda x: (x is not None) and (not pd.isna(x)) and (str(x).strip() != "")
-        ).any(axis=1)
-    else:
-        has_any_text = pd.Series(False, index=curated.index)
+    # 2) колонки счётчиков/текста матчей
+    count_cols = [c for c in ["Matches_count", "AltMatches_count", "WideMatches_count"] if c in curated.columns]
+    text_match_cols = [c for c in ["Matches", "AltMatches", "WideMatches"] if c in curated.columns]
     
-    count_cols = [c for c in ["Matches_count", "AltMatches_count", "WideMatches_count"]
-                  if c in curated.columns]
-    if count_cols:
-        total_counts = sum(pd.to_numeric(curated[c], errors="coerce").fillna(0).astype(int)
-                           for c in count_cols)
-    else:
-        total_counts = pd.Series(0, index=curated.index)
+    # 3) считаем «что-то есть в данных»
+    #    (любая НЕпустая ячейка в «обычных» колонках ИЛИ есть текст матчей ИЛИ счётчики > 0)
+    key_cols = [c for c in curated.columns if c not in (count_cols + text_match_cols)]
+    has_any_key  = curated[key_cols].notna().any(axis=1) if key_cols else pd.Series(False, index=curated.index)
+    has_any_text = curated[text_match_cols].notna().any(axis=1) if text_match_cols else pd.Series(False, index=curated.index)
+    total_counts = sum(pd.to_numeric(curated[c], errors="coerce").fillna(0).astype(int) for c in count_cols) if count_cols else pd.Series(0, index=curated.index)
     
-    keep_mask = has_any_text | (total_counts > 0)
+    keep_mask = has_any_key | has_any_text | (total_counts > 0)
+    
     curated = curated[keep_mask].reset_index(drop=True)
+
 
     st.dataframe(curated, use_container_width=True, height=700)
     st.download_button(
