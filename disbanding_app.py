@@ -530,6 +530,21 @@ def add_wide_matches_column(df: pd.DataFrame,
     out[cnt]  = counts
     return out
 
+import re
+
+def _norm_name(s: str) -> str:
+    return re.sub(r"\s+", " ", str(s).strip().lower())
+
+def _pick_col(df: pd.DataFrame, candidates: set[str], fallback_idx: int | None = None) -> str | None:
+    """Находит колонку по набору синонимов (без регистра/лишних пробелов). Иначе — fallback по индексу."""
+    norm = {_norm_name(c): c for c in df.columns}
+    for key in candidates:
+        if key in norm:
+            return norm[key]
+    if fallback_idx is not None and fallback_idx < len(df.columns):
+        return df.columns[fallback_idx]
+    return None
+
 
 def main():
     st.title("Initial export (A:R, D='active', K < 32, R empty, P/Q != TRUE)")
@@ -581,6 +596,121 @@ def main():
     c1, c2 = st.columns(2)
     c1.caption(f"Rows total: {len(df)}")
     c2.success(f"Filtered rows: {len(filtered)}")
+
+        # --- Sidebar Filters ---
+    dff = filtered.copy()
+
+    # маппим нужные поля по именам, с fallback на позиции A:R (0-based)
+    col_group      = _pick_col(dff, {"group", "group title", "group name", "group id"}, fallback_idx=1)   # B
+    col_tutor      = _pick_col(dff, {"tutor", "teacher", "tutor name", "teacher name"}, fallback_idx=4)   # E
+    col_tutor_id   = _pick_col(dff, {"tutor id", "teacher id", "id"}, fallback_idx=14)                    # O
+    col_course     = _pick_col(dff, {"course"}, fallback_idx=5)                                           # F
+    col_group_age  = _pick_col(dff, {"group age", "age"}, fallback_idx=6)                                 # G
+    col_local_time = _pick_col(dff, {"local time", "localtime", "time (local)"}, fallback_idx=8)          # I
+    col_module     = _pick_col(dff, {"module"}, fallback_idx=2)                                           # C
+    col_lesson_num = _pick_col(dff, {"lesson number", "lesson", "lesson_num"}, fallback_idx=13)           # N
+    col_capacity   = _pick_col(dff, {"capacity", "cap"})                                                  # по имени
+    col_paid       = _pick_col(dff, {"paid students", "paid student", "paid"})                            # по имени
+    col_transfer1  = _pick_col(dff, {"students transferred 1 time", "transferred 1 time"}, fallback_idx=11) # L
+
+    # колонки matches
+    col_m_text  = "Matches"           if "Matches"           in dff.columns else None
+    col_m_cnt   = "Matches_count"     if "Matches_count"     in dff.columns else None
+    col_a_text  = "AltMatches"        if "AltMatches"        in dff.columns else None
+    col_a_cnt   = "AltMatches_count"  if "AltMatches_count"  in dff.columns else None
+    col_w_text  = "WideMatches"       if "WideMatches"       in dff.columns else None
+    col_w_cnt   = "WideMatches_count" if "WideMatches_count" in dff.columns else None
+
+    with st.sidebar.expander("Filters", expanded=True):
+        # — текстовые мультиселекты —
+        def _multi(df, label, col):
+            if not col: return df
+            vals = sorted(df[col].dropna().astype(str).unique())
+            sel = st.multiselect(label, vals)
+            if sel:
+                df = df[df[col].astype(str).isin(sel)]
+            return df
+
+        dff = _multi(dff, "Group",      col_group)
+        dff = _multi(dff, "Tutor",      col_tutor)
+        dff = _multi(dff, "Tutor ID",   col_tutor_id)
+        dff = _multi(dff, "Course",     col_course)
+        dff = _multi(dff, "Group age",  col_group_age)
+        dff = _multi(dff, "Local time", col_local_time)
+        dff = _multi(dff, "Module",     col_module)
+
+        # — числовые диапазоны —
+        def _range(df, label, col):
+            if not col: return df
+            s = pd.to_numeric(df[col], errors="coerce")
+            if s.notna().any():
+                vmin = int(s.min())
+                vmax = int(s.max())
+                lo, hi = st.slider(label, vmin, vmax, (vmin, vmax))
+                df = df[(pd.to_numeric(df[col], errors="coerce") >= lo) &
+                        (pd.to_numeric(df[col], errors="coerce") <= hi)]
+            return df
+
+        dff = _range(dff, "Lesson number",          col_lesson_num)
+        dff = _range(dff, "Capacity",               col_capacity)
+        dff = _range(dff, "Paid students",          col_paid)
+        dff = _range(dff, "Students transferred 1 time", col_transfer1)
+
+        # — фильтры по matches —
+        def _count_slider(df, label, col_cnt):
+            if not col_cnt: return df
+            s = pd.to_numeric(df[col_cnt], errors="coerce").fillna(0).astype(int)
+            mx = int(s.max()) if len(s) else 0
+            v  = st.slider(label, 0, max(1, mx), 0)
+            return df[s >= v]
+
+        dff = _count_slider(dff, "Min Matches",      col_m_cnt)
+        dff = _count_slider(dff, "Min Alt matches",  col_a_cnt)
+        dff = _count_slider(dff, "Min Wide matches", col_w_cnt)
+
+        q = st.text_input("Search in matches text")
+        if q:
+            qrx = re.escape(q)
+            mask = pd.Series(False, index=dff.index)
+            for col in [col_m_text, col_a_text, col_w_text]:
+                if col:
+                    mask |= dff[col].astype(str).str.contains(qrx, case=False, na=False)
+            dff = dff[mask]
+
+        only_any = st.checkbox("Only rows with any matches", value=False)
+        if only_any:
+            cnt = pd.Series(0, index=dff.index)
+            for col in [col_m_cnt, col_a_cnt, col_w_cnt]:
+                if col:
+                    cnt = cnt.add(pd.to_numeric(dff[col], errors="coerce").fillna(0), fill_value=0)
+            dff = dff[cnt > 0]
+
+    # --- Причесанный вывод в заданном порядке ---
+    cols_all = list(dff.columns)
+    def col(idx): 
+        return cols_all[idx] if idx < len(cols_all) else None
+    colA, colB, colC = col(0), col(1), col(2)
+    colE, colF, colG = col(4), col(5), col(6)
+    colI, colJ, colK = col(8), col(9), col(10)
+    colL, colN, colO = col(11), col(13), col(14)
+
+    desired = [
+        colA, colB, colE, colO, colF, colG, colI, colJ, colK, colC, colN, colL,
+        "Matches_count", "Matches",
+        "AltMatches_count", "AltMatches",
+        "WideMatches_count", "WideMatches",
+    ]
+    display_cols = [c for c in desired if (c is not None and c in dff.columns)]
+    curated = dff.loc[:, display_cols].copy()
+
+    st.dataframe(curated, use_container_width=True, height=700)
+    st.download_button(
+        "⬇️ Download CSV (curated)",
+        curated.to_csv(index=False).encode("utf-8"),
+        file_name="curated_view.csv",
+        mime="text/csv",
+    )
+
 
     # --- Причесанный вывод в заданном порядке ---
     # Берём имена колонок по позициям A..R (как в исходном листе)
