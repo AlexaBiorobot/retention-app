@@ -12,7 +12,7 @@ from gspread.exceptions import SpreadsheetNotFound, WorksheetNotFound
 
 # ==== Page / UX ====  (ДОЛЖНО быть самым первым вызовом Streamlit)
 st.set_page_config(
-    page_title="Disbanding Brazil",
+    page_title="Disbanding Brazil/Latam",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -750,7 +750,7 @@ def debug_filter_sequence(df, lesson_min=4, lesson_max=31):
     st.write("Final:", int(m.sum()))
 
 def main():
-    st.title("Disbanding Brazil")
+    st.title("Disbanding Brazil/Latam")
 
     st.markdown(textwrap.dedent("""\
     ### Legend
@@ -785,7 +785,7 @@ def main():
     st.divider()
 
     # === ДВЕ ВКЛАДКИ: основная и внешняя ===
-    tabs = st.tabs(["Main data", "External data"])
+    tabs = st.tabs(["Brazil groups", "Latam groups"])
 
     # ---------- TAB 1: ОСНОВНАЯ (как было) ----------
     with tabs[0]:
@@ -801,7 +801,7 @@ def main():
         except Exception:
             pass
 
-        with st.spinner("Loading MAIN data…"):
+        with st.spinner("Loading Brazil data…"):
             df = load_sheet_df(sheet_id, ws_name)
 
         if df.empty:
@@ -815,7 +815,7 @@ def main():
             df = add_rating_bp_by_O(df, rating_map, new_col_name="Rating_BP")
 
             # --- Debug: пошаговый разбор фильтра (Main) ---
-            with st.expander("Show filter breakdown (Main)", expanded=False):
+            with st.expander("Show filter breakdown (Brazil)", expanded=False):
                 debug_filter_sequence(df, lesson_min=4, lesson_max=31)
 
 
@@ -857,7 +857,7 @@ def main():
                     return df_
                 return df_[df_[col].astype(str).isin(sel)]
 
-            with st.sidebar.expander("Filters (Main)", expanded=True):
+            with st.sidebar.expander("Filters (Brazil)", expanded=True):
                 dff = _apply_ms(dff, col_group,      st.multiselect("Group",      _ms_options(dff, col_group), key="ms_group_main"))
                 dff = _apply_ms(dff, col_tutor,      st.multiselect("Tutor",      _ms_options(dff, col_tutor), key="ms_tutor_main"))
                 dff = _apply_ms(dff, col_tutor_id,   st.multiselect("Tutor ID",   _ms_options(dff, col_tutor_id), key="ms_tid_main"))
@@ -957,7 +957,7 @@ def main():
 
     # ---------- TAB 2: ВНЕШНИЙ ФАЙЛ + правило C/H + рейтинг из BU ----------
     with tabs[1]:
-        with st.spinner("Loading EXTERNAL data…"):
+        with st.spinner("Loading Latam data…"):
             df_ext = load_sheet_df(EXTERNAL_SHEET_ID, EXTERNAL_WS_NAME)
             
     
@@ -999,7 +999,7 @@ def main():
 
 
             c1, c2 = st.columns(2)
-            c1.caption(f"External rows total: {len(df_ext)}")
+            c1.caption(f"Latam rows total: {len(df_ext)}")
 
             # --- Sidebar Filters (EXTERNAL) — те же, но с другими key ---
             dff = filtered.copy()
@@ -1030,7 +1030,7 @@ def main():
                 if not col or not sel: return df_
                 return df_[df_[col].astype(str).isin(sel)]
 
-            with st.sidebar.expander("Filters (External)", expanded=True):
+            with st.sidebar.expander("Filters (Latam)", expanded=True):
                 dff = _apply_ms(dff, col_group,      st.multiselect("Group",      _ms_options(dff, col_group), key="ms_group_ext"))
                 dff = _apply_ms(dff, col_tutor,      st.multiselect("Tutor",      _ms_options(dff, col_tutor), key="ms_tutor_ext"))
                 dff = _apply_ms(dff, col_tutor_id,   st.multiselect("Tutor ID",   _ms_options(dff, col_tutor_id), key="ms_tid_ext"))
@@ -1069,7 +1069,7 @@ def main():
                             cnt = cnt.add(pd.to_numeric(dff[col], errors="coerce").fillna(0).astype(int), fill_value=0)
                     dff = dff[cnt > 0]
 
-            st.success(f"Filtered rows (External): {len(dff)}")
+            st.success(f"Filtered rows (Latam): {len(dff)}")
 
             cols_all = list(dff.columns)
             def col(idx):
@@ -1125,7 +1125,7 @@ def main():
                 if c in curated.columns: cfg[c] = st.column_config.TextColumn(label=c, width="small")
 
             st.dataframe(curated, use_container_width=True, height=table_h, column_config=cfg)
-            st.download_button("⬇️ Download CSV (external)", curated.to_csv(index=False).encode("utf-8"),
+            st.download_button("⬇️ Download CSV (Latam)", curated.to_csv(index=False).encode("utf-8"),
                                file_name="curated_external.csv", mime="text/csv")
 
 
