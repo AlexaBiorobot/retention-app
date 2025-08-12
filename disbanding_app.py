@@ -861,27 +861,26 @@ def main():
             
         st.subheader("Debug (External)")
         dbg("raw", df_ext)
-
+    
         if df_ext.empty:
             st.warning(f"Пусто: проверь файл '{EXTERNAL_SHEET_ID}', вкладку '{EXTERNAL_WS_NAME}' и доступ.")
         else:
             # правило C/H
             df_ext = exclude_c6_h_before_14d(df_ext)
-                dbg("after C/H", df_ext)
-
+            dbg("after C/H", df_ext)
+    
             # остальной пайплайн
             df_ext = adjust_local_time_minus_3(df_ext)
-                dbg("after time -3h", df_ext)
+            dbg("after time -3h", df_ext)
+    
             mapping = load_group_age_map()
             df_ext = replace_group_age_from_map(df_ext, mapping)
-                dbg("after group age", df_ext)
-
-
+            dbg("after group age", df_ext)
+    
             rating_map2 = load_rating_bu_map()   # <--- рейтинг из BU (лист Rating)
             df_ext = add_rating_bp_by_O(df_ext, rating_map2, new_col_name="Rating_BP")
-                dbg("after rating", df_ext)
-
-
+            dbg("after rating", df_ext)
+    
             # диагностируем, найдены ли Capacity/Paid
             def _norm(s): 
                 return str(s).strip().lower().replace("_"," ").replace("-"," ")
@@ -896,12 +895,13 @@ def main():
             
             filtered = filter_df(df_ext)
             dbg("after filter", filtered)
-
+    
             filtered = add_matches_combined(filtered, new_col_name="Matches")
-                dbg("after Matches", filtered)
-
+            dbg("after Matches", filtered)
+    
             filtered = add_wide_matches_column(filtered, new_col_name="WideMatches", exclude_col="Matches")
-                dbg("after Wide", filtered)
+            dbg("after Wide", filtered)
+
 
 
             c1, c2 = st.columns(2)
