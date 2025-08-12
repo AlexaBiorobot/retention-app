@@ -447,12 +447,6 @@ def _b_suffix3(s: str) -> str:
     letters = "".join(ch for ch in tail if ch.isalpha())
     return letters[:3] if len(letters) >= 3 else ""
 
-def dbg(tag, df):
-    try:
-        st.write(f"🔎 {tag}: {df.shape}")
-    except Exception:
-        pass
-
 # --- объединённые Matches (time±120 ИЛИ suffix3 равен), + базовые условия ---
 def add_matches_combined(df: pd.DataFrame, new_col_name="Matches") -> pd.DataFrame:
     if df.empty:
@@ -653,80 +647,63 @@ def exclude_c6_h_before_14d(df: pd.DataFrame) -> pd.DataFrame:
     mask_exclude = (c_num == 6) & h_dt.notna() & (h_dt < cutoff)
     return df.loc[~mask_exclude].copy()
 
-def debug_filter_reasons(df: pd.DataFrame):
-    st.markdown("### 🔬 Filter breakdown (External)")
+def debug_filter_sequence(df, lesson_min=4, lesson_max=31):
+    """Коротко показывает, сколько строк остаётся после каждого условия фильтра."""
     if df.empty:
-        st.write("df is empty"); 
+        st.write("df is empty")
         return
-
     if len(df.columns) < 18:
-        st.write(f"Expected ≥18 columns, got {len(df.columns)}"); 
+        st.write(f"Expected ≥18 columns, got {len(df.columns)}")
         return
 
     colD, colK = df.columns[3], df.columns[10]
     colL, colM = df.columns[11], df.columns[12]
     colP, colQ, colR = df.columns[15], df.columns[16], df.columns[17]
 
-    # D == Active
-    d_active = df[colD].astype(str).str.strip().str.lower() == "active"
-
-    # K in (4..31)
     k_num = pd.to_numeric(df[colK], errors="coerce")
-    k_ok  = k_num.notna() & (k_num > 3) & (k_num < 32)
-
-    # R empty or 0
-    r_str = df[colR].astype(str).str.strip().str.lower()
     r_num = pd.to_numeric(df[colR], errors="coerce")
-    r_ok  = df[colR].isna() | (r_str == "") | (r_str == "0") | (r_num == 0)
+    r_str = df[colR].astype(str).str.strip().str.lower()
 
-    # P/Q flags
-    p_true = (df[colP] == True) | (df[colP].astype(str).str.strip().str.lower() == "true")
-    q_true = (df[colQ] == True) | (df[colQ].astype(str).str.strip().str.lower() == "true")
+    m_active = df[colD].astype(str).str.strip().str.lower() == "active"
+    m_k      = k_num.notna() & (k_num >= lesson_min) & (k_num <= lesson_max)
+    m_r      = df[colR].isna() | (r_str == "") | (r_str == "0") | (r_num == 0)
+    m_p      = ~((df[colP] == True) | (df[colP].astype(str).str.strip().str.lower() == "true"))
+    m_q      = ~((df[colQ] == True) | (df[colQ].astype(str).str.strip().str.lower() == "true"))
+    m_l      = pd.to_numeric(df[colL], errors="coerce").fillna(0) <= 2
+    m_m      = pd.to_numeric(df[colM], errors="coerce").fillna(0) == 0
 
-    # L/M excludes
-    l_num = pd.to_numeric(df[colL], errors="coerce")
-    m_num = pd.to_numeric(df[colM], errors="coerce")
-    exclude_m = (m_num > 0)
-    exclude_l = (l_num > 2)
-
-    # Capacity/Paid condition
-    def _norm(s: str) -> str:
-        return str(s).strip().lower().replace("_", " ").replace("-", " ")
-    paid_aliases = {"paid students","paid student","paid"}
-    cap_aliases  = {"capacity","cap"}
+    def _norm(s): return str(s).strip().lower().replace("_"," ").replace("-"," ")
+    paid_aliases, cap_aliases = {"paid students","paid student","paid"}, {"capacity","cap"}
     colPaid = colCap = None
     for c in df.columns:
         n = _norm(c)
         if colPaid is None and n in paid_aliases: colPaid = c
         if colCap  is None and n in cap_aliases:  colCap  = c
-        if colPaid is not None and colCap is not None: break
-
-    have_free = pd.Series(True, index=df.index)
-    if (colPaid is not None) and (colCap is not None):
-        paid_num = pd.to_numeric(df[colPaid], errors="coerce")
-        cap_num  = pd.to_numeric(df[colCap],  errors="coerce")
-        free_slots = (cap_num - paid_num)
-        have_free  = (cap_num.notna() & paid_num.notna()) & (free_slots >= 1)
+    if colPaid is not None and colCap is not None:
+        paid = pd.to_numeric(df[colPaid], errors="coerce")
+        cap  = pd.to_numeric(df[colCap],  errors="coerce")
+        m_free = (cap.notna() & paid.notna()) & ((cap - paid) >= 1)
     else:
-        st.write("⚠️ Capacity/Paid columns not found for free-slots check.")
+        m_free = pd.Series(True, index=df.index)
 
-    # Итог
-    mask = d_active & k_ok & r_ok & ~p_true & ~q_true & ~exclude_m & ~exclude_l & have_free
-
-    # --- Логи по каждому условию ---
-    def c(s): return int(s.sum())
-    st.write(f"Total: {len(df)}")
-    st.write(f"D==Active: {c(d_active)}")
-    st.write(f"K in 4..31: {c(k_ok)}  (min K={k_num.min(skipna=True)}, max K={k_num.max(skipna=True)})")
-    st.write(f"R empty/0:  {c(r_ok)}  (top R values: {r_str.value_counts(dropna=False).head(5).to_dict()})")
-    st.write(f"~P_true:    {c(~p_true)}  (P true={c(p_true)})")
-    st.write(f"~Q_true:    {c(~q_true)}  (Q true={c(q_true)})")
-    st.write(f"L<=2:       {c(~exclude_l)}  (L>2={c(exclude_l)})")
-    st.write(f"M==0:       {c(~exclude_m)}  (M>0={c(exclude_m)})")
-    if (colPaid is not None) and (colCap is not None):
-        st.write(f"Free slots ≥1: {c(have_free)}  (cap='{colCap}', paid='{colPaid}')")
-        st.dataframe(df[[colCap, colPaid]].head(10))
-    st.write(f"✅ Survive all: {c(mask)}")
+    steps = [
+        ("Active", m_active),
+        (f"K in {lesson_min}..{lesson_max}", m_k),
+        ("R empty/0", m_r),
+        ("~P_true", m_p),
+        ("~Q_true", m_q),
+        ("L<=2", m_l),
+        ("M==0", m_m),
+        ("Free slots ≥1", m_free),
+    ]
+    m = pd.Series(True, index=df.index)
+    st.markdown("### 🔗 Stepwise filter (intersection)")
+    st.write("Start:", int(m.sum()))
+    for name, mask in steps:
+        prev_cnt = int(m.sum())
+        m = m & mask
+        st.write(f"after {name}: {int(m.sum())}  (−{prev_cnt - int(m.sum())})")
+    st.write("Final:", int(m.sum()))
 
 def main():
     st.title("Disbanding Brazil")
@@ -934,27 +911,21 @@ def main():
         with st.spinner("Loading EXTERNAL data…"):
             df_ext = load_sheet_df(EXTERNAL_SHEET_ID, EXTERNAL_WS_NAME)
             
-        st.subheader("Debug (External)")
-        dbg("raw", df_ext)
     
         if df_ext.empty:
             st.warning(f"Пусто: проверь файл '{EXTERNAL_SHEET_ID}', вкладку '{EXTERNAL_WS_NAME}' и доступ.")
         else:
             # правило C/H
             df_ext = exclude_c6_h_before_14d(df_ext)
-            dbg("after C/H", df_ext)
     
             # остальной пайплайн
             df_ext = adjust_local_time_minus_3(df_ext)
-            dbg("after time -3h", df_ext)
     
             mapping = load_group_age_map()
             df_ext = replace_group_age_from_map(df_ext, mapping)
-            dbg("after group age", df_ext)
     
             rating_map2 = load_rating_bu_map()   # <--- рейтинг из BU (лист Rating)
             df_ext = add_rating_bp_by_O(df_ext, rating_map2, new_col_name="Rating_BP")
-            dbg("after rating", df_ext)
     
             # диагностируем, найдены ли Capacity/Paid
             def _norm(s): 
@@ -968,24 +939,14 @@ def main():
                     colCap = c
             st.write(f"🧭 cap='{colCap}', paid='{colPaid}'")
 
-            debug_filter_reasons(df_ext)
+            with st.expander("Show filter breakdown", expanded=False):
+                debug_filter_sequence(df_ext, lesson_min=4, lesson_max=31)
             
             filtered = filter_df(df_ext)
-            st.write("📊 Capacity / Paid sample (before filter):")
-            try:
-                st.dataframe(df_ext[["Capacity", "Paid students"]].head(20))
-                st.write("Capacity types:", df_ext["Capacity"].apply(type).value_counts())
-                st.write("Paid students types:", df_ext["Paid students"].apply(type).value_counts())
-            except Exception as e:
-                st.write(f"⚠️ Error showing Capacity/Paid: {e}")
-
-            dbg("after filter", filtered)
     
             filtered = add_matches_combined(filtered, new_col_name="Matches")
-            dbg("after Matches", filtered)
     
             filtered = add_wide_matches_column(filtered, new_col_name="WideMatches", exclude_col="Matches")
-            dbg("after Wide", filtered)
 
 
 
