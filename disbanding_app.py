@@ -268,8 +268,8 @@ def add_rating_bp_by_O(df: pd.DataFrame, mapping: dict, new_col_name: str = "Rat
 
 
 def filter_df(df: pd.DataFrame) -> pd.DataFrame:
-    """Базовые фильтры + дополнительный: оставляем только строки, где (Capacity - Paid) >= 1.
-       По R берём, если пусто/NaN/0/"0".
+    """Базовые фильтры + доп.: оставляем только строки, где (Capacity - Paid) >= 1.
+       По R берём только те строки, где R == 0.
     """
     if df.empty:
         return df
@@ -298,11 +298,12 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     l_num = pd.to_numeric(df[colL], errors="coerce")
     m_num = pd.to_numeric(df[colM], errors="coerce")
 
-    exclude_m = (m_num > 0)
-    exclude_l = (l_num > 2)
+    # Явные "ok"-маски для L и M
+    l_ok = l_num.fillna(0) <= 2
+    m_ok = m_num.fillna(0) == 0
 
-    # Итоговая маска
-    mask = d_active & k_ok & r_ok & ~p_true & ~q_true & l_ok & m_ok & free_slots
+    # Итоговая маска БЕЗ проверки свободных мест (добавим ниже)
+    mask = d_active & k_ok & r_ok & ~p_true & ~q_true & l_ok & m_ok
 
     # --- ДОП. ФИЛЬТР: есть свободные места (Capacity - Paid >= 1) ---
     def _norm(s: str) -> str:
@@ -320,16 +321,16 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
         if colPaid is not None and colCap is not None:
             break
 
-    free_slots = None
+    free_slots_values = None
     paid_pct_series = None
     if colPaid is not None and colCap is not None:
         paid_num = pd.to_numeric(df[colPaid], errors="coerce")
         cap_num  = pd.to_numeric(df[colCap],  errors="coerce")
-        free_slots = (cap_num - paid_num)
-        have_free  = (cap_num.notna() & paid_num.notna()) & (free_slots >= 1)
+        free_slots_values = (cap_num - paid_num)
+        have_free  = (cap_num.notna() & paid_num.notna()) & (free_slots_values >= 1)
         mask = mask & have_free
 
-        # Paid % = round(Paid/Capacity*100), формат строкой "NN%"
+        # Paid % = round(Paid/Capacity*100), как строка "NN%"
         with np.errstate(divide="ignore", invalid="ignore"):
             pct = np.where(cap_num > 0, (paid_num / cap_num) * 100.0, np.nan)
         paid_pct_series = pd.Series(pct, index=df.index)
@@ -340,13 +341,12 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     out[colK] = k_num.loc[out.index]
 
     # Добавим колонки Free slots и Paid % (если нашли Paid/Capacity)
-    if (colPaid is not None) and (colCap is not None) and (free_slots is not None):
-        out["Free slots"] = free_slots.loc[out.index]
+    if (colPaid is not None) and (colCap is not None) and (free_slots_values is not None):
+        out["Free slots"] = free_slots_values.loc[out.index]
         if paid_pct_series is not None:
             out["Paid %"] = paid_pct_series.loc[out.index]
 
     return out
-
 
 def to_excel_bytes(data: pd.DataFrame) -> io.BytesIO | None:
     try:
@@ -658,18 +658,15 @@ def debug_filter_sequence(df, lesson_min=4, lesson_max=31):
     colD, colK = df.columns[3], df.columns[10]
     colL, colM = df.columns[11], df.columns[12]
     colP, colQ, colR = df.columns[15], df.columns[16], df.columns[17]
-    
+
     k_num = pd.to_numeric(df[colK], errors="coerce")
-    
-    # --- R: strictly == 0 ---
     r_num = pd.to_numeric(df[colR], errors="coerce")
-    m_r   = r_num == 0
 
     m_active = df[colD].astype(str).str.strip().str.lower() == "active"
     m_k      = k_num.notna() & (k_num >= lesson_min) & (k_num <= lesson_max)
 
-    # NEW: R пусто/NaN или R > 2
-    m_r      = df[colR].isna() | (df[colR].astype(str).str.strip() == "") | (r_num > 2)
+    # --- R: strictly == 0 ---
+    m_r      = r_num == 0
 
     m_p      = ~((df[colP] == True) | (df[colP].astype(str).str.strip().str.lower() == "true"))
     m_q      = ~((df[colQ] == True) | (df[colQ].astype(str).str.strip().str.lower() == "true"))
@@ -693,12 +690,12 @@ def debug_filter_sequence(df, lesson_min=4, lesson_max=31):
     steps = [
         ("Active", m_active),
         (f"Lessons from {lesson_min}..{lesson_max}", m_k),
-        ("0-2 balance students", m_r),
+        ("R == 0", m_r),
         ("No disband", m_p),
         ("No merge", m_q),
-        ("Student transferred 1 time <=2", m_l),
-        ("Student transferred 2+ times ==0", m_m),
-        ("Free slots ≥1", m_free),
+        ("Students transferred 1 time ≤ 2", m_l),
+        ("Students transferred 2+ times == 0", m_m),
+        ("Free slots ≥ 1", m_free),
     ]
     m = pd.Series(True, index=df.index)
     st.markdown("### 🔗 Stepwise filter (intersection)")
