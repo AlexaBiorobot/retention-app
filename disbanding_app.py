@@ -653,6 +653,81 @@ def exclude_c6_h_before_14d(df: pd.DataFrame) -> pd.DataFrame:
     mask_exclude = (c_num == 6) & h_dt.notna() & (h_dt < cutoff)
     return df.loc[~mask_exclude].copy()
 
+def debug_filter_reasons(df: pd.DataFrame):
+    st.markdown("### 🔬 Filter breakdown (External)")
+    if df.empty:
+        st.write("df is empty"); 
+        return
+
+    if len(df.columns) < 18:
+        st.write(f"Expected ≥18 columns, got {len(df.columns)}"); 
+        return
+
+    colD, colK = df.columns[3], df.columns[10]
+    colL, colM = df.columns[11], df.columns[12]
+    colP, colQ, colR = df.columns[15], df.columns[16], df.columns[17]
+
+    # D == Active
+    d_active = df[colD].astype(str).str.strip().str.lower() == "active"
+
+    # K in (4..31)
+    k_num = pd.to_numeric(df[colK], errors="coerce")
+    k_ok  = k_num.notna() & (k_num > 3) & (k_num < 32)
+
+    # R empty or 0
+    r_str = df[colR].astype(str).str.strip().str.lower()
+    r_num = pd.to_numeric(df[colR], errors="coerce")
+    r_ok  = df[colR].isna() | (r_str == "") | (r_str == "0") | (r_num == 0)
+
+    # P/Q flags
+    p_true = (df[colP] == True) | (df[colP].astype(str).str.strip().str.lower() == "true")
+    q_true = (df[colQ] == True) | (df[colQ].astype(str).str.strip().str.lower() == "true")
+
+    # L/M excludes
+    l_num = pd.to_numeric(df[colL], errors="coerce")
+    m_num = pd.to_numeric(df[colM], errors="coerce")
+    exclude_m = (m_num > 0)
+    exclude_l = (l_num > 2)
+
+    # Capacity/Paid condition
+    def _norm(s: str) -> str:
+        return str(s).strip().lower().replace("_", " ").replace("-", " ")
+    paid_aliases = {"paid students","paid student","paid"}
+    cap_aliases  = {"capacity","cap"}
+    colPaid = colCap = None
+    for c in df.columns:
+        n = _norm(c)
+        if colPaid is None and n in paid_aliases: colPaid = c
+        if colCap  is None and n in cap_aliases:  colCap  = c
+        if colPaid is not None and colCap is not None: break
+
+    have_free = pd.Series(True, index=df.index)
+    if (colPaid is not None) and (colCap is not None):
+        paid_num = pd.to_numeric(df[colPaid], errors="coerce")
+        cap_num  = pd.to_numeric(df[colCap],  errors="coerce")
+        free_slots = (cap_num - paid_num)
+        have_free  = (cap_num.notna() & paid_num.notna()) & (free_slots >= 1)
+    else:
+        st.write("⚠️ Capacity/Paid columns not found for free-slots check.")
+
+    # Итог
+    mask = d_active & k_ok & r_ok & ~p_true & ~q_true & ~exclude_m & ~exclude_l & have_free
+
+    # --- Логи по каждому условию ---
+    def c(s): return int(s.sum())
+    st.write(f"Total: {len(df)}")
+    st.write(f"D==Active: {c(d_active)}")
+    st.write(f"K in 4..31: {c(k_ok)}  (min K={k_num.min(skipna=True)}, max K={k_num.max(skipna=True)})")
+    st.write(f"R empty/0:  {c(r_ok)}  (top R values: {r_str.value_counts(dropna=False).head(5).to_dict()})")
+    st.write(f"~P_true:    {c(~p_true)}  (P true={c(p_true)})")
+    st.write(f"~Q_true:    {c(~q_true)}  (Q true={c(q_true)})")
+    st.write(f"L<=2:       {c(~exclude_l)}  (L>2={c(exclude_l)})")
+    st.write(f"M==0:       {c(~exclude_m)}  (M>0={c(exclude_m)})")
+    if (colPaid is not None) and (colCap is not None):
+        st.write(f"Free slots ≥1: {c(have_free)}  (cap='{colCap}', paid='{colPaid}')")
+        st.dataframe(df[[colCap, colPaid]].head(10))
+    st.write(f"✅ Survive all: {c(mask)}")
+
 def main():
     st.title("Disbanding Brazil")
 
@@ -892,6 +967,8 @@ def main():
                 if colCap is None and n in {"capacity","cap"}:
                     colCap = c
             st.write(f"🧭 cap='{colCap}', paid='{colPaid}'")
+
+            debug_filter_reasons(df_ext)
             
             filtered = filter_df(df_ext)
             st.write("📊 Capacity / Paid sample (before filter):")
