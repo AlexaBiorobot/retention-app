@@ -287,10 +287,10 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     k_num = pd.to_numeric(df[colK], errors="coerce")
     k_ok  = k_num.notna() & (k_num > 3) & (k_num < 32)
 
-    # R: ок, если пусто/NaN/0/"0"
-    r_str = df[colR].astype(str).str.strip().str.lower()
+    # R
     r_num = pd.to_numeric(df[colR], errors="coerce")
-    r_ok  = df[colR].isna() | (r_str == "") | (r_str == "0") | (r_num == 0)
+    r_ok  = df[colR].isna() | (df[colR].astype(str).str.strip() == "") | (r_num > 2)
+
 
     # P/Q (флаги), L/M (исключения)
     p_true = (df[colP] == True) | (df[colP].astype(str).str.strip().str.lower() == "true")
@@ -662,11 +662,13 @@ def debug_filter_sequence(df, lesson_min=4, lesson_max=31):
 
     k_num = pd.to_numeric(df[colK], errors="coerce")
     r_num = pd.to_numeric(df[colR], errors="coerce")
-    r_str = df[colR].astype(str).str.strip().str.lower()
 
     m_active = df[colD].astype(str).str.strip().str.lower() == "active"
     m_k      = k_num.notna() & (k_num >= lesson_min) & (k_num <= lesson_max)
-    m_r      = df[colR].isna() | (r_str == "") | (r_str == "0") | (r_num == 0)
+
+    # NEW: R пусто/NaN или R > 2
+    m_r      = df[colR].isna() | (df[colR].astype(str).str.strip() == "") | (r_num > 2)
+
     m_p      = ~((df[colP] == True) | (df[colP].astype(str).str.strip().str.lower() == "true"))
     m_q      = ~((df[colQ] == True) | (df[colQ].astype(str).str.strip().str.lower() == "true"))
     m_l      = pd.to_numeric(df[colL], errors="coerce").fillna(0) <= 2
@@ -689,7 +691,7 @@ def debug_filter_sequence(df, lesson_min=4, lesson_max=31):
     steps = [
         ("Active", m_active),
         (f"K in {lesson_min}..{lesson_max}", m_k),
-        ("R empty/0", m_r),
+        ("R empty or >2", m_r),  # <-- обновили подпись шага
         ("~P_true", m_p),
         ("~Q_true", m_q),
         ("L<=2", m_l),
