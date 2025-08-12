@@ -690,7 +690,7 @@ def debug_filter_sequence(df, lesson_min=4, lesson_max=31):
     steps = [
         ("Active", m_active),
         (f"Lessons from {lesson_min}..{lesson_max}", m_k),
-        ("R == 0", m_r),
+        ("Students with 0-2 balance", m_r),
         ("No disband", m_p),
         ("No merge", m_q),
         ("Students transferred 1 time ≤ 2", m_l),
