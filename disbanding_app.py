@@ -815,7 +815,7 @@ def main():
             df = add_rating_bp_by_O(df, rating_map, new_col_name="Rating_BP")
 
             # --- Debug: пошаговый разбор фильтра (Main) ---
-            with st.expander("Show filter breakdown (Brazil)", expanded=False):
+            with st.expander("Show filter breakdown", expanded=False):
                 debug_filter_sequence(df, lesson_min=4, lesson_max=31)
 
 
