@@ -999,7 +999,7 @@ def main():
 
 
             c1, c2 = st.columns(2)
-            c1.caption(f"Latam rows total: {len(df_ext)}")
+            c1.caption(f"Rows total: {len(df_ext)}")
 
             # --- Sidebar Filters (EXTERNAL) — те же, но с другими key ---
             dff = filtered.copy()
