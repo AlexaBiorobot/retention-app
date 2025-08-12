@@ -737,7 +737,7 @@ def debug_filter_sequence(df, lesson_min=4, lesson_max=31):
         ("No disband", m_p),
         ("No merge", m_q),
         ("Students transferred 1 time ≤ 2", m_l),
-        ("Students transferred 2+ times == 0", m_m),
+        ("Students transferred 2+ times = 0", m_m),
         ("Free slots ≥ 1", m_free),
     ]
     m = pd.Series(True, index=df.index)
