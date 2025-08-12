@@ -894,6 +894,14 @@ def main():
             st.write(f"🧭 cap='{colCap}', paid='{colPaid}'")
             
             filtered = filter_df(df_ext)
+            st.write("📊 Capacity / Paid sample (before filter):")
+            try:
+                st.dataframe(df_ext[["Capacity", "Paid students"]].head(20))
+                st.write("Capacity types:", df_ext["Capacity"].apply(type).value_counts())
+                st.write("Paid students types:", df_ext["Paid students"].apply(type).value_counts())
+            except Exception as e:
+                st.write(f"⚠️ Error showing Capacity/Paid: {e}")
+
             dbg("after filter", filtered)
     
             filtered = add_matches_combined(filtered, new_col_name="Matches")
