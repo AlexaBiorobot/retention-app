@@ -952,7 +952,7 @@ def main():
                 if c in curated.columns: cfg[c] = st.column_config.TextColumn(label=c, width="small")
 
             st.dataframe(curated, use_container_width=True, height=table_h, column_config=cfg)
-            st.download_button("⬇️ Download CSV (curated)", curated.to_csv(index=False).encode("utf-8"),
+            st.download_button("⬇️ Download CSV", curated.to_csv(index=False).encode("utf-8"),
                                file_name="curated_view.csv", mime="text/csv")
 
     # ---------- TAB 2: ВНЕШНИЙ ФАЙЛ + правило C/H + рейтинг из BU ----------
@@ -1125,7 +1125,7 @@ def main():
                 if c in curated.columns: cfg[c] = st.column_config.TextColumn(label=c, width="small")
 
             st.dataframe(curated, use_container_width=True, height=table_h, column_config=cfg)
-            st.download_button("⬇️ Download CSV (Latam)", curated.to_csv(index=False).encode("utf-8"),
+            st.download_button("⬇️ Download CSV", curated.to_csv(index=False).encode("utf-8"),
                                file_name="curated_external.csv", mime="text/csv")
 
 
