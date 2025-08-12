@@ -76,9 +76,16 @@ def load_sheet_df(sheet_id: str, worksheet_name: str = "data") -> pd.DataFrame:
     return df
 
 
-def adjust_local_time_minus_3(df: pd.DataFrame) -> pd.DataFrame:
+# --- Универсальный сдвиг "Local time" на заданное число часов ---
+def adjust_local_time_offset(df: pd.DataFrame, hours: int) -> pd.DataFrame:
+    """
+    Сдвигает колонку Local time на заданное число часов (hours может быть отрицательным).
+    Ищет колонку 'Local time' по имени или берёт 9-ю колонку (I).
+    """
     if df.empty:
         return df
+
+    # Найдём колонку
     col = None
     for c in df.columns:
         name = str(c).strip().lower().replace("_", " ")
@@ -90,14 +97,42 @@ def adjust_local_time_minus_3(df: pd.DataFrame) -> pd.DataFrame:
             col = df.columns[8]
         else:
             return df
-# --- Новая универсальная функция для сдвига времени на любое кол-во часов ---
-def adjust_local_time_offset(df: pd.DataFrame, hours: int) -> pd.DataFrame:
-    if df.empty:
-        return df
-    colI = df.columns[8]  # колонка I
-    df = df.copy()
-    df[colI] = pd.to_datetime(df[colI], errors="coerce") - pd.Timedelta(hours=hours)
-    return df
+
+    s = df[col].astype(str).str.strip()
+    # время формата HH:MM(:SS)
+    time_only_mask = s.str.match(r"^\d{1,2}:\d{2}(:\d{2})?$", na=False)
+
+    def _shift_time_str(v: str) -> str:
+        parts = v.split(":")
+        h = int(parts[0])
+        m = int(parts[1])
+        sec = int(parts[2]) if len(parts) > 2 else None
+        h = (h - hours) % 24
+        return f"{h:02d}:{m:02d}" + (f":{sec:02d}" if sec is not None else "")
+
+    out = pd.Series(pd.NA, index=df.index, dtype="object")
+
+    # Сдвигаем чистое время
+    out.loc[time_only_mask] = s.loc[time_only_mask].apply(_shift_time_str)
+
+    # Сдвигаем дату-время
+    dt_mask = (~time_only_mask) & s.ne("")
+    if dt_mask.any():
+        dt = pd.to_datetime(s[dt_mask], errors="coerce", dayfirst=False)
+        miss = dt.isna()
+        if miss.any():
+            dt2 = pd.to_datetime(s[dt_mask][miss], errors="coerce", dayfirst=True)
+            dt.loc[miss] = dt2
+        dt = dt - pd.Timedelta(hours=hours)
+        out.loc[dt_mask] = dt.dt.strftime("%Y-%m-%d %H:%M")
+
+    out_df = df.copy()
+    out_df[col] = out.where(out.notna(), df[col])
+    return out_df
+
+# --- Для Main: фиксированный сдвиг -3 часа ---
+def adjust_local_time_minus_3(df: pd.DataFrame) -> pd.DataFrame:
+    return adjust_local_time_offset(df, hours=3)
 
     s = df[col].astype(str).str.strip()
     time_only_mask = s.str.match(r"^\d{1,2}:\d{2}(:\d{2})?$", na=False)
