@@ -289,7 +289,7 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
 
     # R
     r_num = pd.to_numeric(df[colR], errors="coerce")
-    r_ok  = df[colR].isna() | (df[colR].astype(str).str.strip() == "") | (r_num > 2)
+    m_r   = df[colR].isna() | (df[colR].astype(str).str.strip() == "") | (r_num == 0)
 
 
     # P/Q (флаги), L/M (исключения)
@@ -660,8 +660,8 @@ def debug_filter_sequence(df, lesson_min=4, lesson_max=31):
     colL, colM = df.columns[11], df.columns[12]
     colP, colQ, colR = df.columns[15], df.columns[16], df.columns[17]
 
-    k_num = pd.to_numeric(df[colK], errors="coerce")
     r_num = pd.to_numeric(df[colR], errors="coerce")
+    m_r   = df[colR].isna() | (df[colR].astype(str).str.strip() == "") | (r_num == 0)
 
     m_active = df[colD].astype(str).str.strip().str.lower() == "active"
     m_k      = k_num.notna() & (k_num >= lesson_min) & (k_num <= lesson_max)
@@ -690,12 +690,12 @@ def debug_filter_sequence(df, lesson_min=4, lesson_max=31):
 
     steps = [
         ("Active", m_active),
-        (f"K in {lesson_min}..{lesson_max}", m_k),
-        ("R empty or >2", m_r),  # <-- обновили подпись шага
-        ("~P_true", m_p),
-        ("~Q_true", m_q),
-        ("L<=2", m_l),
-        ("M==0", m_m),
+        (f"Lessons from {lesson_min}..{lesson_max}", m_k),
+        ("0-2 balance students", m_r),  # <-- обновили подпись шага
+        ("No disband", m_p),
+        ("No merge", m_q),
+        ("Student transferred 1 time <=2", m_l),
+        ("Student transferred 2+ times ==0", m_m),
         ("Free slots ≥1", m_free),
     ]
     m = pd.Series(True, index=df.index)
@@ -771,6 +771,11 @@ def main():
 
             rating_map = load_rating_bp_map()  # старый источник рейтинга
             df = add_rating_bp_by_O(df, rating_map, new_col_name="Rating_BP")
+
+            # --- Debug: пошаговый разбор фильтра (Main) ---
+            with st.expander("Show filter breakdown (Main)", expanded=False):
+                debug_filter_sequence(df, lesson_min=4, lesson_max=31)
+
 
             filtered = filter_df(df)
             filtered = add_matches_combined(filtered, new_col_name="Matches")
