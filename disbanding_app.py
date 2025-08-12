@@ -90,6 +90,14 @@ def adjust_local_time_minus_3(df: pd.DataFrame) -> pd.DataFrame:
             col = df.columns[8]
         else:
             return df
+# --- Новая универсальная функция для сдвига времени на любое кол-во часов ---
+def adjust_local_time_offset(df: pd.DataFrame, hours: int) -> pd.DataFrame:
+    if df.empty:
+        return df
+    colI = df.columns[8]  # колонка I
+    df = df.copy()
+    df[colI] = pd.to_datetime(df[colI], errors="coerce") - pd.Timedelta(hours=hours)
+    return df
 
     s = df[col].astype(str).str.strip()
     time_only_mask = s.str.match(r"^\d{1,2}:\d{2}(:\d{2})?$", na=False)
@@ -925,7 +933,7 @@ def main():
             df_ext = exclude_c6_h_before_14d(df_ext)
     
             # остальной пайплайн
-            df_ext = adjust_local_time_minus_3(df_ext)
+            df_ext = adjust_local_time_offset(df_ext, hours=5)
     
             mapping = load_group_age_map()
             df_ext = replace_group_age_from_map(df_ext, mapping)
