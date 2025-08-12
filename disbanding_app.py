@@ -287,10 +287,9 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     k_num = pd.to_numeric(df[colK], errors="coerce")
     k_ok  = k_num.notna() & (k_num > 3) & (k_num < 32)
 
-    # R
+    # --- R: strictly == 0 ---
     r_num = pd.to_numeric(df[colR], errors="coerce")
-    m_r   = df[colR].isna() | (df[colR].astype(str).str.strip() == "") | (r_num == 0)
-
+    r_ok  = r_num == 0
 
     # P/Q (флаги), L/M (исключения)
     p_true = (df[colP] == True) | (df[colP].astype(str).str.strip().str.lower() == "true")
@@ -303,7 +302,7 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     exclude_l = (l_num > 2)
 
     # Итоговая маска
-    mask = d_active & k_ok & r_ok & ~p_true & ~q_true & ~exclude_m & ~exclude_l
+    mask = d_active & k_ok & r_ok & ~p_true & ~q_true & l_ok & m_ok & free_slots
 
     # --- ДОП. ФИЛЬТР: есть свободные места (Capacity - Paid >= 1) ---
     def _norm(s: str) -> str:
@@ -659,9 +658,12 @@ def debug_filter_sequence(df, lesson_min=4, lesson_max=31):
     colD, colK = df.columns[3], df.columns[10]
     colL, colM = df.columns[11], df.columns[12]
     colP, colQ, colR = df.columns[15], df.columns[16], df.columns[17]
-
+    
+    k_num = pd.to_numeric(df[colK], errors="coerce")
+    
+    # --- R: strictly == 0 ---
     r_num = pd.to_numeric(df[colR], errors="coerce")
-    m_r   = df[colR].isna() | (df[colR].astype(str).str.strip() == "") | (r_num == 0)
+    m_r   = r_num == 0
 
     m_active = df[colD].astype(str).str.strip().str.lower() == "active"
     m_k      = k_num.notna() & (k_num >= lesson_min) & (k_num <= lesson_max)
@@ -691,7 +693,7 @@ def debug_filter_sequence(df, lesson_min=4, lesson_max=31):
     steps = [
         ("Active", m_active),
         (f"Lessons from {lesson_min}..{lesson_max}", m_k),
-        ("0-2 balance students", m_r),  # <-- обновили подпись шага
+        ("0-2 balance students", m_r),
         ("No disband", m_p),
         ("No merge", m_q),
         ("Student transferred 1 time <=2", m_l),
