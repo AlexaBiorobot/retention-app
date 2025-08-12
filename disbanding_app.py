@@ -2,6 +2,7 @@ import os
 import json
 import io
 import re
+from datetime import timedelta
 import numpy as np
 import streamlit as st
 import pandas as pd
@@ -27,6 +28,10 @@ EXT_GROUPS_WS    = "Groups & Teachers"
 
 RATING_SS_ID = "1HItT2-PtZWoldYKL210hCQOLg3rh6U1Qj6NWkBjDjzk"
 RATING_WS    = "Rating"
+
+# внешний источник для второй вкладки
+EXTERNAL_SHEET_ID = "1XwyahhHC7uVzwfoErrvwrcruEjwewqIUp2u-6nvdSR0"
+EXTERNAL_WS_NAME  = "data"
 
 SHEET_ID = os.getenv("GSHEET_ID") or st.secrets.get("GSHEET_ID", DEFAULT_SHEET_ID)
 WS_NAME  = os.getenv("GSHEET_WS") or st.secrets.get("GSHEET_WS", DEFAULT_WS_NAME)
@@ -140,15 +145,10 @@ def load_group_age_map(sheet_id: str = EXT_GROUPS_SS_ID, worksheet_name: str = E
 
 
 def replace_group_age_from_map(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
-    """Подставляем Group age из внешней карты по колонке B (Group/ID/Title).
-       Если в mapping нет значения — оставляем исходное.
-    """
     if df.empty or not mapping:
         return df.copy()
-
     dff = df.copy()
 
-    # ищем колонку B (group id/title) по синонимам
     colB = None
     for c in dff.columns:
         if str(c).strip().lower().replace("_", " ") in (
@@ -159,7 +159,6 @@ def replace_group_age_from_map(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
     if colB is None:
         colB = dff.columns[1] if len(dff.columns) >= 2 else None
 
-    # ищем колонку Group age
     colG = None
     for c in dff.columns:
         if str(c).strip().lower().replace("_", " ") == "group age":
@@ -173,8 +172,6 @@ def replace_group_age_from_map(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
 
     keys = dff[colB].astype(str).str.strip()
     new_vals = keys.map(lambda k: mapping.get(k, pd.NA))
-
-    # подставляем только непустые значения из mapping
     dff[colG] = new_vals.where(new_vals.notna() & (new_vals.astype(str).str.strip() != ""), dff[colG])
     return dff
 
@@ -225,9 +222,6 @@ def add_rating_bp_by_O(df: pd.DataFrame, mapping: dict, new_col_name: str = "Rat
 
 
 def filter_df(df: pd.DataFrame) -> pd.DataFrame:
-    """Базовые фильтры + дополнительный: оставляем только строки, где (Capacity - Paid) >= 1.
-       По R берём, если пусто/NaN/0/"0".
-    """
     if df.empty:
         return df
     if len(df.columns) < 18:
@@ -238,18 +232,15 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     colL, colM = df.columns[11], df.columns[12]
     colP, colQ, colR = df.columns[15], df.columns[16], df.columns[17]
 
-    # Базовые поля
     d_active = df[colD].astype(str).str.strip().str.lower() == "active"
 
     k_num = pd.to_numeric(df[colK], errors="coerce")
     k_ok  = k_num.notna() & (k_num > 3) & (k_num < 32)
 
-    # R: ок, если пусто/NaN/0/"0"
     r_str = df[colR].astype(str).str.strip().str.lower()
     r_num = pd.to_numeric(df[colR], errors="coerce")
     r_ok  = df[colR].isna() | (r_str == "") | (r_str == "0") | (r_num == 0)
 
-    # P/Q (флаги), L/M (исключения)
     p_true = (df[colP] == True) | (df[colP].astype(str).str.strip().str.lower() == "true")
     q_true = (df[colQ] == True) | (df[colQ].astype(str).str.strip().str.lower() == "true")
 
@@ -259,10 +250,8 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     exclude_m = (m_num > 0)
     exclude_l = (l_num > 2)
 
-    # Итоговая маска
     mask = d_active & k_ok & r_ok & ~p_true & ~q_true & ~exclude_m & ~exclude_l
 
-    # --- ДОП. ФИЛЬТР: есть свободные места (Capacity - Paid >= 1) ---
     def _norm(s: str) -> str:
         return str(s).strip().lower().replace("_", " ").replace("-", " ")
 
@@ -287,7 +276,6 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
         have_free  = (cap_num.notna() & paid_num.notna()) & (free_slots >= 1)
         mask = mask & have_free
 
-        # Paid % = round(Paid/Capacity*100), формат строкой "NN%"
         with np.errstate(divide="ignore", invalid="ignore"):
             pct = np.where(cap_num > 0, (paid_num / cap_num) * 100.0, np.nan)
         paid_pct_series = pd.Series(pct, index=df.index)
@@ -297,7 +285,6 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     out = df.loc[mask].copy()
     out[colK] = k_num.loc[out.index]
 
-    # Добавим колонки Free slots и Paid % (если нашли Paid/Capacity)
     if (colPaid is not None) and (colCap is not None) and (free_slots is not None):
         out["Free slots"] = free_slots.loc[out.index]
         if paid_pct_series is not None:
@@ -319,9 +306,7 @@ def to_excel_bytes(data: pd.DataFrame) -> io.BytesIO | None:
 
 
 # --- утилиты матчинга ---
-
 def _time_to_minutes(v: str) -> float:
-    """I всегда HH:MM."""
     if v is None or pd.isna(v): return np.nan
     s = str(v).strip()
     if not re.fullmatch(r"\d{1,2}:\d{2}", s):
@@ -363,7 +348,6 @@ def _norm_rating(x: str) -> str:
     return s
 
 def can_pair(my_rating_raw: str, cand_rating_raw: str) -> bool:
-    """Правило пар по рейтингам из ТЗ."""
     my   = _norm_rating(my_rating_raw)
     cand = _norm_rating(cand_rating_raw)
 
@@ -375,22 +359,16 @@ def can_pair(my_rating_raw: str, cand_rating_raw: str) -> bool:
     OKISH = {"ok", "new_tutor_ok"}
 
     if cand in OKISH:
-        return my not in (HIGH | {"new_tutor"})  # не к high и не к 'new_tutor'
+        return my not in (HIGH | {"new_tutor"})
     if cand == "new_tutor":
-        return my not in HIGH                    # не к high
+        return my not in HIGH
     if cand in HIGH:
         return True
 
-    return True  # неизвестные ярлыки — разрешаем
+    return True
 
 
 def _b_suffix3(s: str) -> str:
-    """
-    Возвращает 3 буквы:
-      - если в B есть >= 2 подчёркиваний — берём 3 буквы после второго '_'
-      - если ровно 1 подчёркивание — берём 3 буквы после первого '_'
-      - иначе ""
-    """
     if s is None or pd.isna(s):
         return ""
     s = str(s).upper()
@@ -405,7 +383,6 @@ def _b_suffix3(s: str) -> str:
     return letters[:3] if len(letters) >= 3 else ""
 
 
-# --- объединённые Matches (time±120 ИЛИ suffix3 равен), + базовые условия ---
 def add_matches_combined(df: pd.DataFrame, new_col_name="Matches") -> pd.DataFrame:
     if df.empty:
         return df
@@ -450,7 +427,6 @@ def add_matches_combined(df: pd.DataFrame, new_col_name="Matches") -> pd.DataFra
         mask.iloc[i] = False
 
         if mask.any():
-            # Для вывода берём только B, E, K (+ Rating и Free slots)
             cols_take = [colB, colE, colK]
             cols_take = [c for c in cols_take if c in df.columns]
             sub = df.loc[mask, cols_take].copy()
@@ -480,18 +456,12 @@ def add_matches_combined(df: pd.DataFrame, new_col_name="Matches") -> pd.DataFra
     return out
 
 
-# --- WideMatches: без времени/суффикса, смотрим и вверх, и вниз; не исключаем тех, у кого уже есть Matches ---
 def add_wide_matches_column(df: pd.DataFrame, new_col_name="WideMatches", exclude_col="Matches") -> pd.DataFrame:
-    """
-    WideMatches: без времени и без суффикса, смотрим и вверх, и вниз.
-    НЕ включаем те кандидаты, которые уже присутствуют в Matches этой же строки.
-    Условия: same course & same age & |K-K'| <= 1 & одинаковый PRM-статус & рейтинги совместимы.
-    """
     if df.empty:
         return df
 
     colB, colE, colF, colG = df.columns[1], df.columns[4], df.columns[5], df.columns[6]
-    colI, colK             = df.columns[8], df.columns[10]  # colI не используем, оставлен для совместимости
+    colI, colK             = df.columns[8], df.columns[10]
     rating_col             = _find_rating_col(df)
 
     f_vals = df[colF].astype(str).str.strip()
@@ -519,23 +489,19 @@ def add_wide_matches_column(df: pd.DataFrame, new_col_name="WideMatches", exclud
         my_r = r_vals.iloc[i]
         ok_by_rating = r_vals.apply(lambda rr: can_pair(my_r, rr))
 
-        # Базовая широкая маска
         mask = same_course & same_age & close_k & same_prm & ok_by_rating
-        mask.iloc[i] = False  # не матчим сами на себя
+        mask.iloc[i] = False
 
-        # --- НОВОЕ: исключаем то, что уже есть в Matches этой строки ---
         if exclude_col in df.columns:
             ex_text = df.iloc[i][exclude_col]
             ex_set = set()
             if pd.notna(ex_text):
                 for line in str(ex_text).splitlines():
-                    # строки вида: "- <GroupID>, Tutor: ..., Rating: ..., lesson: ..., slots: ..."
                     m = re.match(r"^\s*-\s*(.*?),", line)
                     if m:
                         ex_set.add(m.group(1).strip())
             if ex_set:
                 mask = mask & ~df[colB].astype(str).isin(ex_set)
-        # --- конец нового блока ---
 
         if mask.any():
             cols_take = [colB, colE, colK]
@@ -569,7 +535,7 @@ def add_wide_matches_column(df: pd.DataFrame, new_col_name="WideMatches", exclud
     return out
 
 
-# ---- Нормализатор имён и выбор колонок по синонимам ----
+# ---- вспомогательные ----
 def _norm_name(s: str) -> str:
     return re.sub(r"\s+", " ", str(s).strip().lower())
 
@@ -581,6 +547,140 @@ def _pick_col(df: pd.DataFrame, candidates: set[str], fallback_idx: int | None =
     if fallback_idx is not None and fallback_idx < len(df.columns):
         return df.columns[fallback_idx]
     return None
+
+# правило для второй вкладки: исключить C=6 и H старше 14 дней
+def exclude_c6_h_before_14d(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty or len(df.columns) < 8:
+        return df
+    col_c = df.columns[2]  # C
+    col_h = df.columns[7]  # H
+
+    c_num = pd.to_numeric(df[col_c], errors="coerce")
+
+    h_dt = pd.to_datetime(df[col_h], errors="coerce", dayfirst=False, infer_datetime_format=True)
+    miss = h_dt.isna()
+    if miss.any():
+        h_dt.loc[miss] = pd.to_datetime(df.loc[miss, col_h], errors="coerce", dayfirst=True)
+
+    cutoff = pd.Timestamp.today().normalize() - pd.Timedelta(days=14)
+    mask_exclude = (c_num == 6) & h_dt.notna() & (h_dt < cutoff)
+    return df.loc[~mask_exclude].copy()
+
+
+def render_pipeline(df: pd.DataFrame, caption_prefix: str = "") -> pd.DataFrame:
+    if df.empty:
+        st.warning("Источник пустой.")
+        return df
+
+    df = adjust_local_time_minus_3(df)
+    mapping = load_group_age_map()
+    df = replace_group_age_from_map(df, mapping)
+    rating_map = load_rating_bp_map()
+    df = add_rating_bp_by_O(df, rating_map, new_col_name="Rating_BP")
+    filtered = filter_df(df)
+    filtered = add_matches_combined(filtered, new_col_name="Matches")
+    filtered = add_wide_matches_column(filtered, new_col_name="WideMatches", exclude_col="Matches")
+
+    dff = filtered.copy()
+
+    col_group      = _pick_col(dff, {"group", "group title", "group name", "group id"}, fallback_idx=1)
+    col_tutor      = _pick_col(dff, {"tutor", "teacher", "tutor name", "teacher name"}, fallback_idx=4)
+    col_tutor_id   = _pick_col(dff, {"tutor id", "teacher id", "id"}, fallback_idx=14)
+    col_course     = _pick_col(dff, {"course"}, fallback_idx=5)
+    col_group_age  = _pick_col(dff, {"group age", "age"}, fallback_idx=6)
+    col_local_time = _pick_col(dff, {"local time", "localtime", "time (local)"}, fallback_idx=8)
+    col_module     = _pick_col(dff, {"module"}, fallback_idx=2)
+    col_lesson_num = _pick_col(dff, {"lesson number", "lesson", "lesson_num"}, fallback_idx=13)
+    col_capacity   = _pick_col(dff, {"capacity", "cap"})
+    col_paid       = _pick_col(dff, {"paid students", "paid student", "paid"})
+    col_transfer1  = _pick_col(dff, {"students transferred 1 time", "transferred 1 time"}, fallback_idx=11)
+    col_paid_pct   = _pick_col(dff, {"paid %", "paid percent", "paid percentage", "paid pct"})
+
+    col_m_text  = "Matches"           if "Matches"           in dff.columns else None
+    col_m_cnt   = "Matches_count"     if "Matches_count"     in dff.columns else None
+    col_w_text  = "WideMatches"       if "WideMatches"       in dff.columns else None
+    col_w_cnt   = "WideMatches_count" if "WideMatches_count" in dff.columns else None
+
+    cols_all = list(dff.columns)
+    def col(idx):
+        return cols_all[idx] if idx < len(cols_all) else None
+
+    colA, colB, colC = col(0), col(1), col(2)
+    colE, colF, colG = col(4), col(5), col(6)
+    colI, colJ, colK = col(8), col(9), col(10)
+    colL, colN, colO = col(11), col(13), col(14)
+
+    rating_colname = _find_rating_col(dff)
+
+    desired = [
+        colA, colB, colE, colO, rating_colname,
+        colF, colG, colI,
+        col_capacity, col_paid, "Free slots", "Paid %",
+        colK, colC, colN, colL,
+        "Matches_count", "Matches",
+        "WideMatches_count", "WideMatches",
+    ]
+    display_cols = [c for c in desired if (c is not None and c in dff.columns)]
+    seen = set()
+    display_cols = [c for c in display_cols if not (c in seen or seen.add(c))]
+
+    curated = dff.loc[:, display_cols].copy()
+    curated = curated.loc[:, ~curated.columns.duplicated()]
+
+    if rating_colname and rating_colname in curated.columns:
+        curated.rename(columns={rating_colname: "Rating"}, inplace=True)
+
+    def _to_na(v):
+        if v is None or pd.isna(v):
+            return pd.NA
+        if isinstance(v, str):
+            s = (v.replace("\u00A0", " ")
+                   .replace("\u200B", "")
+                   .replace("\u200C", "")
+                   .replace("\u200D", "")
+                   .replace("\uFEFF", "")
+                   .strip())
+            if s == "" or s.lower() in {"nan", "none", "null", "na"}:
+                return pd.NA
+            return s
+        return v
+
+    curated = curated.applymap(_to_na)
+
+    count_cols = [c for c in ["Matches_count","WideMatches_count"] if c in curated.columns]
+    text_cols  = [c for c in ["Matches","WideMatches"] if c in curated.columns]
+    base_cols  = [c for c in curated.columns if c not in (count_cols + text_cols)]
+
+    has_base   = curated[base_cols].notna().any(axis=1) if base_cols else False
+    has_text   = curated[text_cols].notna().any(axis=1) if text_cols else False
+    has_counts = (sum(pd.to_numeric(curated[c], errors="coerce").fillna(0).astype(int) for c in count_cols) > 0) if count_cols else False
+
+    curated = curated[ has_base | has_text | has_counts ].reset_index(drop=True)
+
+    ROW, HEADER = 34, 39
+    table_h = min(700, HEADER + ROW * max(1, len(curated)))
+
+    st.caption(f"{caption_prefix}Filtered rows: {len(curated)}")
+    cfg = {}
+    for c in ["BO", "Group", "Tutor", "Course", "Matches", "WideMatches"]:
+        if c in curated.columns:
+            cfg[c] = st.column_config.TextColumn(label=c, width="large")
+    for c in ["Lesson number", "Capacity", "Paid students", "Free slots", "Paid %", "Students transferred 1 time",
+              "Module", "Group age", "Local time",
+              "Matches_count", "WideMatches_count"]:
+        if c in curated.columns:
+            cfg[c] = st.column_config.TextColumn(label=c, width="small")
+
+    st.dataframe(curated, use_container_width=True, height=table_h, column_config=cfg)
+
+    st.download_button(
+        f"⬇️ Download CSV ({caption_prefix.strip() or 'curated'})",
+        curated.to_csv(index=False).encode("utf-8"),
+        file_name=f"curated_{(caption_prefix.strip().lower().replace(' ', '_') or 'main')}.csv",
+        mime="text/csv",
+    )
+
+    return curated
 
 
 def main():
@@ -618,215 +718,40 @@ def main():
     """))
     st.divider()
 
-    # --- Source (hidden, no UI) ---
-    sheet_id = SHEET_ID
-    ws_name  = WS_NAME
-    
-    try:
-        client = _authorize_client()
-        sh = client.open_by_key(sheet_id)
-        ws_names = [ws.title for ws in sh.worksheets()]
-        if ws_name not in ws_names and ws_names:
-            ws_name = ws_names[0]
-    except Exception:
-        pass
+    tabs = st.tabs(["Main data", "External data"])
 
-    with st.spinner("Loading data from Google Sheets…"):
-        df = load_sheet_df(sheet_id, ws_name)
+    # ---------- TAB 1: основной источник ----------
+    with tabs[0]:
+        sheet_id = SHEET_ID
+        ws_name  = WS_NAME
 
-    if df.empty:
-        st.warning(f"Пусто: проверь вкладку '{ws_name}' и доступ сервисного аккаунта (Viewer/Editor).")
-        st.stop()
+        try:
+            client = _authorize_client()
+            sh = client.open_by_key(sheet_id)
+            ws_names = [ws.title for ws in sh.worksheets()]
+            if ws_name not in ws_names and ws_names:
+                ws_name = ws_names[0]
+        except Exception:
+            pass
 
-    df = adjust_local_time_minus_3(df)
+        with st.spinner("Loading MAIN data…"):
+            df_main = load_sheet_df(sheet_id, ws_name)
 
-    mapping = load_group_age_map()
-    df = replace_group_age_from_map(df, mapping)
+        if df_main.empty:
+            st.warning(f"Пусто: проверь вкладку '{ws_name}' и доступ сервисного аккаунта (Viewer/Editor).")
+        else:
+            render_pipeline(df_main, caption_prefix="Main • ")
 
-    rating_map = load_rating_bp_map()
-    df = add_rating_bp_by_O(df, rating_map, new_col_name="Rating_BP")
+    # ---------- TAB 2: внешний файл + правило C/H ----------
+    with tabs[1]:
+        with st.spinner("Loading EXTERNAL data…"):
+            df_ext = load_sheet_df(EXTERNAL_SHEET_ID, EXTERNAL_WS_NAME)
 
-    filtered = filter_df(df)
-
-    # матчи
-    filtered = add_matches_combined(filtered, new_col_name="Matches")
-    filtered = add_wide_matches_column(filtered, new_col_name="WideMatches", exclude_col="Matches")
-
-    c1, c2 = st.columns(2)
-    c1.caption(f"Rows total: {len(df)}")
-
-    # --- Sidebar Filters (multiselect-only, без слайдеров по тексту) ---
-    dff = filtered.copy()
-
-    # маппим нужные поля по именам, с fallback на позиции A:R (0-based)
-    col_group      = _pick_col(dff, {"group", "group title", "group name", "group id"}, fallback_idx=1)   # B
-    col_tutor      = _pick_col(dff, {"tutor", "teacher", "tutor name", "teacher name"}, fallback_idx=4)   # E
-    col_tutor_id   = _pick_col(dff, {"tutor id", "teacher id", "id"}, fallback_idx=14)                    # O
-    col_course     = _pick_col(dff, {"course"}, fallback_idx=5)                                           # F
-    col_group_age  = _pick_col(dff, {"group age", "age"}, fallback_idx=6)                                 # G
-    col_local_time = _pick_col(dff, {"local time", "localtime", "time (local)"}, fallback_idx=8)          # I
-    col_module     = _pick_col(dff, {"module"}, fallback_idx=2)                                           # C
-    col_lesson_num = _pick_col(dff, {"lesson number", "lesson", "lesson_num"}, fallback_idx=13)           # N
-    col_capacity   = _pick_col(dff, {"capacity", "cap"})                                                  # по имени
-    col_paid       = _pick_col(dff, {"paid students", "paid student", "paid"})                            # по имени
-    col_transfer1  = _pick_col(dff, {"students transferred 1 time", "transferred 1 time"}, fallback_idx=11) # L
-    col_paid_pct   = _pick_col(dff, {"paid %", "paid percent", "paid percentage", "paid pct"})
-
-    # колонки matches
-    col_m_text  = "Matches"           if "Matches"           in dff.columns else None
-    col_m_cnt   = "Matches_count"     if "Matches_count"     in dff.columns else None
-    col_w_text  = "WideMatches"       if "WideMatches"       in dff.columns else None
-    col_w_cnt   = "WideMatches_count" if "WideMatches_count" in dff.columns else None
-
-    def _ms_options(df_, col):
-        if not col or col not in df_.columns:
-            return []
-        return sorted(df_[col].dropna().astype(str).unique())
-
-    def _apply_ms(df_, col, sel):
-        if not col or not sel:
-            return df_
-        return df_[df_[col].astype(str).isin(sel)]
-
-    with st.sidebar.expander("Filters", expanded=True):
-        # текстовые мультиселекты
-        dff = _apply_ms(dff, col_group,      st.multiselect("Group",      _ms_options(dff, col_group)))
-        dff = _apply_ms(dff, col_tutor,      st.multiselect("Tutor",      _ms_options(dff, col_tutor)))
-        dff = _apply_ms(dff, col_tutor_id,   st.multiselect("Tutor ID",   _ms_options(dff, col_tutor_id)))
-        dff = _apply_ms(dff, col_course,     st.multiselect("Course",     _ms_options(dff, col_course)))
-        dff = _apply_ms(dff, col_group_age,  st.multiselect("Group age",  _ms_options(dff, col_group_age)))
-        dff = _apply_ms(dff, col_local_time, st.multiselect("Local time", _ms_options(dff, col_local_time)))
-        dff = _apply_ms(dff, col_module,     st.multiselect("Module",     _ms_options(dff, col_module)))
-
-        # тоже как текст — никаких слайдеров
-        dff = _apply_ms(dff, col_lesson_num, st.multiselect("Lesson number",             _ms_options(dff, col_lesson_num)))
-        dff = _apply_ms(dff, col_capacity,   st.multiselect("Capacity",                  _ms_options(dff, col_capacity)))
-        dff = _apply_ms(dff, col_paid,       st.multiselect("Paid students",             _ms_options(dff, col_paid)))
-        dff = _apply_ms(dff, col_paid_pct,   st.multiselect("Paid %",                    _ms_options(dff, col_paid_pct)))
-        dff = _apply_ms(dff, col_transfer1,  st.multiselect("Students transferred 1 time", _ms_options(dff, col_transfer1)))
-
-        # пороги по количеству матчей
-        if col_m_cnt: 
-            min_m = st.number_input("Min Matches",      min_value=0, value=0, step=1)
-            dff = dff[pd.to_numeric(dff[col_m_cnt], errors="coerce").fillna(0).astype(int) >= min_m]
-        if col_w_cnt:
-            min_w = st.number_input("Min Wide matches", min_value=0, value=0, step=1)
-            dff = dff[pd.to_numeric(dff[col_w_cnt], errors="coerce").fillna(0).astype(int) >= min_w]
-
-        # поиск по тексту матчей
-        q = st.text_input("Search in matches text")
-        if q:
-            qrx = re.escape(q)
-            mask = pd.Series(False, index=dff.index)
-            for col in [col_m_text, col_w_text]:
-                if col:
-                    mask |= dff[col].astype(str).str.contains(qrx, case=False, na=False)
-            dff = dff[mask]
-
-        # оставить только строки, где есть любые матчи
-        only_any = st.checkbox("Only rows with any matches", value=False)
-        if only_any:
-            cnt = pd.Series(0, index=dff.index)
-            for col in [col_m_cnt, col_w_cnt]:
-                if col:
-                    cnt = cnt.add(pd.to_numeric(dff[col], errors="coerce").fillna(0).astype(int), fill_value=0)
-            dff = dff[cnt > 0]
-
-    st.success(f"Filtered rows: {len(dff)}")
-
-    # --- Причесанный вывод в заданном порядке ---
-    cols_all = list(dff.columns)
-    def col(idx):
-        return cols_all[idx] if idx < len(cols_all) else None
-    
-    colA, colB, colC = col(0), col(1), col(2)
-    colE, colF, colG = col(4), col(5), col(6)
-    colI, colJ, colK = col(8), col(9), col(10)
-    colL, colN, colO = col(11), col(13), col(14)
-    
-    # найдём колонку рейтинга и поставим её сразу после Tutor ID
-    rating_colname = _find_rating_col(dff)  # "Rating_BP" или "Rating"
-    # добавим Free slots и Paid % (они появились в dff, если нашлись Paid/Capacity)
-    desired = [
-        colA, colB, colE, colO, rating_colname,
-        colF, colG, colI,             # базовые поля
-        col_capacity, col_paid, "Free slots", "Paid %",  # Capacity / Paid / Free / Paid %
-        colK, colC, colN, colL,       # прочее
-        "Matches_count", "Matches",
-        "WideMatches_count", "WideMatches",
-    ]
-    display_cols = [c for c in desired if (c is not None and c in dff.columns)]
-    
-    # убираем дубликаты имён, сохраняя порядок
-    seen = set()
-    display_cols = [c for c in display_cols if not (c in seen or seen.add(c))]
-    
-    curated = dff.loc[:, display_cols].copy()
-    
-    # дополнительная страховка: если всё же где-то повторилось имя — дропаем дубликаты
-    curated = curated.loc[:, ~curated.columns.duplicated()]
-
-    # жёстко переименуем рейтинг
-    if rating_colname and rating_colname in curated.columns:
-        curated.rename(columns={rating_colname: "Rating"}, inplace=True)
-    
-    # --- чистим невидимые символы и скрытые "пустоты", затем убираем пустые строки ---
-    def _to_na(v):
-        if v is None or pd.isna(v):
-            return pd.NA
-        if isinstance(v, str):
-            s = (v.replace("\u00A0", " ")
-                   .replace("\u200B", "")
-                   .replace("\u200C", "")
-                   .replace("\u200D", "")
-                   .replace("\uFEFF", "")
-                   .strip())
-            if s == "" or s.lower() in {"nan", "none", "null", "na"}:
-                return pd.NA
-            return s
-        return v
-    
-    curated = curated.applymap(_to_na)
-    
-    # если все видимые значения пустые — строку удаляем (ноль в счётчиках не считается «данными»)
-    count_cols = [c for c in ["Matches_count","WideMatches_count"] if c in curated.columns]
-    text_cols  = [c for c in ["Matches","WideMatches"] if c in curated.columns]
-    base_cols  = [c for c in curated.columns if c not in (count_cols + text_cols)]
-    
-    has_base   = curated[base_cols].notna().any(axis=1) if base_cols else False
-    has_text   = curated[text_cols].notna().any(axis=1) if text_cols else False
-    has_counts = (sum(pd.to_numeric(curated[c], errors="coerce").fillna(0).astype(int) for c in count_cols) > 0) if count_cols else False
-    
-    curated = curated[ has_base | has_text | has_counts ].reset_index(drop=True)
-
-    # --- Рендер: широкая таблица без «висячих» пустых рядов ---
-    ROW, HEADER, PAD = 34, 39, 8
-    table_h = min(700, HEADER + ROW * max(1, len(curated)))
-    
-    # Настроим ширины колонок
-    cfg = {}
-    for c in ["BO", "Group", "Tutor", "Course", "Matches", "WideMatches"]:
-        if c in curated.columns:
-            cfg[c] = st.column_config.TextColumn(label=c, width="large")
-    for c in ["Lesson number", "Capacity", "Paid students", "Free slots", "Paid %", "Students transferred 1 time",
-              "Module", "Group age", "Local time",
-              "Matches_count", "WideMatches_count"]:
-        if c in curated.columns:
-            cfg[c] = st.column_config.TextColumn(label=c, width="small")
-    
-    st.dataframe(
-        curated,
-        use_container_width=True,
-        height=table_h,
-        column_config=cfg,
-    )
-    
-    st.download_button(
-        "⬇️ Download CSV (curated)",
-        curated.to_csv(index=False).encode("utf-8"),
-        file_name="curated_view.csv",
-        mime="text/csv",
-    )
+        if df_ext.empty:
+            st.warning(f"Пусто: проверь файл '{EXTERNAL_SHEET_ID}', вкладку '{EXTERNAL_WS_NAME}' и доступ.")
+        else:
+            df_ext_rule = exclude_c6_h_before_14d(df_ext)
+            render_pipeline(df_ext_rule, caption_prefix="External • ")
 
     if st.button("Refresh"):
         load_sheet_df.clear()
