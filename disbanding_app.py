@@ -943,7 +943,6 @@ def main():
                     colPaid = c
                 if colCap is None and n in {"capacity","cap"}:
                     colCap = c
-            st.write(f"🧭 cap='{colCap}', paid='{colPaid}'")
 
             with st.expander("Show filter breakdown", expanded=False):
                 debug_filter_sequence(df_ext, lesson_min=4, lesson_max=31)
