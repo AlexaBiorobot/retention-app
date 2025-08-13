@@ -37,7 +37,7 @@ RATING2_SS_ID = "16QrbLtzLTV6GqyT8HYwzcwYIsXewzjUbM0Jy5i1fENE"
 RATING2_WS    = "Rating"
 
 # --- LATAM: источник Group age ---
-LATAM_GROUPS_SS_ID = RATING_SS_ID      # "1HItT2-PtZWoldYKL210hCQOLg3rh6U1Qj6NWkBjDjzk"
+LATAM_GROUPS_SS_ID = "16QrbLtzLTV6GqyT8HYwzcwYIsXewzjUbM0Jy5i1fENE"
 LATAM_GROUPS_WS    = "Groups"
 
 SHEET_ID = os.getenv("GSHEET_ID") or st.secrets.get("GSHEET_ID", DEFAULT_SHEET_ID)
