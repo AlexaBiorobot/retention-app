@@ -810,6 +810,138 @@ def debug_filter_sequence(df, lesson_min=4, lesson_max=31):
         st.write(f"after {name}: {int(m.sum())}  (−{prev_cnt - int(m.sum())})")
     st.write("Final:", int(m.sum()))
 
+def _col_by_index(df: pd.DataFrame, idx: int) -> str | None:
+    return df.columns[idx] if idx < len(df.columns) else None
+
+def _series_bool(name, s):
+    # для аккуратного отображения NaN → False
+    return pd.Series(s.fillna(False).astype(bool), name=name)
+
+def debug_matches_sequence(df: pd.DataFrame, strict: bool = True, sample_row: int | None = 0):
+    """
+    Пошаговый разбор логики матчей:
+    strict=True  -> Matches (с временем ±120 ИЛИ суффиксом)
+    strict=False -> WideMatches (без времени и без суффикса)
+    Сравнение по индексам колонок: B=1, E=4, F=5, G=6, I=8, K=10.
+    """
+    if df.empty:
+        st.write("df is empty")
+        return
+
+    # ---- колонки по индексам
+    colB = _col_by_index(df, 1)   # Group/ID
+    colE = _col_by_index(df, 4)   # Tutor (только для вывода)
+    colF = _col_by_index(df, 5)   # Course
+    colG = _col_by_index(df, 6)   # Group age (уже после replace_group_age_from_map)
+    colI = _col_by_index(df, 8)   # Local time (уже со сдвигом)
+    colK = _col_by_index(df, 10)  # Lesson number
+
+    if any(c is None for c in [colB, colF, colG, colK]):
+        st.warning("Ожидались колонки B,F,G,K по индексам (1,5,6,10). Проверь порядок столбцов.")
+        return
+
+    # ---- данные и вспомогательные ряды
+    b_vals = df[colB].astype(str).fillna("").str.upper()
+    f_vals = df[colF].astype(str).str.strip()
+    g_vals = df[colG].astype(str).str.strip()
+    k_num  = pd.to_numeric(df[colK], errors="coerce")
+
+    if colI is not None and colI in df.columns:
+        i_mins = df[colI].astype(str).str.strip().apply(_time_to_minutes)
+    else:
+        i_mins = pd.Series(np.nan, index=df.index)
+
+    b_is_prm = b_vals.str.contains("PRM", na=False)
+    rating_col = _find_rating_col(df)
+    r_vals = df[rating_col].astype(str) if rating_col else pd.Series("", index=df.index)
+
+    # суффикс из B для strict
+    suf3 = b_vals.apply(_b_suffix3)
+
+    # какую строку брать в качестве «эталона» для пошагового показа
+    i = 0 if sample_row is None else int(sample_row)
+    i = max(0, min(i, len(df) - 1))
+
+    st.markdown(f"#### Debug for {'Matches (strict)' if strict else 'WideMatches'} — sample row: {i+1}")
+    st.write({
+        "Group": df.iloc[i][colB],
+        "Course": df.iloc[i][colF] if colF in df.columns else None,
+        "Age": df.iloc[i][colG] if colG in df.columns else None,
+        "Lesson": df.iloc[i][colK] if colK in df.columns else None,
+        "Local time (mins)": i_mins.iloc[i] if pd.notna(i_mins.iloc[i]) else None,
+        "Suffix(_b_suffix3)": suf3.iloc[i],
+        "PRM?": bool(b_is_prm.iloc[i]),
+        "Rating": r_vals.iloc[i] if len(r_vals) else None,
+    })
+
+    # --- по шагам формируем маски
+    same_course = (f_vals == f_vals.iloc[i])
+    same_age    = (g_vals == g_vals.iloc[i])
+
+    base_k = k_num.iloc[i]
+    close_k = (k_num.sub(base_k).abs() <= 1) if not pd.isna(base_k) else pd.Series(False, index=df.index)
+
+    same_prm = (b_is_prm == b_is_prm.iloc[i])
+
+    my_r = r_vals.iloc[i] if len(r_vals) else ""
+    ok_by_rating = r_vals.apply(lambda rr: can_pair(my_r, rr)) if len(r_vals) else pd.Series(True, index=df.index)
+
+    # strict: время ±120 ИЛИ совпадающий непустой суффикс
+    if strict:
+        base_t = i_mins.iloc[i]
+        close_time = (i_mins.sub(base_t).abs() <= 120) if not pd.isna(base_t) else pd.Series(False, index=df.index)
+
+        suf_i = suf3.iloc[i]
+        if isinstance(suf_i, str) and len(suf_i) > 0:
+            same_suf = (suf3 == suf_i) & (suf3.str.len() > 0)
+        else:
+            same_suf = pd.Series(False, index=df.index)
+
+        final_gate = (close_time | same_suf)
+    else:
+        # wide: без времени и без суффикса
+        final_gate = pd.Series(True, index=df.index)
+
+    # собираем шаги
+    steps = [
+        ("Same course",       _series_bool("same_course", same_course)),
+        ("Same group age",    _series_bool("same_age",    same_age)),
+        ("Lesson ±1",         _series_bool("close_k",     close_k)),
+        ("Same PRM flag",     _series_bool("same_prm",    same_prm)),
+        ("Rating-compatible", _series_bool("ok_by_rating",ok_by_rating)),
+    ]
+    if strict:
+        steps.append(("Time±120 OR same suffix", _series_bool("final_gate", final_gate)))
+    else:
+        steps.append(("Wide gate (no time/suffix)", _series_bool("final_gate", final_gate)))
+
+    # поэтапная стыковка масок
+    m = pd.Series(True, index=df.index)
+    st.markdown("##### Stepwise intersection")
+    st.write("Start:", int(m.sum()))
+    for name, mask in steps:
+        prev = int(m.sum())
+        m = m & mask
+        # исключаем саму строку
+        if i < len(m):
+            m.iloc[i] = False
+        st.write(f"after {name}: {int(m.sum())}  (−{prev - int(m.sum())})")
+
+    st.write("Final:", int(m.sum()))
+
+    # Покажем небольшой сэмпл итоговых кандидатов
+    if int(m.sum()) > 0:
+        cols_for_view = [c for c in [colB, colE, colF, colG, colK, colI] if c in df.columns]
+        sub = df.loc[m, cols_for_view].copy()
+        if len(sub) > 20:
+            st.write(sub.head(20))
+            st.caption(f"... and {len(sub)-20} more")
+        else:
+            st.write(sub)
+    else:
+        st.info("Нет кандидатов на выходе для выбранной строки.")
+
+
 def main():
     st.title("Disbanding Brazil/Latam")
 
@@ -883,6 +1015,32 @@ def main():
             filtered = filter_df(df)
             filtered = add_matches_combined(filtered, new_col_name="Matches")
             filtered = add_wide_matches_column(filtered, new_col_name="WideMatches", exclude_col="Matches")
+
+            # ⬇️ DEBUG блоки для пошагового логирования матчей
+            if len(filtered) > 0:
+                with st.expander("🧭 Debug Matches (strict)", expanded=False):
+                    row_idx_strict = st.number_input(
+                        "Sample row (1-based)",
+                        min_value=1,
+                        max_value=len(filtered),
+                        value=1,
+                        step=1,
+                        key="dbg_row_strict_main",
+                    )
+                    debug_matches_sequence(filtered, strict=True, sample_row=row_idx_strict - 1)
+            
+                with st.expander("🧭 Debug WideMatches", expanded=False):
+                    row_idx_wide = st.number_input(
+                        "Sample row (1-based)",
+                        min_value=1,
+                        max_value=len(filtered),
+                        value=1,
+                        step=1,
+                        key="dbg_row_wide_main",
+                    )
+                    debug_matches_sequence(filtered, strict=False, sample_row=row_idx_wide - 1)
+            else:
+                st.info("Нет строк после фильтра — лог матчей скрыт.")
 
             c1, c2 = st.columns(2)
             c1.caption(f"Rows total: {len(df)}")
@@ -1058,6 +1216,31 @@ def main():
     
             filtered = add_wide_matches_column(filtered, new_col_name="WideMatches", exclude_col="Matches")
 
+            # ⬇️ DEBUG блоки для пошагового логирования матчей
+            if len(filtered) > 0:
+                with st.expander("🧭 Debug Matches (strict)", expanded=False):
+                    row_idx_strict = st.number_input(
+                        "Sample row (1-based)",
+                        min_value=1,
+                        max_value=len(filtered),
+                        value=1,
+                        step=1,
+                        key="dbg_row_strict_ext",
+                    )
+                    debug_matches_sequence(filtered, strict=True, sample_row=row_idx_strict - 1)
+            
+                with st.expander("🧭 Debug WideMatches", expanded=False):
+                    row_idx_wide = st.number_input(
+                        "Sample row (1-based)",
+                        min_value=1,
+                        max_value=len(filtered),
+                        value=1,
+                        step=1,
+                        key="dbg_row_wide_ext",
+                    )
+                    debug_matches_sequence(filtered, strict=False, sample_row=row_idx_wide - 1)
+            else:
+                st.info("Нет строк после фильтра — лог матчей скрыт.")
 
 
             c1, c2 = st.columns(2)
