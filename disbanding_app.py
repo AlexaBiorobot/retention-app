@@ -910,6 +910,9 @@ def debug_matches_sequence(
     if int(m.sum()) > 0:
         cols_for_view = [c for c in [colB, colE, colF, colG, colK] if c in df.columns]
         sub = df.loc[m, cols_for_view].copy()
+        if rating_col:
+            insert_pos = sub.columns.get_loc(colE) + 1  # после Tutor
+            sub.insert(insert_pos, "Rating", r_vals.loc[sub.index].values)
         if colI in df.columns:
             sub["Local time"] = i_mins.loc[sub.index].apply(_minutes_to_hhmm)
         if len(sub) > 20:
