@@ -996,31 +996,34 @@ def main():
             filtered = add_wide_matches_column(filtered, new_col_name="WideMatches", exclude_col="Matches")
 
             # ⬇️ DEBUG блоки для пошагового логирования матчей
-            with st.expander("🧭 Debug Matches (strict)", expanded=False):
-                row_idx_strict = st.number_input(
-                    "Sample row (0-based)",
-                    min_value=0,
-                    max_value=len(filtered)-1,
-                    value=0,
-                    step=1,
-                    key="dbg_row_strict_main",
-                )
-                debug_matches_sequence(filtered, strict=True, sample_row=row_idx_strict)
+            if len(filtered) > 0:
+                with st.expander("🧭 Debug Matches (strict)", expanded=False):
+                    row_idx_strict = st.number_input(
+                        "Sample row (0-based)",
+                        min_value=0,
+                        max_value=len(filtered) - 1,
+                        value=0,
+                        step=1,
+                        key="dbg_row_strict_main",
+                    )
+                    debug_matches_sequence(filtered, strict=True, sample_row=row_idx_strict)
             
-            with st.expander("🧭 Debug WideMatches", expanded=False):
-                row_idx_wide = st.number_input(
-                    "Sample row (0-based)",
-                    min_value=0,
-                    max_value=len(filtered)-1,
-                    value=0,
-                    step=1,
-                    key="dbg_row_wide_main",
-                )
-                debug_matches_sequence(filtered, strict=False, sample_row=row_idx_wide,
-                                       exclude_col_for_wide="Matches")
-
+                with st.expander("🧭 Debug WideMatches", expanded=False):
+                    row_idx_wide = st.number_input(
+                        "Sample row (0-based)",
+                        min_value=0,
+                        max_value=len(filtered) - 1,
+                        value=0,
+                        step=1,
+                        key="dbg_row_wide_main",
+                    )
+                    debug_matches_sequence(
+                        filtered, strict=False, sample_row=row_idx_wide,
+                        exclude_col_for_wide="Matches"
+                    )
             else:
                 st.info("Нет строк после фильтра — лог матчей скрыт.")
+
             
             c1, c2 = st.columns(2)
             c1.caption(f"Rows total: {len(df)}")
@@ -1198,31 +1201,34 @@ def main():
             filtered = add_wide_matches_column(filtered, new_col_name="WideMatches", exclude_col="Matches")
 
             # ⬇️ DEBUG блоки для пошагового логирования матчей
-            with st.expander("🧭 Debug Matches (strict)", expanded=False):
-                row_idx_strict = st.number_input(
-                    "Sample row (0-based)",
-                    min_value=0,
-                    max_value=len(filtered)-1,
-                    value=0,
-                    step=1,
-                    key="dbg_row_strict_ext",
-                )
-                debug_matches_sequence(filtered, strict=True, sample_row=row_idx_strict)
+            if len(filtered) > 0:
+                with st.expander("🧭 Debug Matches (strict)", expanded=False):
+                    row_idx_strict = st.number_input(
+                        "Sample row (0-based)",
+                        min_value=0,
+                        max_value=len(filtered) - 1,
+                        value=0,
+                        step=1,
+                        key="dbg_row_strict_ext",
+                    )
+                    debug_matches_sequence(filtered, strict=True, sample_row=row_idx_strict)
             
-            with st.expander("🧭 Debug WideMatches", expanded=False):
-                row_idx_wide = st.number_input(
-                    "Sample row (0-based)",
-                    min_value=0,
-                    max_value=len(filtered)-1,
-                    value=0,
-                    step=1,
-                    key="dbg_row_wide_ext",
-                )
-                debug_matches_sequence(filtered, strict=False, sample_row=row_idx_wide,
-                                       exclude_col_for_wide="Matches")
-
+                with st.expander("🧭 Debug WideMatches", expanded=False):
+                    row_idx_wide = st.number_input(
+                        "Sample row (0-based)",
+                        min_value=0,
+                        max_value=len(filtered) - 1,
+                        value=0,
+                        step=1,
+                        key="dbg_row_wide_ext",
+                    )
+                    debug_matches_sequence(
+                        filtered, strict=False, sample_row=row_idx_wide,
+                        exclude_col_for_wide="Matches"
+                    )
             else:
                 st.info("Нет строк после фильтра — лог матчей скрыт.")
+
             
             c1, c2 = st.columns(2)
             c1.caption(f"Rows total: {len(df_ext)}")
