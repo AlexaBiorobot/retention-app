@@ -50,12 +50,12 @@ SCOPE = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/au
 def _authorize_client():
     sa_json = os.getenv("GCP_SERVICE_ACCOUNT") or st.secrets.get("GCP_SERVICE_ACCOUNT")
     if not sa_json:
-        st.error("Не найден сервисный ключ. Добавь GCP_SERVICE_ACCOUNT в Secrets или ENV.")
+        st.error("Service key is not found. Add GCP_SERVICE_ACCOUNT to Secrets")
         st.stop()
     try:
         sa_info = json.loads(sa_json)
     except Exception:
-        st.error("GCP_SERVICE_ACCOUNT должен быть JSON-строкой (а не объектом).")
+        st.error("GCP_SERVICE_ACCOUNT should be JSON-string")
         st.stop()
     creds  = ServiceAccountCredentials.from_json_keyfile_dict(sa_info, SCOPE)
     client = gspread.authorize(creds)
@@ -153,13 +153,13 @@ def load_group_age_map(
         # Берём только A:E, чтобы не тащить лишнее
         vals = ws.get("A:E")
     except SpreadsheetNotFound:
-        st.warning("Не могу открыть таблицу EXT_GROUPS_SS_ID. Проверь ID и доступ сервисного аккаунта.")
+        st.warning("Cannot open EXT_GROUPS_SS_ID. Check ID and service acc access")
         return {}
     except WorksheetNotFound:
-        st.warning(f"Не найден лист '{worksheet_name}' в EXT_GROUPS_SS_ID.")
+        st.warning(f"The list '{worksheet_name}' is not found in EXT_GROUPS_SS_ID.")
         return {}
     except Exception as e:
-        st.warning(f"Ошибка при чтении EXT_GROUPS_SS_ID: {e}")
+        st.warning(f"Failed reading EXT_GROUPS_SS_ID: {e}")
         return {}
 
     if not vals or len(vals) < 2:
@@ -241,13 +241,13 @@ def load_group_age_map_latam(
         ws = client.open_by_key(sheet_id).worksheet(worksheet_name)
         vals = ws.get("A:D")
     except SpreadsheetNotFound:
-        st.warning("Не могу открыть LATAM_GROUPS_SS_ID. Проверь ID и доступ.")
+        st.warning("Cannot open LATAM_GROUPS_SS_ID. Check ID and access")
         return {}
     except WorksheetNotFound:
-        st.warning(f"Не найден лист '{worksheet_name}' в LATAM_GROUPS_SS_ID.")
+        st.warning(f"The list '{worksheet_name}' is not found in LATAM_GROUPS_SS_ID.")
         return {}
     except Exception as e:
-        st.warning(f"Ошибка при чтении LATAM_GROUPS_SS_ID: {e}")
+        st.warning(f"Failed reading LATAM_GROUPS_SS_ID: {e}")
         return {}
 
     if not vals or len(vals) < 2:
@@ -274,13 +274,13 @@ def load_rating_bp_map(sheet_id: str = RATING_SS_ID, worksheet_name: str = RATIN
             date_time_render_option="FORMATTED_STRING",
         )
     except SpreadsheetNotFound:
-        st.warning("Не могу открыть таблицу RATING_SS_ID. Проверь ID и доступ сервисного аккаунта.")
+        st.warning("Cannot open RATING_SS_ID. Check ID and service acc access")
         return {}
     except WorksheetNotFound:
-        st.warning(f"Не найден лист '{worksheet_name}' в RATING_SS_ID.")
+        st.warning(f"The list '{worksheet_name}' is not found in RATING_SS_ID.")
         return {}
     except Exception as e:
-        st.warning(f"Ошибка при чтении RATING_SS_ID: {e}")
+        st.warning(f"Failed reading RATING_SS_ID: {e}")
         return {}
     if not vals or len(vals) < 2:
         return {}
@@ -306,13 +306,13 @@ def load_rating_bu_map(sheet_id: str = RATING2_SS_ID, worksheet_name: str = RATI
             date_time_render_option="FORMATTED_STRING",
         )
     except SpreadsheetNotFound:
-        st.warning("Не могу открыть таблицу RATING2_SS_ID. Проверь ID и доступ сервисного аккаунта.")
+        st.warning("Cannot open RATING2_SS_ID. Check ID and service acc access")
         return {}
     except WorksheetNotFound:
-        st.warning(f"Не найден лист '{worksheet_name}' в RATING2_SS_ID.")
+        st.warning(f"The list '{worksheet_name}' is not found in RATING2_SS_ID.")
         return {}
     except Exception as e:
-        st.warning(f"Ошибка при чтении RATING2_SS_ID: {e}")
+        st.warning(f"Failed reading RATING2_SS_ID: {e}")
         return {}
 
     if not vals or len(vals) < 2:
@@ -350,7 +350,7 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
     if len(df.columns) < 18:
-        st.error("Ожидалось минимум 18 колонок (до R). Проверь диапазон A:R и заголовки.")
+        st.error("Expected 18 cols (up to R). Check A:R and headers")
         st.stop()
 
     colD, colK = df.columns[3], df.columns[10]
@@ -832,7 +832,7 @@ def debug_matches_sequence(
     colK = _col_by_index(df, 10)  # Lesson number
 
     if any(c is None for c in [colB, colF, colG, colK]):
-        st.warning("Ожидались колонки B,F,G,K по индексам (1,5,6,10). Проверь порядок столбцов.")
+        st.warning("Expected B,F,G,K by indexes (1,5,6,10). Check the order of columns")
         return
 
     b_vals = df[colB].astype(str).fillna("").str.upper()
@@ -856,7 +856,7 @@ def debug_matches_sequence(
         "Age": df.iloc[i][colG] if colG in df.columns else None,
         "Lesson": df.iloc[i][colK] if colK in df.columns else None,
         "Local time (HH:MM)": _minutes_to_hhmm(i_mins.iloc[i]),
-        "Suffix(_b_suffix3)": suf3.iloc[i],
+        "Day": suf3.iloc[i],
         "PRM?": bool(b_is_prm.iloc[i]),
         "Rating": r_vals.iloc[i] if len(r_vals) else None,
     })
@@ -889,9 +889,9 @@ def debug_matches_sequence(
         ("Rating-compatible", _series_bool("ok_by_rating",ok_by_rating)),
     ]
     if strict:
-        steps.append(("Time±120 OR same suffix", _series_bool("final_gate", final_gate)))
+        steps.append(("Time±120 OR same day", _series_bool("final_gate", final_gate)))
     else:
-        steps.append(("Wide gate (no time/suffix)", _series_bool("final_gate", final_gate)))
+        steps.append(("Wide gate (no time/day)", _series_bool("final_gate", final_gate)))
 
     m = pd.Series(True, index=df.index)
     st.markdown("##### Stepwise intersection")
@@ -934,7 +934,7 @@ def debug_matches_sequence(
         else:
             st.write(sub)
     else:
-        st.info("Нет кандидатов на выходе для выбранной строки.")
+        st.info("No candidates found")
 
 
 def main():
@@ -960,8 +960,7 @@ def main():
       - **Bad** / **New tutor (Bad)** → never
       - **OK** / **New tutor (OK)** → not with **Amazing/Good/New tutor (Good)** and not with **New tutor**
       - **New tutor** → not with **Amazing/Good/New tutor (Good)**
-      - **Amazing/Good/New tutor (Good)** → allowed with anyone
-    - Excludes the current row itself
+      - **Amazing/Good/New tutor (Good)/Bad*** → allowed with anyone
 
     **WideMatches (broad)**
     - Same **Course** and **Group age**
@@ -993,7 +992,7 @@ def main():
             df = load_sheet_df(sheet_id, ws_name)
 
         if df.empty:
-            st.warning(f"Пусто: проверь вкладку '{ws_name}' и доступ сервисного аккаунта (Viewer/Editor).")
+            st.warning(f"Empty: check the tab '{ws_name}' and provide access (Viewer/Editor).")
         else:
             df = adjust_local_time_minus_3(df)
             mapping = load_group_age_map()
@@ -1038,7 +1037,7 @@ def main():
                         exclude_col_for_wide="Matches"
                     )
             else:
-                st.info("Нет строк после фильтра — лог матчей скрыт.")
+                st.info("No rows after the filter — matches' log is hidden")
 
             
             c1, c2 = st.columns(2)
@@ -1181,7 +1180,7 @@ def main():
             
     
         if df_ext.empty:
-            st.warning(f"Пусто: проверь файл '{EXTERNAL_SHEET_ID}', вкладку '{EXTERNAL_WS_NAME}' и доступ.")
+            st.warning(f"Empty: check the file '{EXTERNAL_SHEET_ID}', tab '{EXTERNAL_WS_NAME}' and access.")
         else:
             # правило C/H
             df_ext = exclude_c6_h_before_14d(df_ext)
@@ -1243,7 +1242,7 @@ def main():
                         exclude_col_for_wide="Matches"
                     )
             else:
-                st.info("Нет строк после фильтра — лог матчей скрыт.")
+                st.info("No rows after the filter - the matches' log is hidden")
 
             
             c1, c2 = st.columns(2)
