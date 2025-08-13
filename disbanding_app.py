@@ -135,36 +135,8 @@ def adjust_local_time_offset(df: pd.DataFrame, hours: int) -> pd.DataFrame:
     out_df[col] = out.where(out.notna(), df[col])
     return out_df
 
-# --- Для Main: фиксированный сдвиг -3 часа ---
 def adjust_local_time_minus_3(df: pd.DataFrame) -> pd.DataFrame:
     return adjust_local_time_offset(df, hours=3)
-
-    s = df[col].astype(str).str.strip()
-    time_only_mask = s.str.match(r"^\d{1,2}:\d{2}(:\d{2})?$", na=False)
-
-    def _shift_time_str(v: str) -> str:
-        parts = v.split(":")
-        h = int(parts[0]); m = int(parts[1]); sec = int(parts[2]) if len(parts) > 2 else None
-        h = (h - 3) % 24
-        return f"{h:02d}:{m:02d}" + (f":{sec:02d}" if sec is not None else "")
-
-    out = pd.Series(pd.NA, index=df.index, dtype="object")
-    out.loc[time_only_mask] = s.loc[time_only_mask].apply(_shift_time_str)
-
-    dt_mask = (~time_only_mask) & s.ne("")
-    if dt_mask.any():
-        dt = pd.to_datetime(s[dt_mask], errors="coerce", dayfirst=False)
-        miss = dt.isna()
-        if miss.any():
-            dt2 = pd.to_datetime(s[dt_mask][miss], errors="coerce", dayfirst=True)
-            dt.loc[miss] = dt2
-        dt = dt - pd.Timedelta(hours=3)
-        out.loc[dt_mask] = dt.dt.strftime("%Y-%m-%d %H:%M")
-
-    df = df.copy()
-    df[col] = out.where(out.notna(), df[col])
-    return df
-
 
 @st.cache_data(show_spinner=False, ttl=300)
 def load_group_age_map(
@@ -596,7 +568,11 @@ def add_matches_combined(df: pd.DataFrame, new_col_name="Matches") -> pd.DataFra
         if not pd.isna(base_t):
             close_time = (i_mins.sub(base_t).abs() <= 120)
 
-        same_suf = (suf3 == suf3.iloc[i])
+        suf_i = suf3.iloc[i]
+        if isinstance(suf_i, str) and len(suf_i) > 0:
+            same_suf = (suf3 == suf_i) & (suf3.str.len() > 0)
+        else:
+            same_suf = pd.Series(False, index=df.index)
         same_prm = (b_is_prm == b_is_prm.iloc[i])
 
         my_r = r_vals.iloc[i]
@@ -828,51 +804,41 @@ def _series_bool(name, s):
     # для аккуратного отображения NaN → False
     return pd.Series(s.fillna(False).astype(bool), name=name)
 
-def debug_matches_sequence(df: pd.DataFrame, strict: bool = True, sample_row: int | None = 0):
-    """
-    Пошаговый разбор логики матчей:
-    strict=True  -> Matches (с временем ±120 ИЛИ суффиксом)
-    strict=False -> WideMatches (без времени и без суффикса)
-    Сравнение по индексам колонок: B=1, E=4, F=5, G=6, I=8, K=10.
-    """
+def debug_matches_sequence(
+    df: pd.DataFrame,
+    strict: bool = True,
+    sample_row: int | None = 0,
+    exclude_col_for_wide: str | None = "Matches",
+):
     if df.empty:
         st.write("df is empty")
         return
 
-    # ---- колонки по индексам
     colB = _col_by_index(df, 1)   # Group/ID
     colE = _col_by_index(df, 4)   # Tutor (только для вывода)
     colF = _col_by_index(df, 5)   # Course
-    colG = _col_by_index(df, 6)   # Group age (уже после replace_group_age_from_map)
-    colI = _col_by_index(df, 8)   # Local time (уже со сдвигом)
+    colG = _col_by_index(df, 6)   # Group age
+    colI = _col_by_index(df, 8)   # Local time
     colK = _col_by_index(df, 10)  # Lesson number
 
     if any(c is None for c in [colB, colF, colG, colK]):
         st.warning("Ожидались колонки B,F,G,K по индексам (1,5,6,10). Проверь порядок столбцов.")
         return
 
-    # ---- данные и вспомогательные ряды
     b_vals = df[colB].astype(str).fillna("").str.upper()
     f_vals = df[colF].astype(str).str.strip()
     g_vals = df[colG].astype(str).str.strip()
     k_num  = pd.to_numeric(df[colK], errors="coerce")
-
-    if colI is not None and colI in df.columns:
-        i_mins = df[colI].astype(str).str.strip().apply(_time_to_minutes)
-    else:
-        i_mins = pd.Series(np.nan, index=df.index)
-
+    i_mins = df[colI].astype(str).str.strip().apply(_time_to_minutes) if (colI in df.columns) else pd.Series(np.nan, index=df.index)
     b_is_prm = b_vals.str.contains("PRM", na=False)
     rating_col = _find_rating_col(df)
     r_vals = df[rating_col].astype(str) if rating_col else pd.Series("", index=df.index)
-
-    # суффикс из B для strict
     suf3 = b_vals.apply(_b_suffix3)
 
-    # какую строку брать в качестве «эталона» для пошагового показа
     i = 0 if sample_row is None else int(sample_row)
     i = max(0, min(i, len(df) - 1))
 
+    # Заголовок + quick context
     st.markdown(f"#### Debug for {'Matches (strict)' if strict else 'WideMatches'} — sample row: {i+1}")
     st.write({
         "Group": df.iloc[i][colB],
@@ -885,35 +851,26 @@ def debug_matches_sequence(df: pd.DataFrame, strict: bool = True, sample_row: in
         "Rating": r_vals.iloc[i] if len(r_vals) else None,
     })
 
-    # --- по шагам формируем маски
+    # Базовые маски
     same_course = (f_vals == f_vals.iloc[i])
     same_age    = (g_vals == g_vals.iloc[i])
-
     base_k = k_num.iloc[i]
     close_k = (k_num.sub(base_k).abs() <= 1) if not pd.isna(base_k) else pd.Series(False, index=df.index)
-
     same_prm = (b_is_prm == b_is_prm.iloc[i])
-
     my_r = r_vals.iloc[i] if len(r_vals) else ""
     ok_by_rating = r_vals.apply(lambda rr: can_pair(my_r, rr)) if len(r_vals) else pd.Series(True, index=df.index)
 
-    # strict: время ±120 ИЛИ совпадающий непустой суффикс
+    # Строгая «калитка»
     if strict:
         base_t = i_mins.iloc[i]
         close_time = (i_mins.sub(base_t).abs() <= 120) if not pd.isna(base_t) else pd.Series(False, index=df.index)
-
         suf_i = suf3.iloc[i]
-        if isinstance(suf_i, str) and len(suf_i) > 0:
-            same_suf = (suf3 == suf_i) & (suf3.str.len() > 0)
-        else:
-            same_suf = pd.Series(False, index=df.index)
-
+        same_suf = (suf3 == suf_i) & (suf3.str.len() > 0) if isinstance(suf_i, str) and len(suf_i) > 0 else pd.Series(False, index=df.index)
         final_gate = (close_time | same_suf)
     else:
-        # wide: без времени и без суффикса
         final_gate = pd.Series(True, index=df.index)
 
-    # собираем шаги
+    # Пошаговая стыковка
     steps = [
         ("Same course",       _series_bool("same_course", same_course)),
         ("Same group age",    _series_bool("same_age",    same_age)),
@@ -926,24 +883,38 @@ def debug_matches_sequence(df: pd.DataFrame, strict: bool = True, sample_row: in
     else:
         steps.append(("Wide gate (no time/suffix)", _series_bool("final_gate", final_gate)))
 
-    # поэтапная стыковка масок
     m = pd.Series(True, index=df.index)
     st.markdown("##### Stepwise intersection")
     st.write("Start:", int(m.sum()))
     for name, mask in steps:
         prev = int(m.sum())
         m = m & mask
-        # исключаем саму строку
         if i < len(m):
-            m.iloc[i] = False
+            m.iloc[i] = False  # не матчим сами на себя
         st.write(f"after {name}: {int(m.sum())}  (−{prev - int(m.sum())})")
+
+    # ВАЖНО: исключаем то, что уже попало в Matches (как в add_wide_matches_column)
+    if not strict and exclude_col_for_wide and (exclude_col_for_wide in df.columns):
+        ex_text = df.iloc[i][exclude_col_for_wide]
+        ex_set = set()
+        if pd.notna(ex_text):
+            for line in str(ex_text).splitlines():
+                m_line = re.match(r"^\s*-\s*(.*?),", line)
+                if m_line:
+                    ex_set.add(m_line.group(1).strip())
+        if ex_set:
+            prev = int(m.sum())
+            m = m & ~df[colB].astype(str).isin(ex_set)
+            st.write(f"after Exclude already in '{exclude_col_for_wide}': {int(m.sum())}  (−{prev - int(m.sum())})")
 
     st.write("Final:", int(m.sum()))
 
-    # Покажем небольшой сэмпл итоговых кандидатов
+    # Вывод кандидатов
     if int(m.sum()) > 0:
-        cols_for_view = [c for c in [colB, colE, colF, colG, colK, colI] if c in df.columns]
+        cols_for_view = [c for c in [colB, colE, colF, colG, colK] if c in df.columns]
         sub = df.loc[m, cols_for_view].copy()
+        if colI in df.columns:
+            sub["Local time"] = i_mins.loc[sub.index].apply(_minutes_to_hhmm)
         if len(sub) > 20:
             st.write(sub.head(20))
             st.caption(f"... and {len(sub)-20} more")
@@ -1049,12 +1020,15 @@ def main():
                         step=1,
                         key="dbg_row_wide_main",
                     )
-                    debug_matches_sequence(filtered, strict=False, sample_row=row_idx_wide - 1)
+                    # ⬇️ ВАЖНО: добавляем exclude_col_for_wide
+                    debug_matches_sequence(filtered, strict=False, sample_row=row_idx_wide - 1,
+                                           exclude_col_for_wide="Matches")
             else:
                 st.info("Нет строк после фильтра — лог матчей скрыт.")
-
+            
             c1, c2 = st.columns(2)
             c1.caption(f"Rows total: {len(df)}")
+
 
             # --- Sidebar Filters (MAIN) ---
             dff = filtered.copy()
@@ -1249,13 +1223,17 @@ def main():
                         step=1,
                         key="dbg_row_wide_ext",
                     )
-                    debug_matches_sequence(filtered, strict=False, sample_row=row_idx_wide - 1)
+                    # ⬇️ важно: исключаем уже учтённые в Matches
+                    debug_matches_sequence(
+                        filtered, strict=False, sample_row=row_idx_wide - 1,
+                        exclude_col_for_wide="Matches"
+                    )
             else:
                 st.info("Нет строк после фильтра — лог матчей скрыт.")
-
-
+            
             c1, c2 = st.columns(2)
             c1.caption(f"Rows total: {len(df_ext)}")
+
 
             # --- Sidebar Filters (EXTERNAL) — те же, но с другими key ---
             dff = filtered.copy()
@@ -1389,6 +1367,7 @@ def main():
         load_sheet_df.clear()
         load_group_age_map.clear()
         load_group_age_map_latam.clear()
+        load_rating_bu_map.clear()
         load_rating_bp_map.clear()
         st.rerun()
 
