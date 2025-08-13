@@ -193,6 +193,19 @@ def load_group_age_map(sheet_id: str = EXT_GROUPS_SS_ID, worksheet_name: str = E
                 mapping[key] = val
     return mapping
 
+def load_group_age_map_latam(sheet_id: str, worksheet_name: str) -> dict:
+    """Загружает соответствие Group -> Age для Latam из колонки D."""
+    try:
+        ws = open_gspread(sheet_id, worksheet_name)
+    except (SpreadsheetNotFound, WorksheetNotFound):
+        return {}
+
+    records = ws.get_all_values()
+    mapping = {}
+    for row in records:
+        if len(row) >= 4 and row[1].strip():  # B — ключ
+            mapping[row[1].strip()] = row[3].strip()  # D — возраст
+    return mapping
 
 def replace_group_age_from_map(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
     """Подставляем Group age из внешней карты по колонке B (Group/ID/Title).
@@ -974,7 +987,7 @@ def main():
             # остальной пайплайн
             df_ext = adjust_local_time_offset(df_ext, hours=5)
     
-            mapping = load_group_age_map(sheet_id=LATAM_GROUPS_SS_ID, worksheet_name=LATAM_GROUPS_WS)
+            mapping = load_group_age_map_latam(sheet_id=LATAM_GROUPS_SS_ID, worksheet_name=LATAM_GROUPS_WS)
             df_ext = replace_group_age_from_map(df_ext, mapping)
 
             rating_map2 = load_rating_bu_map()   # <--- рейтинг из BU (лист Rating)
