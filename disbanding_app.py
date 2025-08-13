@@ -474,43 +474,56 @@ def _find_free_slots_col(df: pd.DataFrame) -> str | None:
     return None
 
 def _norm_rating(x: str) -> str:
-    if x is None or pd.isna(x): return ""
+    if x is None or pd.isna(x):
+        return ""
     s = str(x).strip().lower()
-    repl = {
-        "amazing": "amazing",
-        "good": "good",
-        "ok": "ok",
-        "new tutor (good)": "new_tutor_good",
-        "new tutor (ok)": "new_tutor_ok",
-        "new tutor (bad)": "new_tutor_bad",
-        "new tutor": "new_tutor",
-        "bad": "bad",
-    }
-    for k in sorted(repl.keys(), key=len, reverse=True):
-        if s == k:
-            return repl[k]
+    s = re.sub(r"\s+", " ", s)
+
+    # спец-случай Bad*
+    if re.search(r"\bbad\s*\*", s):
+        return "bad_star"
+
+    # базовые ярлыки
+    base = {"amazing","good","ok","bad"}
+    if s in base:
+        return s
+
+    # варианты new tutor
+    if "new tutor" in s:
+        if "(good)" in s: return "new_tutor_good"
+        if "(ok)"   in s: return "new_tutor_ok"
+        if "(bad)"  in s: return "new_tutor_bad"
+        return "new_tutor"
+
     return s
 
 def can_pair(my_rating_raw: str, cand_rating_raw: str) -> bool:
-    """Правило пар по рейтингам из ТЗ."""
     my   = _norm_rating(my_rating_raw)
     cand = _norm_rating(cand_rating_raw)
 
-    NEVER = {"bad", "new_tutor_bad"}
+    NEVER = {"bad", "new_tutor_bad"}               # как и раньше
     if cand in NEVER:
         return False
+
+    # Bad* можно предлагать всем
+    if cand == "bad_star":
+        return True
 
     HIGH  = {"amazing", "good", "new_tutor_good"}
     OKISH = {"ok", "new_tutor_ok"}
 
+    # к Bad* не предлагать OK (и NT(OK))
     if cand in OKISH:
-        return my not in (HIGH | {"new_tutor"})  # не к high и не к 'new_tutor'
+        return my not in (HIGH | {"new_tutor", "bad_star"})
+
     if cand == "new_tutor":
-        return my not in HIGH                    # не к high
+        return my not in HIGH
+
     if cand in HIGH:
         return True
 
-    return True  # неизвестные ярлыки — разрешаем
+    # неизвестные ярлыки — разрешаем
+    return True
 
 
 def _b_suffix3(s: str) -> str:
