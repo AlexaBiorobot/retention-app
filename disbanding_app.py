@@ -36,6 +36,10 @@ EXTERNAL_WS_NAME  = "data"
 RATING2_SS_ID = "16QrbLtzLTV6GqyT8HYwzcwYIsXewzjUbM0Jy5i1fENE"
 RATING2_WS    = "Rating"
 
+# --- LATAM: источник Group age ---
+LATAM_GROUPS_SS_ID = RATING_SS_ID      # "1HItT2-PtZWoldYKL210hCQOLg3rh6U1Qj6NWkBjDjzk"
+LATAM_GROUPS_WS    = "Groups"
+
 SHEET_ID = os.getenv("GSHEET_ID") or st.secrets.get("GSHEET_ID", DEFAULT_SHEET_ID)
 WS_NAME  = os.getenv("GSHEET_WS") or st.secrets.get("GSHEET_WS", DEFAULT_WS_NAME)
 
@@ -970,9 +974,9 @@ def main():
             # остальной пайплайн
             df_ext = adjust_local_time_offset(df_ext, hours=5)
     
-            mapping = load_group_age_map()
+            mapping = load_group_age_map(sheet_id=LATAM_GROUPS_SS_ID, worksheet_name=LATAM_GROUPS_WS)
             df_ext = replace_group_age_from_map(df_ext, mapping)
-    
+
             rating_map2 = load_rating_bu_map()   # <--- рейтинг из BU (лист Rating)
             df_ext = add_rating_bp_by_O(df_ext, rating_map2, new_col_name="Rating_BP")
     
