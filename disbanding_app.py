@@ -167,11 +167,18 @@ def adjust_local_time_minus_3(df: pd.DataFrame) -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False, ttl=300)
-def load_group_age_map(sheet_id: str = EXT_GROUPS_SS_ID, worksheet_name: str = EXT_GROUPS_WS) -> dict:
+def load_group_age_map(
+    sheet_id: str = EXT_GROUPS_SS_ID,
+    worksheet_name: str = EXT_GROUPS_WS
+) -> dict:
+    """
+    Карта для Brazil: ключ = колонка A (Group/ID), значение = колонка E (Group age)
+    из листа EXT_GROUPS_WS таблицы EXT_GROUPS_SS_ID.
+    """
     try:
         client = _authorize_client()
-        sh = client.open_by_key(sheet_id)
-        ws = sh.worksheet(worksheet_name)
+        ws = client.open_by_key(sheet_id).worksheet(worksheet_name)
+        # Берём только A:E, чтобы не тащить лишнее
         vals = ws.get("A:E")
     except SpreadsheetNotFound:
         st.warning("Не могу открыть таблицу EXT_GROUPS_SS_ID. Проверь ID и доступ сервисного аккаунта.")
@@ -182,33 +189,80 @@ def load_group_age_map(sheet_id: str = EXT_GROUPS_SS_ID, worksheet_name: str = E
     except Exception as e:
         st.warning(f"Ошибка при чтении EXT_GROUPS_SS_ID: {e}")
         return {}
+
     if not vals or len(vals) < 2:
         return {}
-    rows = vals[1:]
-    mapping = {}
-    for r in rows:
+
+    mapping: dict[str, str] = {}
+    for r in vals[1:]:
         if len(r) >= 5:
-            key = str(r[0]).strip()
-            val = r[4]
+            key = str(r[0]).strip()              # A — Group/ID
+            val = (r[4] if r[4] is not None else "")  # E — Group age
             if key:
                 mapping[key] = val
     return mapping
 
 
 def replace_group_age_from_map(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
-    """Подставляем Group age из внешней карты по колонке B (Group/ID/Title).
-       Если в mapping нет значения — оставляем исходное.
     """
+    Подставляем/обновляем 'Group age' по соответствию ключей из mapping с колонкой группы (из B или по синонимам).
+    Если 'Group age' отсутствует — создадим её.
+    Если mapping пустой или df пуст — вернём копию df без изменений.
+    """
+    if not isinstance(df, pd.DataFrame):
+        return pd.DataFrame()
     if df.empty or not mapping:
         return df.copy()
 
     dff = df.copy()
 
+    # Нормализация названий столбцов
+    def _norm(s: str) -> str:
+        return str(s).strip().lower().replace("_", " ")
+
+    # Пытаемся найти колонку группы по синонимам
+    group_synonyms = {
+        "group id", "group", "group title", "group name", "group_name", "b"
+    }
+    colB = None
+    for c in dff.columns:
+        if _norm(c) in group_synonyms:
+            colB = c
+            break
+    if colB is None and len(dff.columns) >= 2:
+        colB = dff.columns[1]  # fallback: вторая колонка (как B)
+
+    # Ищем/создаём колонку Group age
+    colG = None
+    for c in dff.columns:
+        if _norm(c) == "group age":
+            colG = c
+            break
+    if colG is None:
+        colG = "Group age"
+        if colG not in dff.columns:
+            dff[colG] = pd.NA
+
+    if colB is None:
+        # Нет ключевой колонки — ничего не подставляем
+        return dff
+
+    keys = dff[colB].astype(str).str.strip()
+    new_vals = keys.map(lambda k: mapping.get(k, pd.NA))
+
+    # Подставляем только непустые значения из mapping
+    dff[colG] = new_vals.where(new_vals.notna() & (new_vals.astype(str).str.strip() != ""), dff[colG])
+    return dff
+
+
 @st.cache_data(show_spinner=False, ttl=300)
-def load_group_age_map_latam(sheet_id: str = LATAM_GROUPS_SS_ID,
-                             worksheet_name: str = LATAM_GROUPS_WS) -> dict:
+def load_group_age_map_latam(
+    sheet_id: str = LATAM_GROUPS_SS_ID,
+    worksheet_name: str = LATAM_GROUPS_WS
+) -> dict:
     """
-    LATAM: ключ = колонка A (Group/ID), значение = колонка D (Group age) с листа 'Groups'.
+    LATAM: ключ = колонка A (Group/ID), значение = колонка D (Group age) с листа 'Groups'
+    таблицы LATAM_GROUPS_SS_ID.
     """
     try:
         client = _authorize_client()
@@ -227,44 +281,14 @@ def load_group_age_map_latam(sheet_id: str = LATAM_GROUPS_SS_ID,
     if not vals or len(vals) < 2:
         return {}
 
-    mapping = {}
+    mapping: dict[str, str] = {}
     for r in vals[1:]:
         if len(r) >= 4:
-            key = str(r[0]).strip()  # A — идентификатор группы
-            val = r[3]               # D — Group age
+            key = str(r[0]).strip()             # A — Group/ID
+            val = (r[3] if r[3] is not None else "")  # D — Group age
             if key:
                 mapping[key] = val
     return mapping
-
-    # ищем колонку B (group id/title) по синонимам
-    colB = None
-    for c in dff.columns:
-        if str(c).strip().lower().replace("_", " ") in (
-            "b", "group id", "group", "group title", "group_name", "group name"
-        ):
-            colB = c
-            break
-    if colB is None:
-        colB = dff.columns[1] if len(dff.columns) >= 2 else None
-
-    # ищем колонку Group age
-    colG = None
-    for c in dff.columns:
-        if str(c).strip().lower().replace("_", " ") == "group age":
-            colG = c
-            break
-    if colG is None:
-        colG = dff.columns[6] if len(dff.columns) >= 7 else None
-
-    if colB is None or colG is None:
-        return dff
-
-    keys = dff[colB].astype(str).str.strip()
-    new_vals = keys.map(lambda k: mapping.get(k, pd.NA))
-
-    # подставляем только непустые значения из mapping
-    dff[colG] = new_vals.where(new_vals.notna() & (new_vals.astype(str).str.strip() != ""), dff[colG])
-    return dff
 
 
 @st.cache_data(show_spinner=False, ttl=300)
