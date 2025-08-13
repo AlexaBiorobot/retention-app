@@ -36,10 +36,6 @@ EXTERNAL_WS_NAME  = "data"
 RATING2_SS_ID = "16QrbLtzLTV6GqyT8HYwzcwYIsXewzjUbM0Jy5i1fENE"
 RATING2_WS    = "Rating"
 
-# --- LATAM: источник Group age ---
-LATAM_GROUPS_SS_ID = "16QrbLtzLTV6GqyT8HYwzcwYIsXewzjUbM0Jy5i1fENE"
-LATAM_GROUPS_WS    = "Groups"
-
 SHEET_ID = os.getenv("GSHEET_ID") or st.secrets.get("GSHEET_ID", DEFAULT_SHEET_ID)
 WS_NAME  = os.getenv("GSHEET_WS") or st.secrets.get("GSHEET_WS", DEFAULT_WS_NAME)
 
@@ -193,35 +189,6 @@ def load_group_age_map(sheet_id: str = EXT_GROUPS_SS_ID, worksheet_name: str = E
                 mapping[key] = val
     return mapping
 
-@st.cache_data(show_spinner=False, ttl=300)
-def load_group_age_map_latam(sheet_id: str = LATAM_GROUPS_SS_ID,
-                             worksheet_name: str = LATAM_GROUPS_WS) -> dict:
-    """Latam: ключ = колонка B (Group ID), значение = колонка D (Group age) на листе 'Groups'."""
-    try:
-        client = _authorize_client()
-        ws = client.open_by_key(sheet_id).worksheet(worksheet_name)
-        vals = ws.get("A:D")  # нам хватит до D
-    except SpreadsheetNotFound:
-        st.warning("Не могу открыть LATAM_GROUPS_SS_ID. Проверь ID и доступ сервисного аккаунта.")
-        return {}
-    except WorksheetNotFound:
-        st.warning(f"Не найден лист '{worksheet_name}' в LATAM_GROUPS_SS_ID.")
-        return {}
-    except Exception as e:
-        st.warning(f"Ошибка при чтении LATAM_GROUPS_SS_ID: {e}")
-        return {}
-
-    if not vals or len(vals) < 2:
-        return {}
-
-    mapping = {}
-    for r in vals[1:]:
-        if len(r) >= 4:
-            key = str(r[1]).strip()  # B
-            val = r[3]               # D
-            if key:
-                mapping[key] = val
-    return mapping
 
 def replace_group_age_from_map(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
     """Подставляем Group age из внешней карты по колонке B (Group/ID/Title).
@@ -1003,9 +970,9 @@ def main():
             # остальной пайплайн
             df_ext = adjust_local_time_offset(df_ext, hours=5)
     
-            mapping = load_group_age_map_latam()
+            mapping = load_group_age_map()
             df_ext = replace_group_age_from_map(df_ext, mapping)
-
+    
             rating_map2 = load_rating_bu_map()   # <--- рейтинг из BU (лист Rating)
             df_ext = add_rating_bp_by_O(df_ext, rating_map2, new_col_name="Rating_BP")
     
@@ -1165,7 +1132,6 @@ def main():
     if st.button("Refresh"):
         load_sheet_df.clear()
         load_group_age_map.clear()
-        load_group_age_map_latam.clear() 
         load_rating_bp_map.clear()
         st.rerun()
 
