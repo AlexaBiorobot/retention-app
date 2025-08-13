@@ -475,6 +475,17 @@ def _time_to_minutes(v: str) -> float:
     h, m = s.split(":")
     return int(h) * 60 + int(m)
 
+def _minutes_to_hhmm(x) -> str | None:
+    if x is None or (isinstance(x, float) and np.isnan(x)):
+        return None
+    try:
+        m = int(x)
+    except Exception:
+        return None
+    h = (m // 60) % 24
+    mm = m % 60
+    return f"{h:02d}:{mm:02d}"
+
 def _find_rating_col(df: pd.DataFrame) -> str | None:
     if "Rating_BP" in df.columns:
         return "Rating_BP"
@@ -868,7 +879,7 @@ def debug_matches_sequence(df: pd.DataFrame, strict: bool = True, sample_row: in
         "Course": df.iloc[i][colF] if colF in df.columns else None,
         "Age": df.iloc[i][colG] if colG in df.columns else None,
         "Lesson": df.iloc[i][colK] if colK in df.columns else None,
-        "Local time (mins)": i_mins.iloc[i] if pd.notna(i_mins.iloc[i]) else None,
+        "Local time (HH:MM)": _minutes_to_hhmm(i_mins.iloc[i]),
         "Suffix(_b_suffix3)": suf3.iloc[i],
         "PRM?": bool(b_is_prm.iloc[i]),
         "Rating": r_vals.iloc[i] if len(r_vals) else None,
