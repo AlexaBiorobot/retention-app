@@ -943,15 +943,15 @@ def main():
     st.session_state.setdefault("is_authed", False)
 
     if not st.session_state["is_authed"]:
-        pwd = st.text_input("Пароль:", type="password")
+        pwd = st.text_input("Password:", type="password")
         # здесь можно поменять на свой пароль
-        if pwd == "secret123":
+        if pwd == "Kodland123":
             st.session_state["is_authed"] = True
             st.rerun()
         else:
             # показываем подсказку только если что-то ввели
             if pwd:
-                st.error("Неверный пароль")
+                st.error("Wrong password")
             st.stop()  # дальше код не выполняется, пока не введут верный пароль
             
     st.title("Disbanding Brazil/Latam")
