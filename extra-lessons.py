@@ -155,9 +155,10 @@ DISPLAY_ALIASES_RAW = {
     "Motivo de la clase extra": "Reason for extra class",
     "Enlace de grabación de la clase": "Recording",
     "Tipo de lección extra": "Type of extra lesson",
-    # Даты (если у вас A или L называются так)
     "Timestamp": "Date of the report",
     "Fecha de la clase": "Date of the class",
+    "Email Address": "Tutor's personal email",
+    "Email Corporativo": "Tutor's corporate email",
 }
 
 # Преобразуем ключи в нормализованные (как делает _main_label)
