@@ -138,6 +138,31 @@ def _is_force_multiselect(col_name: str) -> bool:
     full = _norm_ascii(col_name)
     return any(tok in main for tok in _FORCE_MULTI_TOKENS) or any(tok in full for tok in _FORCE_MULTI_TOKENS)
 
+# ---- Display aliases for filter labels ----
+DISPLAY_ALIASES = {
+    "Nombre": "Tutor's name",
+    "Líder de Equipo": "TL",
+    "Curso": "Course",
+    "Tipo de grupo": "Group type",
+    "Número de grupo Si no hay grupo para el alumno (en posible caso de clase extra), poner 0": "Group number",
+    "Duración de la clase": "Class duartion",
+    "Nombre del estudiante": "Student's name",
+    "Enlace al perfil del estudiante en BO": "Student's BO",
+    "Módulo": "Module",
+    "Lección": "Lesson",
+    "Motivo de la clase extra": "Reason for extra class",
+    "Enlace de grabación de la clase": "Recording",
+    "Tipo de lección extra": "Type of extra lesson",
+    "Date range — A: Timestamp": "Date of the report",
+    "Date range — L: Fecha de la clase": "Date of the class",
+    
+}
+
+def _display_label(col_name: str, suffix: str = "") -> str:
+    """Filter name"""
+    base = DISPLAY_ALIASES.get(_main_label(col_name), str(col_name).splitlines()[0].strip())
+    return f"{base}{suffix}"
+
 # ===================== Main =====================
 
 with st.spinner("Loading data…"):
@@ -165,7 +190,7 @@ if colA_name is not None:
         st.sidebar.caption(f"Column A ('{colA_name}') doesn't look like dates → skipping range filter.")
     else:
         a_def = (a_min.date(), a_max.date())
-        a_range = st.sidebar.date_input(f"Date range — A: {colA_name}", value=a_def)
+        a_range = st.sidebar.date_input(f"Date range — A: {_display_label(colA_name)}", value=a_def)
         if isinstance(a_range, tuple) and len(a_range) == 2:
             startA, endA = pd.to_datetime(a_range[0]), pd.to_datetime(a_range[1])
             endA = endA + pd.Timedelta(days=1)
@@ -178,7 +203,7 @@ if colL_name is not None:
         st.sidebar.caption(f"Column L ('{colL_name}') doesn't look like dates → skipping range filter.")
     else:
         l_def = (l_min.date(), l_max.date())
-        l_range = st.sidebar.date_input(f"Date range — L: {colL_name}", value=l_def, key="date_L")
+        l_range = st.sidebar.date_input(f"Date range — L: {_display_label(colL_name)}", value=l_def, key="date_L")
         if isinstance(l_range, tuple) and len(l_range) == 2:
             startL, endL = pd.to_datetime(l_range[0]), pd.to_datetime(l_range[1])
             endL = endL + pd.Timedelta(days=1)
@@ -200,14 +225,16 @@ for idx, col in enumerate(col_order):
         nmax = float(np.nanmax(col_num.values)) if np.isfinite(np.nanmax(col_num.values)) else 0.0
         if not np.isfinite(nmin) or not np.isfinite(nmax) or nmin == nmax:
             opts = _unique_list_for_multiselect(col_series)
-            sel = st.sidebar.multiselect(f"{col}", opts)
+            label = _display_label(col)
+            sel = st.sidebar.multiselect(label, options, key=f"ms_{idx}")
             if sel:
                 base = col_series.astype(str).str.strip()
                 mask = base.isin([s for s in sel if s != "(blank)"]) | (col_series.isna() if "(blank)" in sel else False)
                 _df = _df[mask]
         else:
+            label = _display_label(col, " (range)")
             lo, hi = st.sidebar.slider(
-                f"{col} (range)",
+                label,
                 min_value=float(np.floor(nmin)),
                 max_value=float(np.ceil(nmax)),
                 value=(float(np.floor(nmin)), float(np.ceil(nmax))),
