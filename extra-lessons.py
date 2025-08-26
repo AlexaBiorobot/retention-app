@@ -22,7 +22,6 @@ st.set_page_config(
 st.session_state.setdefault("is_authed", False)
 if not st.session_state["is_authed"]:
     pwd = st.text_input("Password:", type="password")
-    # можно задать свой пароль через переменную окружения/секреты
     target_pwd = os.getenv("APP_PASSWORD") or st.secrets.get("APP_PASSWORD") or "Kodland123"
     if pwd == target_pwd:
         st.session_state["is_authed"] = True
@@ -36,7 +35,7 @@ st.title("📋 Form Responses Viewer (A:Q)")
 st.caption("Loads a Google Sheet tab and lets you filter by every column. Columns A and L have date-range filters.")
 
 # ===================== Config =====================
-DEFAULT_SHEET_ID = "1BtET9YSSLv1vSqWejO8tka4kdJygsnrlXYSEOavG4uA"  # from your link
+DEFAULT_SHEET_ID = "1BtET9YSSLv1vSqWejO8tka4kdJygsnrlXYSEOavG4uA"
 DEFAULT_WS_NAME  = "Form Responses 1"
 
 SHEET_ID = os.getenv("GSHEET_ID") or st.secrets.get("GSHEET_ID", DEFAULT_SHEET_ID)
@@ -67,8 +66,6 @@ def _authorize_client():
 
 @st.cache_data(show_spinner=False, ttl=300)
 def load_sheet_df(sheet_id: str, worksheet_name: str, rng: str = "A:Q") -> pd.DataFrame:
-    """Read header + rows from A:Q and return a DataFrame.
-    Empty strings are converted to <NA>."""
     client = _authorize_client()
     sh = client.open_by_key(sheet_id)
     ws = sh.worksheet(worksheet_name)
@@ -81,14 +78,13 @@ def load_sheet_df(sheet_id: str, worksheet_name: str, rng: str = "A:Q") -> pd.Da
         return pd.DataFrame()
     header = values[0]
     rows = values[1:]
-    rows = [r + [None] * (len(header) - len(r)) for r in rows]  # pad
+    rows = [r + [None] * (len(header) - len(r)) for r in rows]
     df = pd.DataFrame(rows, columns=header)
     return df.replace({"": pd.NA})
 
 # ===================== Helpers =====================
 
 def _to_datetime_series(s: pd.Series) -> pd.Series:
-    """Parse column to datetime with two passes (US/ISO then dayfirst)."""
     if s.empty:
         return pd.to_datetime(pd.Series([], dtype="object"))
     s_str = s.astype(str)
@@ -113,25 +109,38 @@ def _unique_list_for_multiselect(col: pd.Series) -> list:
     uniq = sorted(vals.unique())
     if col.isna().any():
         uniq = ["(blank)"] + uniq
-    return uniq[:2000]  # hard cap for UI
+    return uniq[:2000]
 
-# --- label normalizer & forced-multiselect list ---
+# ---- Robust header normalization & force-multiselect rules ----
 
-def _norm_label(s: str) -> str:
+def _norm_ascii(s: str) -> str:
     s = unicodedata.normalize("NFKD", str(s)).encode("ascii", "ignore").decode("ascii")
     return " ".join(s.lower().strip().split())
 
-FORCE_MULTI = {
-    # Spanish
-    "Número de grupo", "Numero de grupo",
-    "Módulo", "Modulo",
-    "Lección", "Leccion",
-    # English fallbacks
-    "Group number", "Module", "Lesson", "Lesson number",
-}
-FORCE_MULTI_NORM = { _norm_label(x) for x in FORCE_MULTI }
+def _main_label(s: str) -> str:
+    """Return only the first header line without hints like '(range)'."""
+    first = str(s).splitlines()[0]
+    # trim parenthetical hints in first line
+    if "(" in first:
+        first = first.split("(")[0]
+    return _norm_ascii(first)
 
-# --- export utils (как в исходнике) ---
+# tokens to match by substring on the first line or full header
+_FORCE_MULTI_TOKENS = {
+    # Spanish / Portuguese
+    "numero de grupo", "numero do grupo",
+    "modulo", "leccion", "licao", "licao", "licao", "licao",  # include pt variants
+    # English fallbacks
+    "group number", "module", "lesson number", "lesson",
+}
+
+def _is_force_multiselect(col_name: str) -> bool:
+    main = _main_label(col_name)
+    full = _norm_ascii(col_name)
+    return any(tok in main for tok in _FORCE_MULTI_TOKENS) or any(tok in full for tok in _FORCE_MULTI_TOKENS)
+
+# --- export util ---
+
 def to_excel_bytes(data: pd.DataFrame) -> Optional[io.BytesIO]:
     try:
         import xlsxwriter  # noqa: F401
@@ -150,26 +159,21 @@ with st.spinner("Loading data…"):
 
 if df_raw.empty:
     st.warning(
-    f"No data. Check access to the file and that the tab '{WS_NAME}' contains a header row in A:Q.\n"
-    "Also share the sheet with your service account e-mail."
-)
+        f"No data. Check access to the file and that the tab '{WS_NAME}' contains a header row in A:Q.
+"
+        "Also share the sheet with your service account e‑mail."
+    )
     st.stop()
 
-# Work on a copy
 _df = df_raw.copy()
-
-# Original order (A:Q)
 col_order = list(_df.columns)
 
-# A, L positional names
 colA_name = col_order[0] if len(col_order) >= 1 else None
 colL_name = col_order[11] if len(col_order) >= 12 else None
 
-# Parse A & L to datetime
 _dtA = _to_datetime_series(_df[colA_name]) if colA_name else pd.Series([], dtype="datetime64[ns]")
 _dtL = _to_datetime_series(_df[colL_name]) if colL_name else pd.Series([], dtype="datetime64[ns]")
 
-# ---------------- Sidebar filters ----------------
 st.sidebar.header("Filters")
 
 # Date range for A
@@ -202,13 +206,11 @@ st.sidebar.divider()
 
 # Filters for ALL other columns
 for idx, col in enumerate(col_order):
-    if col is None:
-        continue
-    if idx in (0, 11):  # skip A & L here (already filtered by date)
+    if col is None or idx in (0, 11):
         continue
 
     col_series = _df[col]
-    force_multi = _norm_label(col) in FORCE_MULTI_NORM
+    force_multi = _is_force_multiselect(col)
 
     if _is_numeric_col(col_series) and not force_multi:
         col_num = pd.to_numeric(col_series, errors="coerce")
@@ -242,17 +244,14 @@ for idx, col in enumerate(col_order):
 
 st.success(f"Rows: {len(_df)} (of {len(df_raw)})")
 
-# Preserve original column order and show only A:Q
 show_cols = [c for c in col_order if c in _df.columns]
 view = _df.loc[:, show_cols].copy()
 
-# Table size
 ROW, HEADER = 34, 44
 height = min(900, HEADER + ROW * max(1, min(len(view), 200)))
 
 st.dataframe(view, use_container_width=True, height=height)
 
-# Downloads
 c1, c2 = st.columns(2)
 with c1:
     st.download_button("⬇️ Download CSV", view.to_csv(index=False).encode("utf-8"), file_name="filtered.csv", mime="text/csv")
@@ -279,7 +278,6 @@ st.caption(textwrap.dedent(
     """
 ))
 
-# --- Refresh like in your original app ---
 if st.button("Refresh"):
     load_sheet_df.clear()
     _unique_list_for_multiselect.clear()
