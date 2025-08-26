@@ -1,5 +1,4 @@
 import os
-import io
 import json
 import textwrap
 import unicodedata
@@ -139,19 +138,6 @@ def _is_force_multiselect(col_name: str) -> bool:
     full = _norm_ascii(col_name)
     return any(tok in main for tok in _FORCE_MULTI_TOKENS) or any(tok in full for tok in _FORCE_MULTI_TOKENS)
 
-# --- export util ---
-
-def to_excel_bytes(data: pd.DataFrame) -> Optional[io.BytesIO]:
-    try:
-        import xlsxwriter  # noqa: F401
-        buf = io.BytesIO()
-        with pd.ExcelWriter(buf, engine="xlsxwriter") as w:
-            data.to_excel(w, index=False)
-        buf.seek(0)
-        return buf
-    except Exception:
-        return None
-
 # ===================== Main =====================
 
 with st.spinner("Loading data…"):
@@ -248,15 +234,7 @@ height = min(900, HEADER + ROW * max(1, min(len(view), 200)))
 
 st.dataframe(view, use_container_width=True, height=height)
 
-c1, c2 = st.columns(2)
-with c1:
-    st.download_button("⬇️ Download CSV", view.to_csv(index=False).encode("utf-8"), file_name="filtered.csv", mime="text/csv")
-with c2:
-    buf = to_excel_bytes(view)
-    if buf is not None:
-        st.download_button("⬇️ Download Excel", buf, file_name="filtered.xlsx")
-    else:
-        st.caption("Excel export is unavailable; install xlsxwriter.")
+st.download_button("⬇️ Download CSV", view.to_csv(index=False).encode("utf-8"), file_name="filtered.csv", mime="text/csv")
 
 st.caption(textwrap.dedent(
     f"""
