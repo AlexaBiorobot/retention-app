@@ -12,7 +12,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 
 # ===================== Page / UX =====================
 st.set_page_config(
-    page_title="Form Responses Viewer",
+    page_title="Extra-classes Latam",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -30,8 +30,8 @@ if not st.session_state["is_authed"]:
             st.error("Wrong password")
         st.stop()
 
-st.title("📋 Form Responses Viewer (A:Q)")
-st.caption("Loads a Google Sheet tab and lets you filter by every column. Columns A and L have date-range filters.")
+st.title("📋 Extra-classes Latam")
+st.caption("Use this instrument for extra-class analysis")
 
 # ===================== Config =====================
 DEFAULT_SHEET_ID = "1BtET9YSSLv1vSqWejO8tka4kdJygsnrlXYSEOavG4uA"
