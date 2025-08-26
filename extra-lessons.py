@@ -195,7 +195,7 @@ if colA_name is not None:
         st.sidebar.caption(f"Column A ('{colA_name}') doesn't look like dates → skipping range filter.")
     else:
         a_def = (a_min.date(), a_max.date())
-        a_range = st.sidebar.date_input(f"Date range — A: {_display_label(colA_name)}", value=a_def)
+        a_range = st.sidebar.date_input(f"{_display_label(colA_name)}", value=a_def)
         if isinstance(a_range, tuple) and len(a_range) == 2:
             startA, endA = pd.to_datetime(a_range[0]), pd.to_datetime(a_range[1])
             endA = endA + pd.Timedelta(days=1)
@@ -208,7 +208,7 @@ if colL_name is not None:
         st.sidebar.caption(f"Column L ('{colL_name}') doesn't look like dates → skipping range filter.")
     else:
         l_def = (l_min.date(), l_max.date())
-        l_range = st.sidebar.date_input(f"Date range — L: {_display_label(colL_name)}", value=l_def, key="date_L")
+        l_range = st.sidebar.date_input(f"{_display_label(colL_name)}", value=l_def, key="date_L")
         if isinstance(l_range, tuple) and len(l_range) == 2:
             startL, endL = pd.to_datetime(l_range[0]), pd.to_datetime(l_range[1])
             endL = endL + pd.Timedelta(days=1)
