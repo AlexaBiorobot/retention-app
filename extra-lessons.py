@@ -158,11 +158,7 @@ with st.spinner("Loading data…"):
     df_raw = load_sheet_df(SHEET_ID, WS_NAME, rng="A:Q")
 
 if df_raw.empty:
-    st.warning(
-        f"No data. Check access to the file and that the tab '{WS_NAME}' contains a header row in A:Q.
-"
-        "Also share the sheet with your service account e‑mail."
-    )
+    st.warning(f"No data. Check access to the file and that the tab '{WS_NAME}' contains a header row in A:Q.""Also share the sheet with your service account e‑mail.")
     st.stop()
 
 _df = df_raw.copy()
