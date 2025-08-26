@@ -139,13 +139,15 @@ def _is_force_multiselect(col_name: str) -> bool:
     return any(tok in main for tok in _FORCE_MULTI_TOKENS) or any(tok in full for tok in _FORCE_MULTI_TOKENS)
 
 # ---- Display aliases for filter labels ----
-DISPLAY_ALIASES = {
+# Пишем "сырые" названия как на листе, АЛГОРИТМ сам нормализует (первая строка, без акцентов, нижний регистр)
+DISPLAY_ALIASES_RAW = {
+    # Шапки колонок (первая строка)
     "Nombre": "Tutor's name",
     "Líder de Equipo": "TL",
     "Curso": "Course",
     "Tipo de grupo": "Group type",
-    "Número de grupo Si no hay grupo para el alumno (en posible caso de clase extra), poner 0": "Group number",
-    "Duración de la clase": "Class duartion",
+    "Número de grupo": "Group number",
+    "Duración de la clase": "Class duration",
     "Nombre del estudiante": "Student's name",
     "Enlace al perfil del estudiante en BO": "Student's BO",
     "Módulo": "Module",
@@ -153,13 +155,16 @@ DISPLAY_ALIASES = {
     "Motivo de la clase extra": "Reason for extra class",
     "Enlace de grabación de la clase": "Recording",
     "Tipo de lección extra": "Type of extra lesson",
-    "Date range — A: Timestamp": "Date of the report",
-    "Date range — L: Fecha de la clase": "Date of the class",
-    
+    # Даты (если у вас A или L называются так)
+    "Timestamp": "Date of the report",
+    "Fecha de la clase": "Date of the class",
 }
 
+# Преобразуем ключи в нормализованные (как делает _main_label)
+DISPLAY_ALIASES = { _main_label(k): v for k, v in DISPLAY_ALIASES_RAW.items() }
+
 def _display_label(col_name: str, suffix: str = "") -> str:
-    """Filter name"""
+    """Красивое имя для фильтра: алиас по первой строке заголовка + опциональный суффикс."""
     base = DISPLAY_ALIASES.get(_main_label(col_name), str(col_name).splitlines()[0].strip())
     return f"{base}{suffix}"
 
@@ -226,7 +231,7 @@ for idx, col in enumerate(col_order):
         if not np.isfinite(nmin) or not np.isfinite(nmax) or nmin == nmax:
             opts = _unique_list_for_multiselect(col_series)
             label = _display_label(col)
-            sel = st.sidebar.multiselect(label, options, key=f"ms_{idx}")
+            sel = st.sidebar.multiselect(label, opts, key=f"ms_{idx}")
             if sel:
                 base = col_series.astype(str).str.strip()
                 mask = base.isin([s for s in sel if s != "(blank)"]) | (col_series.isna() if "(blank)" in sel else False)
@@ -243,7 +248,8 @@ for idx, col in enumerate(col_order):
             _df = _df[(num >= lo) & (num <= hi) | num.isna()]
     else:
         opts = _unique_list_for_multiselect(col_series)
-        sel = st.sidebar.multiselect(f"{col}", opts)
+        label = _display_label(col)
+        sel = st.sidebar.multiselect(label, opts, key=f"ms_{idx}")
         if sel:
             base = col_series.astype(str).str.strip()
             mask = base.isin([s for s in sel if s != "(blank)"]) | (col_series.isna() if "(blank)" in sel else False)
