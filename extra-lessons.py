@@ -2,6 +2,7 @@ import os
 import io
 import json
 import textwrap
+import unicodedata
 from typing import Tuple, Optional
 
 import numpy as np
@@ -114,6 +115,22 @@ def _unique_list_for_multiselect(col: pd.Series) -> list:
         uniq = ["(blank)"] + uniq
     return uniq[:2000]  # hard cap for UI
 
+# --- label normalizer & forced-multiselect list ---
+
+def _norm_label(s: str) -> str:
+    s = unicodedata.normalize("NFKD", str(s)).encode("ascii", "ignore").decode("ascii")
+    return " ".join(s.lower().strip().split())
+
+FORCE_MULTI = {
+    # Spanish
+    "Número de grupo", "Numero de grupo",
+    "Módulo", "Modulo",
+    "Lección", "Leccion",
+    # English fallbacks
+    "Group number", "Module", "Lesson", "Lesson number",
+}
+FORCE_MULTI_NORM = { _norm_label(x) for x in FORCE_MULTI }
+
 # --- export utils (как в исходнике) ---
 def to_excel_bytes(data: pd.DataFrame) -> Optional[io.BytesIO]:
     try:
@@ -132,7 +149,11 @@ with st.spinner("Loading data…"):
     df_raw = load_sheet_df(SHEET_ID, WS_NAME, rng="A:Q")
 
 if df_raw.empty:
-    st.warning(f"No data. Check access to the file and that the tab '{WS_NAME}' contains a header row in A:Q. Also share the sheet with your service account e-mail.")
+    st.warning(
+        f"No data. Check access to the file and that the tab '{WS_NAME}' contains a header row in A:Q.
+"
+        "Also share the sheet with your service account e‑mail."
+    )
     st.stop()
 
 # Work on a copy
@@ -188,8 +209,9 @@ for idx, col in enumerate(col_order):
         continue
 
     col_series = _df[col]
+    force_multi = _norm_label(col) in FORCE_MULTI_NORM
 
-    if _is_numeric_col(col_series):
+    if _is_numeric_col(col_series) and not force_multi:
         col_num = pd.to_numeric(col_series, errors="coerce")
         nmin = float(np.nanmin(col_num.values)) if np.isfinite(np.nanmin(col_num.values)) else 0.0
         nmax = float(np.nanmax(col_num.values)) if np.isfinite(np.nanmax(col_num.values)) else 0.0
