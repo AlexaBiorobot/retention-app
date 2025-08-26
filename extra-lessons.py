@@ -150,10 +150,9 @@ with st.spinner("Loading data…"):
 
 if df_raw.empty:
     st.warning(
-        f"No data. Check access to the file and that the tab '{WS_NAME}' contains a header row in A:Q.
-"
-        "Also share the sheet with your service account e‑mail."
-    )
+    f"No data. Check access to the file and that the tab '{WS_NAME}' contains a header row in A:Q.\n"
+    "Also share the sheet with your service account e-mail."
+)
     st.stop()
 
 # Work on a copy
