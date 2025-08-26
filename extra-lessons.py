@@ -262,15 +262,6 @@ st.caption(textwrap.dedent(
     f"""
     **Notes**
     • Sheet ID: `{SHEET_ID}`  |  Tab: `{WS_NAME}`  |  Range: A:Q
-    • Share the Google Sheet with your service account e‑mail (Viewer is enough).
-    • Configure secrets (Streamlit Cloud / local `.streamlit/secrets.toml`):
-
-      ```toml
-      GSHEET_ID = "{DEFAULT_SHEET_ID}"
-      GSHEET_WS = "{DEFAULT_WS_NAME}"
-      GCP_SERVICE_ACCOUNT = "{{ your service account JSON here as a single line }}"
-      APP_PASSWORD = "Kodland123"  # or your own
-      ```
     """
 ))
 
