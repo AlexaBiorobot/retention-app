@@ -17,6 +17,20 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# --- Simple password gate (как в исходном коде) ---
+st.session_state.setdefault("is_authed", False)
+if not st.session_state["is_authed"]:
+    pwd = st.text_input("Password:", type="password")
+    # можно задать свой пароль через переменную окружения/секреты
+    target_pwd = os.getenv("APP_PASSWORD") or st.secrets.get("APP_PASSWORD") or "Kodland123"
+    if pwd == target_pwd:
+        st.session_state["is_authed"] = True
+        st.rerun()
+    else:
+        if pwd:
+            st.error("Wrong password")
+        st.stop()
+
 st.title("📋 Form Responses Viewer (A:Q)")
 st.caption("Loads a Google Sheet tab and lets you filter by every column. Columns A and L have date-range filters.")
 
@@ -50,7 +64,7 @@ def _authorize_client():
 
 # ===================== Data =====================
 
-@st.cache_data(show_spinner=False, ttl=180)
+@st.cache_data(show_spinner=False, ttl=300)
 def load_sheet_df(sheet_id: str, worksheet_name: str, rng: str = "A:Q") -> pd.DataFrame:
     """Read header + rows from A:Q and return a DataFrame.
     Empty strings are converted to <NA>."""
@@ -66,8 +80,7 @@ def load_sheet_df(sheet_id: str, worksheet_name: str, rng: str = "A:Q") -> pd.Da
         return pd.DataFrame()
     header = values[0]
     rows = values[1:]
-    # Pad rows to header length
-    rows = [r + [None] * (len(header) - len(r)) for r in rows]
+    rows = [r + [None] * (len(header) - len(r)) for r in rows]  # pad
     df = pd.DataFrame(rows, columns=header)
     return df.replace({"": pd.NA})
 
@@ -90,25 +103,8 @@ def _is_numeric_col(s: pd.Series) -> bool:
         return False
     num = pd.to_numeric(s, errors="coerce")
     non_na = num.notna().sum()
-    # Treat as numeric if >= 80% of non-empty values are numbers
     filled = s.notna().sum()
     return filled > 0 and (non_na / max(1, filled)) >= 0.8
-
-def _download_bytes(data: pd.DataFrame, as_excel: bool = False) -> Tuple[bytes, str, str]:
-    if as_excel:
-        try:
-            import xlsxwriter  # noqa: F401
-            buf = io.BytesIO()
-            with pd.ExcelWriter(buf, engine="xlsxwriter") as w:
-                data.to_excel(w, index=False)
-            buf.seek(0)
-            return buf.read(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "filtered.xlsx"
-        except Exception as e:
-            st.warning(f"Excel export failed ({e}); falling back to CSV.")
-    csv = data.to_csv(index=False).encode("utf-8")
-    return csv, "text/csv", "filtered.csv"
-
-# ===================== UI: Filters =====================
 
 @st.cache_data(show_spinner=False)
 def _unique_list_for_multiselect(col: pd.Series) -> list:
@@ -116,8 +112,19 @@ def _unique_list_for_multiselect(col: pd.Series) -> list:
     uniq = sorted(vals.unique())
     if col.isna().any():
         uniq = ["(blank)"] + uniq
-    # Hard cap to keep UI responsive
-    return uniq[:2000]
+    return uniq[:2000]  # hard cap for UI
+
+# --- export utils (как в исходнике) ---
+def to_excel_bytes(data: pd.DataFrame) -> Optional[io.BytesIO]:
+    try:
+        import xlsxwriter  # noqa: F401
+        buf = io.BytesIO()
+        with pd.ExcelWriter(buf, engine="xlsxwriter") as w:
+            data.to_excel(w, index=False)
+        buf.seek(0)
+        return buf
+    except Exception:
+        return None
 
 # ===================== Main =====================
 
@@ -126,7 +133,8 @@ with st.spinner("Loading data…"):
 
 if df_raw.empty:
     st.warning(
-        f"No data. Check access to the file and that the tab '{WS_NAME}' contains a header row in A:Q.\n"
+        f"No data. Check access to the file and that the tab '{WS_NAME}' contains a header row in A:Q.
+"
         "Also share the sheet with your service account e‑mail."
     )
     st.stop()
@@ -134,53 +142,41 @@ if df_raw.empty:
 # Work on a copy
 _df = df_raw.copy()
 
-# Remember original column order
+# Original order (A:Q)
 col_order = list(_df.columns)
 
-# Which columns are A and L? Use positional fallback if header names are unexpected
+# A, L positional names
 colA_name = col_order[0] if len(col_order) >= 1 else None
 colL_name = col_order[11] if len(col_order) >= 12 else None
 
-# Parse A and L to datetimes for filtering; keep originals for display
+# Parse A & L to datetime
 _dtA = _to_datetime_series(_df[colA_name]) if colA_name else pd.Series([], dtype="datetime64[ns]")
 _dtL = _to_datetime_series(_df[colL_name]) if colL_name else pd.Series([], dtype="datetime64[ns]")
 
-# Sidebar filters
+# ---------------- Sidebar filters ----------------
 st.sidebar.header("Filters")
 
-# ---- Date range for A ----
+# Date range for A
 if colA_name is not None:
-    a_min = _dtA.min()
-    a_max = _dtA.max()
+    a_min, a_max = _dtA.min(), _dtA.max()
     if pd.isna(a_min) or pd.isna(a_max):
         st.sidebar.caption(f"Column A ('{colA_name}') doesn't look like dates → skipping range filter.")
-        a_range = None
     else:
         a_def = (a_min.date(), a_max.date())
-        a_range = st.sidebar.date_input(
-            f"Date range — A: {colA_name}",
-            value=a_def,
-        )
+        a_range = st.sidebar.date_input(f"Date range — A: {colA_name}", value=a_def)
         if isinstance(a_range, tuple) and len(a_range) == 2:
             startA, endA = pd.to_datetime(a_range[0]), pd.to_datetime(a_range[1])
-            # inclusive end of day
             endA = endA + pd.Timedelta(days=1)
-            _df = _df[(_dtA >= startA) & (_dtA < endA) | _dtA.isna()]  # keep blanks unless user filters them later
+            _df = _df[(_dtA >= startA) & (_dtA < endA) | _dtA.isna()]
 
-# ---- Date range for L ----
+# Date range for L
 if colL_name is not None:
-    l_min = _dtL.min()
-    l_max = _dtL.max()
+    l_min, l_max = _dtL.min(), _dtL.max()
     if pd.isna(l_min) or pd.isna(l_max):
         st.sidebar.caption(f"Column L ('{colL_name}') doesn't look like dates → skipping range filter.")
-        l_range = None
     else:
         l_def = (l_min.date(), l_max.date())
-        l_range = st.sidebar.date_input(
-            f"Date range — L: {colL_name}",
-            value=l_def,
-            key="date_L",
-        )
+        l_range = st.sidebar.date_input(f"Date range — L: {colL_name}", value=l_def, key="date_L")
         if isinstance(l_range, tuple) and len(l_range) == 2:
             startL, endL = pd.to_datetime(l_range[0]), pd.to_datetime(l_range[1])
             endL = endL + pd.Timedelta(days=1)
@@ -188,23 +184,20 @@ if colL_name is not None:
 
 st.sidebar.divider()
 
-# ---- Filters for ALL other columns ----
+# Filters for ALL other columns
 for idx, col in enumerate(col_order):
     if col is None:
         continue
-    # Skip A and L here (already filtered by date ranges above)
-    if idx in (0, 11):
+    if idx in (0, 11):  # skip A & L here (already filtered by date)
         continue
 
     col_series = _df[col]
 
-    # Numeric? → range slider; otherwise → multiselect
     if _is_numeric_col(col_series):
         col_num = pd.to_numeric(col_series, errors="coerce")
         nmin = float(np.nanmin(col_num.values)) if np.isfinite(np.nanmin(col_num.values)) else 0.0
         nmax = float(np.nanmax(col_num.values)) if np.isfinite(np.nanmax(col_num.values)) else 0.0
         if not np.isfinite(nmin) or not np.isfinite(nmax) or nmin == nmax:
-            # Degenerate; fall back to multiselect
             opts = _unique_list_for_multiselect(col_series)
             sel = st.sidebar.multiselect(f"{col}", opts)
             if sel:
@@ -236,21 +229,22 @@ st.success(f"Rows: {len(_df)} (of {len(df_raw)})")
 show_cols = [c for c in col_order if c in _df.columns]
 view = _df.loc[:, show_cols].copy()
 
-# Make table a bit taller depending on rows
+# Table size
 ROW, HEADER = 34, 44
 height = min(900, HEADER + ROW * max(1, min(len(view), 200)))
 
-# Auto-expand text columns (Streamlit search works out of the box)
 st.dataframe(view, use_container_width=True, height=height)
 
 # Downloads
 c1, c2 = st.columns(2)
 with c1:
-    data, mime, fname = _download_bytes(view, as_excel=False)
-    st.download_button("⬇️ Download CSV", data, file_name=fname, mime=mime)
+    st.download_button("⬇️ Download CSV", view.to_csv(index=False).encode("utf-8"), file_name="filtered.csv", mime="text/csv")
 with c2:
-    data_x, mime_x, fname_x = _download_bytes(view, as_excel=True)
-    st.download_button("⬇️ Download Excel", data_x, file_name=fname_x, mime=mime_x)
+    buf = to_excel_bytes(view)
+    if buf is not None:
+        st.download_button("⬇️ Download Excel", buf, file_name="filtered.xlsx")
+    else:
+        st.caption("Excel export is unavailable; install xlsxwriter.")
 
 st.caption(textwrap.dedent(
     f"""
@@ -263,6 +257,13 @@ st.caption(textwrap.dedent(
       GSHEET_ID = "{DEFAULT_SHEET_ID}"
       GSHEET_WS = "{DEFAULT_WS_NAME}"
       GCP_SERVICE_ACCOUNT = "{{ your service account JSON here as a single line }}"
+      APP_PASSWORD = "Kodland123"  # or your own
       ```
     """
 ))
+
+# --- Refresh like in your original app ---
+if st.button("Refresh"):
+    load_sheet_df.clear()
+    _unique_list_for_multiselect.clear()
+    st.rerun()
