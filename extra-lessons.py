@@ -211,8 +211,6 @@ if bo_col:
         base = _df[bo_col].astype(str)
         _df = _df[base.str.contains(q_bo.strip(), case=False, na=False, regex=False)]
 
-st.sidebar.divider()
-
 # ⬇️ Все остальные фильтры — под тогглом
 st.sidebar.divider()
 
