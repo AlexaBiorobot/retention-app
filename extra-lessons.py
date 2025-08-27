@@ -215,56 +215,61 @@ if colL_name is not None:
             endL = endL + pd.Timedelta(days=1)
             _df = _df[(_dtL >= startL) & (_dtL < endL) | _dtL.isna()]
 
+# --- Top filter: Student's BO (substring) ---
+bo_col = next((c for c in col_order if DISPLAY_ALIASES.get(_main_label(c)) == "Student's BO"), None)
+if bo_col:
+    bo_label = _display_label(bo_col, " (contains)")
+    q_bo = st.sidebar.text_input(bo_label, key="contains_bo", placeholder="например: 2336844")
+    if q_bo:
+        base = _df[bo_col].astype(str)
+        _df = _df[base.str.contains(q_bo.strip(), case=False, na=False, regex=False)]
+
 st.sidebar.divider()
 
-# Filters for ALL other columns
-for idx, col in enumerate(col_order):
-    if col is None or idx in (0, 11):
-        continue
+# ⬇️ Все остальные фильтры — под тогглом
+with st.sidebar.expander("More filters", expanded=False):
+    # Filters for ALL other columns
+    for idx, col in enumerate(col_order):
+        if col is None or idx in (0, 11):
+            continue
+        if bo_col and col == bo_col:
+            continue  # BO уже вынесен наверх
 
-    col_series = _df[col]
-    
-    # --- спецфильтр: "Student's BO" — поиск по подстроке ---
-    if DISPLAY_ALIASES.get(_main_label(col)) == "Student's BO":
-        label = _display_label(col, " (contains)")
-        q = st.sidebar.text_input(label, key=f"contains_{idx}", placeholder="e.g: 1234567")
-        if q:
-            base = col_series.astype(str)
-            _df = _df[base.str.contains(q.strip(), case=False, na=False, regex=False)]
-        continue
-        
-    force_multi = _is_force_multiselect(col)
+        col_series = _df[col]
+        force_multi = _is_force_multiselect(col)
 
-    if _is_numeric_col(col_series) and not force_multi:
-        col_num = pd.to_numeric(col_series, errors="coerce")
-        nmin = float(np.nanmin(col_num.values)) if np.isfinite(np.nanmin(col_num.values)) else 0.0
-        nmax = float(np.nanmax(col_num.values)) if np.isfinite(np.nanmax(col_num.values)) else 0.0
-        if not np.isfinite(nmin) or not np.isfinite(nmax) or nmin == nmax:
+        if _is_numeric_col(col_series) and not force_multi:
+            col_num = pd.to_numeric(col_series, errors="coerce")
+            nmin = float(np.nanmin(col_num.values)) if np.isfinite(np.nanmin(col_num.values)) else 0.0
+            nmax = float(np.nanmax(col_num.values)) if np.isfinite(np.nanmax(col_num.values)) else 0.0
+
+            if not np.isfinite(nmin) or not np.isfinite(nmax) or nmin == nmax:
+                opts = _unique_list_for_multiselect(col_series)
+                label = _display_label(col)
+                sel = st.multiselect(label, opts, key=f"ms_{idx}")   # ⚠️ внутри expander используем st.*, не st.sidebar.*
+                if sel:
+                    base = col_series.astype(str).str.strip()
+                    mask = base.isin([s for s in sel if s != "(blank)"]) | (col_series.isna() if "(blank)" in sel else False)
+                    _df = _df[mask]
+            else:
+                label = _display_label(col, " (range)")
+                lo, hi = st.slider(
+                    label,
+                    min_value=float(np.floor(nmin)),
+                    max_value=float(np.ceil(nmax)),
+                    value=(float(np.floor(nmin)), float(np.ceil(nmax))),
+                    key=f"sl_{idx}",
+                )
+                num = pd.to_numeric(_df[col], errors="coerce")
+                _df = _df[(num >= lo) & (num <= hi) | num.isna()]
+        else:
             opts = _unique_list_for_multiselect(col_series)
             label = _display_label(col)
-            sel = st.sidebar.multiselect(label, opts, key=f"ms_{idx}")
+            sel = st.multiselect(label, opts, key=f"ms_{idx}")
             if sel:
                 base = col_series.astype(str).str.strip()
                 mask = base.isin([s for s in sel if s != "(blank)"]) | (col_series.isna() if "(blank)" in sel else False)
                 _df = _df[mask]
-        else:
-            label = _display_label(col, " (range)")
-            lo, hi = st.sidebar.slider(
-                label,
-                min_value=float(np.floor(nmin)),
-                max_value=float(np.ceil(nmax)),
-                value=(float(np.floor(nmin)), float(np.ceil(nmax))),
-            )
-            num = pd.to_numeric(_df[col], errors="coerce")
-            _df = _df[(num >= lo) & (num <= hi) | num.isna()]
-    else:
-        opts = _unique_list_for_multiselect(col_series)
-        label = _display_label(col)
-        sel = st.sidebar.multiselect(label, opts, key=f"ms_{idx}")
-        if sel:
-            base = col_series.astype(str).str.strip()
-            mask = base.isin([s for s in sel if s != "(blank)"]) | (col_series.isna() if "(blank)" in sel else False)
-            _df = _df[mask]
 
 # ===================== Output =====================
 
