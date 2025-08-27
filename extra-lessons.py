@@ -218,8 +218,8 @@ if colL_name is not None:
 # --- Top filter: Student's BO (substring) ---
 bo_col = next((c for c in col_order if DISPLAY_ALIASES.get(_main_label(c)) == "Student's BO"), None)
 if bo_col:
-    bo_label = _display_label(bo_col, " (contains)")
-    q_bo = st.sidebar.text_input(bo_label, key="contains_bo", placeholder="например: 2336844")
+    bo_label = _display_label(bo_col, " (search by number!)")
+    q_bo = st.sidebar.text_input(bo_label, key="contains_bo", placeholder="e.g.: 2336844")
     if q_bo:
         base = _df[bo_col].astype(str)
         _df = _df[base.str.contains(q_bo.strip(), case=False, na=False, regex=False)]
