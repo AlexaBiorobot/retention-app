@@ -223,6 +223,16 @@ for idx, col in enumerate(col_order):
         continue
 
     col_series = _df[col]
+    
+    # --- спецфильтр: "Student's BO" — поиск по подстроке ---
+    if DISPLAY_ALIASES.get(_main_label(col)) == "Student's BO":
+        label = _display_label(col, " (contains)")
+        q = st.sidebar.text_input(label, key=f"contains_{idx}", placeholder="e.g: 1234567")
+        if q:
+            base = col_series.astype(str)
+            _df = _df[base.str.contains(q.strip(), case=False, na=False, regex=False)]
+        continue
+        
     force_multi = _is_force_multiselect(col)
 
     if _is_numeric_col(col_series) and not force_multi:
