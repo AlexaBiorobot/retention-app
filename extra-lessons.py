@@ -189,19 +189,6 @@ _dtL = _to_datetime_series(_df[colL_name]) if colL_name else pd.Series([], dtype
 
 st.sidebar.header("Filters")
 
-# Date range for A
-if colA_name is not None:
-    a_min, a_max = _dtA.min(), _dtA.max()
-    if pd.isna(a_min) or pd.isna(a_max):
-        st.sidebar.caption(f"Column A ('{colA_name}') doesn't look like dates → skipping range filter.")
-    else:
-        a_def = (a_min.date(), a_max.date())
-        a_range = st.sidebar.date_input(f"{_display_label(colA_name)}", value=a_def)
-        if isinstance(a_range, tuple) and len(a_range) == 2:
-            startA, endA = pd.to_datetime(a_range[0]), pd.to_datetime(a_range[1])
-            endA = endA + pd.Timedelta(days=1)
-            _df = _df[(_dtA >= startA) & (_dtA < endA) | _dtA.isna()]
-
 # Date range for L
 if colL_name is not None:
     l_min, l_max = _dtL.min(), _dtL.max()
@@ -227,13 +214,29 @@ if bo_col:
 st.sidebar.divider()
 
 # ⬇️ Все остальные фильтры — под тогглом
+st.sidebar.divider()
+
 with st.sidebar.expander("More filters", expanded=False):
-    # Filters for ALL other columns
+    # --- Date of the report (Column A) внутри тоггла ---
+    if colA_name is not None:
+        a_min, a_max = _dtA.min(), _dtA.max()
+        if pd.isna(a_min) or pd.isna(a_max):
+            st.caption(f"Column A ('{colA_name}') doesn't look like dates → skipping range filter.")
+        else:
+            a_def = (a_min.date(), a_max.date())
+            a_range = st.date_input(_display_label(colA_name), value=a_def, key="date_A_more")
+            if isinstance(a_range, tuple) and len(a_range) == 2:
+                startA, endA = pd.to_datetime(a_range[0]), pd.to_datetime(a_range[1])
+                endA = endA + pd.Timedelta(days=1)
+                # применяем фильтр по A
+                _df = _df[(_dtA >= startA) & (_dtA < endA) | _dtA.isna()]
+
+    # --- Остальные фильтры ---
     for idx, col in enumerate(col_order):
-        if col is None or idx in (0, 11):
+        if col is None or idx in (0, 11):  # 0=A (перенесён в тоггл выше), 11=L (сверху), пропускаем
             continue
-        if bo_col and col == bo_col:
-            continue  # BO уже вынесен наверх
+        if bo_col and col == bo_col:       # BO вынесен наверх
+            continue
 
         col_series = _df[col]
         force_multi = _is_force_multiselect(col)
@@ -242,11 +245,10 @@ with st.sidebar.expander("More filters", expanded=False):
             col_num = pd.to_numeric(col_series, errors="coerce")
             nmin = float(np.nanmin(col_num.values)) if np.isfinite(np.nanmin(col_num.values)) else 0.0
             nmax = float(np.nanmax(col_num.values)) if np.isfinite(np.nanmax(col_num.values)) else 0.0
-
             if not np.isfinite(nmin) or not np.isfinite(nmax) or nmin == nmax:
                 opts = _unique_list_for_multiselect(col_series)
                 label = _display_label(col)
-                sel = st.multiselect(label, opts, key=f"ms_{idx}")   # ⚠️ внутри expander используем st.*, не st.sidebar.*
+                sel = st.multiselect(label, opts, key=f"ms_{idx}")
                 if sel:
                     base = col_series.astype(str).str.strip()
                     mask = base.isin([s for s in sel if s != "(blank)"]) | (col_series.isna() if "(blank)" in sel else False)
