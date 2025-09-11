@@ -426,7 +426,7 @@ with tab_charts:
             if counts.empty:
                 st.info("No data for the selected filters.")
             else:
-                # 1) Полный временной ряд по выбранной гранулярности (день/нед/мес/год)
+                # Полный временной ряд по выбранной гранулярности (день/нед/мес/год)
                 counts = counts.sort_values("date").reset_index(drop=True)
                 dmin, dmax = counts["date"].min(), counts["date"].max()
             
@@ -451,52 +451,21 @@ with tab_charts:
                     .fillna({"count": 0})
                 )
             
-                # 2) Скользящая средняя в той же гранулярности
-                win_map = {"Day": 7, "Week": 4, "Month": 3, "Year": 3}
-                win = win_map.get(granularity, 7)
-                counts["trend"] = counts["count"].rolling(window=win, min_periods=win).mean()
-            
-                # 3) Ось X и тип базового графика под гранулярность
+                # Ось X под гранулярность
                 fmt_map = {"Day": "%d %b %Y", "Week": "%d %b %Y", "Month": "%b %Y", "Year": "%Y"}
                 x_enc = alt.X("date:T", title=granularity, axis=alt.Axis(format=fmt_map[granularity]))
             
-                if granularity in ("Day", "Week"):
-                    base = (
-                        alt.Chart(counts)
-                        .mark_line()
-                        .encode(
-                            x=x_enc,
-                            y=alt.Y("count:Q", title="Count"),
-                            tooltip=[alt.Tooltip("date:T"), alt.Tooltip("count:Q")]
-                        )
-                        .properties(height=320)
+                # Кривая (line) по count
+                chart = (
+                    alt.Chart(counts)
+                    .mark_line(interpolate="monotone")
+                    .encode(
+                        x=x_enc,
+                        y=alt.Y("count:Q", title="Count"),
+                        tooltip=[alt.Tooltip("date:T"), alt.Tooltip("count:Q")]
                     )
-                else:  # Month/Year
-                    base = (
-                        alt.Chart(counts)
-                        .mark_bar()
-                        .encode(
-                            x=x_enc,
-                            y=alt.Y("count:Q", title="Count"),
-                            tooltip=[alt.Tooltip("date:T"), alt.Tooltip("count:Q")]
-                        )
-                        .properties(height=320)
-                    )
-            
-                add_curve = st.checkbox("Добавить кривую (скользящее среднее)", value=True)
-                if add_curve and counts["trend"].notna().any():
-                    curve = (
-                        alt.Chart(counts)
-                        .mark_line(interpolate="monotone")
-                        .encode(
-                            x=x_enc,
-                            y=alt.Y("trend:Q", title=None),
-                            tooltip=[alt.Tooltip("date:T"), alt.Tooltip("trend:Q", title="Trend")]
-                        )
-                    )
-                    chart = alt.layer(base, curve)
-                else:
-                    chart = base
+                    .properties(height=320)
+                )
             
                 st.altair_chart(chart, use_container_width=True)
             
@@ -505,7 +474,7 @@ with tab_charts:
                 if sel_teacher != "(All)":
                     st.write("— **Teacher**:", sel_teacher)
             
-            # кнопка обновления оставляем
+            # Кнопка обновления
             if st.button("Refresh data", key="refresh_charts"):
                 load_sheet_df.clear()
                 _unique_list_for_multiselect.clear()
