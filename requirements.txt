@@ -6,3 +6,4 @@ openpyxl
 tk
 streamlit-aggrid
 streamlit>=1.36
+altair
