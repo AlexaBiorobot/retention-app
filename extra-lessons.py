@@ -495,12 +495,12 @@ with tab_charts:
                 st.divider()
                 st.subheader("Status mix by period (from column Z)")
                 st.caption("Stacked 100% bars. OK → 'Recording is too short' if Recording check says so.")
-
+                
                 z_col = df_raw.columns[25] if len(df_raw.columns) > 25 else None
                 if not z_col:
                     st.info("Column Z is not available. Expand load range to A:Z.")
                 else:
-                    # 1) нормализация статусов из Z к каноническим
+                    # 1) берём статусы и нормализуем написания
                     z_raw = df_raw.loc[df_ch.index, z_col].astype(str)
                 
                     def _canon_status(s: pd.Series) -> pd.Series:
@@ -519,66 +519,68 @@ with tab_charts:
                 
                     status = _canon_status(z_raw)
                 
-                    # 2) override: OK → "Recording is too short" при флаге в "Recording check"
+                    # 2) override из соседней колонки "Recording check"
                     rec_col = "Recording check"
-                    rec = (_df.loc[df_ch.index, rec_col].astype(str)
-                           if rec_col in _df.columns else pd.Series("", index=df_ch.index))
-                    override = (rec == "Recording is too short") & (status == "OK")
-                    status = pd.Series(np.where(override, "Recording is too short", status), index=df_ch.index)
+                    rec = (df_ch[rec_col].astype(str) if rec_col in df_ch.columns
+                           else pd.Series("", index=df_ch.index))
+                    status = status.copy()
+                    status.loc[(rec == "Recording is too short") & (status == "OK")] = "Recording is too short"
                 
-                    # 3) ключ периода под гранулярность (ДАЁМ key, all_idx, x_axis2, x_title2, НИЧЕГО НЕ РИСУЕМ здесь)
+                    # 3) ключи периодов как Period + их диапазон
                     if granularity == "Day":
-                        key = dtL_ch.dt.floor("D")
-                        all_idx = pd.date_range(start=key.min(), end=key.max(), freq="D")
-                        x_axis2 = alt.Axis(values=all_idx.to_pydatetime().tolist(), format="%d %b %Y", ticks=True, labelAngle=-45)
+                        period = dtL_ch.dt.to_period("D")
+                        freq = "D"
                         x_title2 = "Day"
-                
+                        x_fmt = "%d %b %Y"
+                        x_angle = -45
                     elif granularity == "Week":
-                        weeks = dtL_ch.dt.to_period("W-MON")            # недели как Period
-                        key = weeks.dt.start_time                       # дата начала недели
-                        all_idx = pd.date_range(
-                            start=weeks.min().start_time,
-                            end=weeks.max().start_time,
-                            freq="W-MON"
-                        )
-                        x_axis2 = alt.Axis(
-                            values=all_idx.to_pydatetime().tolist(),
-                            format="W%V (%d %b %Y)",    # номер ISO-недели + дата старта
-                            ticks=True,
-                            labelAngle=-45,
-                            labelOverlap="greedy",
-                        )
+                        period = dtL_ch.dt.to_period("W-MON")   # недели с понедельника
+                        freq = "W-MON"
                         x_title2 = "Week"
-                
+                        x_fmt = "W%V (%d %b %Y)"                # ISO-неделя + дата старта
+                        x_angle = -45
                     elif granularity == "Month":
-                        key = dtL_ch.dt.to_period("M").dt.start_time
-                        all_idx = pd.date_range(start=key.min().to_period("M").start_time,
-                                                end=key.max().to_period("M").start_time, freq="MS")
-                        x_axis2 = alt.Axis(values=all_idx.to_pydatetime().tolist(), format="%b %Y", ticks=True)
+                        period = dtL_ch.dt.to_period("M")
+                        freq = "M"
                         x_title2 = "Month"
-                
+                        x_fmt = "%b %Y"
+                        x_angle = 0
                     else:  # Year
-                        key = dtL_ch.dt.to_period("Y").dt.start_time
-                        all_idx = pd.date_range(start=key.min().to_period("Y").start_time,
-                                                end=key.max().to_period("Y").start_time, freq="YS")
-                        x_axis2 = alt.Axis(values=all_idx.to_pydatetime().tolist(), format="%Y", ticks=True)
+                        period = dtL_ch.dt.to_period("Y")
+                        freq = "Y"
                         x_title2 = "Year"
+                        x_fmt = "%Y"
+                        x_angle = 0
                 
-                    # 4) общий подсчёт + каркас всех периодов + стабильный домен цветов
-                    df_status = pd.DataFrame({"date": key, "status": status}).dropna(subset=["date"])
-                    counts_s = (df_status.groupby(["date", "status"], dropna=False)
-                                        .size().reset_index(name="count"))
+                    # 4) группировка по Period + заполнение пропусков PeriodRange
+                    df_status = pd.DataFrame({"period": period, "status": status}).dropna(subset=["period"])
+                    counts_s = (df_status.groupby(["period", "status"], dropna=False)
+                                        .size()
+                                        .reset_index(name="count"))
                 
                     status_order = ["Recording is too short", "Recording ID Error", "Duplicate", "OK", "(blank)"]
-                    idx = pd.MultiIndex.from_product([all_idx, status_order], names=["date", "status"])
-                    counts_full = (counts_s.set_index(["date", "status"])
+                
+                    all_periods = pd.period_range(start=period.min(), end=period.max(), freq=freq)
+                    idx = pd.MultiIndex.from_product([all_periods, status_order], names=["period", "status"])
+                    counts_full = (counts_s.set_index(["period", "status"])
                                           .reindex(idx, fill_value=0)
                                           .reset_index())
                 
-                    counts_full["total"] = counts_full.groupby("date")["count"].transform("sum").astype(float)
+                    # 5) дата для оси X = начало периода
+                    counts_full["date"] = counts_full["period"].dt.start_time
+                
+                    # 6) доли
+                    counts_full["total"] = counts_full.groupby("period")["count"].transform("sum").astype(float)
                     counts_full["pct"] = (counts_full["count"] / counts_full["total"]).fillna(0.0)
-
-                    st.write("DEBUG sample", counts_full.head(), counts_full.dtypes)
+                
+                    # 7) ось X: тики на каждом шаге периода
+                    x_axis2 = alt.Axis(
+                        values=counts_full["date"].drop_duplicates().tolist(),
+                        format=x_fmt,
+                        ticks=True,
+                        labelAngle=x_angle,
+                        labelOverlap="greedy",
+                    )
                 
                     chart2 = (
                         alt.Chart(counts_full)
@@ -590,13 +592,13 @@ with tab_charts:
                                 "status:N",
                                 title="Status",
                                 sort=status_order,
-                                scale=alt.Scale(domain=status_order),   # <- фиксируем домен легенды/цветов
+                                scale=alt.Scale(domain=status_order),  # фиксируем порядок цветов
                             ),
                             tooltip=[
                                 alt.Tooltip("date:T", title=x_title2),
                                 alt.Tooltip("status:N", title="Status"),
                                 alt.Tooltip("count:Q", title="Count"),
-                                alt.Tooltip("pct:Q", title="Share", format=".0%")
+                                alt.Tooltip("pct:Q", title="Share", format=".0%"),
                             ],
                         )
                         .properties(height=320)
