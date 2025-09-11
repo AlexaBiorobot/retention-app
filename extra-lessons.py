@@ -734,6 +734,149 @@ with tab_charts:
                             )
                             st.altair_chart(pie, use_container_width=True)
 
+            # ===== Рейтинг по преподавателям (D) =====
+            st.divider()
+            st.subheader("Tutor violation ranking (monthly activity > 20)")
+            
+            # Колонки
+            colD_name = col_order[3] if len(col_order) >= 4 else None   # D: Tutor
+            colE_name = col_order[4] if len(col_order) >= 5 else None   # E: TL
+            z_col     = df_raw.columns[25] if len(df_raw.columns) > 25 else None  # Z
+            y_col     = df_raw.columns[24] if len(df_raw.columns) > 24 else None  # Y
+            rec_col   = "Recording check"
+            
+            # База для ранкинга: вся текущая выборка _df (с учётом фильтров сайдбара) + валидная L
+            rank_mask = _dtL.notna()
+            df_rank = _df.loc[rank_mask].copy()
+            dtL_rank = _dtL.loc[rank_mask]
+            
+            if not colD_name or colD_name not in df_rank.columns or not colE_name or colE_name not in df_rank.columns:
+                st.info("Required columns D (Tutor) or E (TL) are missing.")
+            else:
+                # ---- Подготовка признаков нарушений ----
+            
+                # 1) Нормализация статуса Z
+                def _canon_status(s: pd.Series) -> pd.Series:
+                    x = (s.astype(str).str.lower().str.strip().str.replace(r"\s+", " ", regex=True))
+                    out = np.select(
+                        [
+                            x.eq("ok") | x.eq("okay"),
+                            x.str.contains(r"\bduplicate\b"),
+                            x.str.contains(r"(recording.*id.*error|id.*error|rec.*id.*error)")
+                        ],
+                        ["OK", "Duplicate", "Recording ID Error"],
+                        default=s.astype(str).str.strip()
+                    )
+                    out = pd.Series(out, index=s.index).replace({"": "(blank)"})
+                    return out
+            
+                if z_col and z_col in df_rank.columns:
+                    status_z = _canon_status(df_rank[z_col])
+                else:
+                    status_z = pd.Series("(blank)", index=df_rank.index)
+            
+                # 2) Recording check (short)
+                rec_short = df_rank[rec_col].astype(str).eq("Recording is too short") if rec_col in df_rank.columns else pd.Series(False, index=df_rank.index)
+            
+                # 3) Y != 1  (парсим число; поддержка '1,0', '%', текста)
+                if y_col and y_col in df_rank.columns:
+                    y_raw = df_rank[y_col].astype(str)
+                    y_num = (
+                        y_raw.str.replace("%", "", regex=False)
+                             .str.replace(",", ".", regex=False)
+                             .str.extract(r"([-+]?\d*\.?\d+)")[0]
+                    )
+                    y_num = pd.to_numeric(y_num, errors="coerce")
+                    y_not_one = y_num.notna() & (~np.isclose(y_num, 1.0))
+                else:
+                    y_not_one = pd.Series(False, index=df_rank.index)
+            
+                # 4) Z != OK (исключаем пустое и 'Recording is too short', т.к. отдельная статья)
+                z_not_ok = (~status_z.isin(["OK", "(blank)", "Recording is too short"]))
+            
+                # 5) Общее нарушение в строке (объединение статей)
+                any_violation = z_not_ok | y_not_one | rec_short
+            
+                # ---- Фильтр по активности >20 в ЛЮБОМ месяце ----
+                months = dtL_rank.dt.to_period("M")
+                by_tutor_month = (
+                    pd.DataFrame({
+                        "tutor": df_rank[colD_name].astype(str),
+                        "month": months
+                    })
+                    .groupby(["tutor", "month"], dropna=False)
+                    .size()
+                    .reset_index(name="n")
+                )
+                tutors_over_20 = by_tutor_month.groupby("tutor")["n"].max()
+                tutors_over_20 = tutors_over_20[tutors_over_20 > 20].index
+            
+                # Оставляем только таких
+                df_rank = df_rank[df_rank[colD_name].astype(str).isin(tutors_over_20)]
+                status_z = status_z.loc[df_rank.index]
+                rec_short = rec_short.loc[df_rank.index]
+                y_not_one = y_not_one.loc[df_rank.index]
+                any_violation = any_violation.loc[df_rank.index]
+            
+                if df_rank.empty:
+                    st.info("No tutors with >20 lessons in any month for the current filters.")
+                else:
+                    # ---- Агрегация по (Tutor, TL) ----
+                    grp_keys = [colD_name, colE_name]
+                    agg_df = (
+                        pd.DataFrame({
+                            colD_name: df_rank[colD_name].astype(str),
+                            colE_name: df_rank[colE_name].astype(str),
+                            "z_not_ok": z_not_ok.loc[df_rank.index].astype(bool),
+                            "y_not_one": y_not_one.astype(bool),
+                            "rec_short": rec_short.astype(bool),
+                            "any_violation": any_violation.astype(bool),
+                        })
+                        .groupby(grp_keys, dropna=False)
+                        .agg(
+                            lessons_total=("any_violation", "size"),
+                            z_not_ok=("z_not_ok", "sum"),
+                            y_not_one=("y_not_one", "sum"),
+                            rec_short=("rec_short", "sum"),
+                            violations_total=("any_violation", "sum"),
+                        )
+                        .reset_index()
+                    )
+            
+                    # % нарушений
+                    agg_df["violation_pct"] = (agg_df["violations_total"] / agg_df["lessons_total"] * 100).round(1)
+            
+                    # Сортировка как в рейтинге: по % и абсолюту
+                    agg_df = agg_df.sort_values(["violation_pct", "violations_total"], ascending=[False, False])
+            
+                    # Переименуем колонки под задачу
+                    out_cols = {
+                        colD_name: "Tutor",
+                        colE_name: "TL",
+                        "z_not_ok": "Z not OK (count)",
+                        "y_not_one": "Y != 1 (count)",
+                        "rec_short": "Recording too short (count)",
+                        "lessons_total": "Lessons (total)",
+                        "violations_total": "Violations (total)",
+                        "violation_pct": "Violations (%)",
+                    }
+                    table_df = agg_df.rename(columns=out_cols)
+            
+                    # Подсветка красным, если >20%
+                    def _highlight_pct(s: pd.Series):
+                        return ['color: red; font-weight: 600' if (isinstance(v, (int, float)) and v > 20) else '' for v in s]
+            
+                    styled = table_df.style.apply(_highlight_pct, subset=["Violations (%)"])
+            
+                    st.table(styled)
+            
+                    # Скачивание CSV
+                    st.download_button(
+                        "⬇️ Download ranking (CSV)",
+                        table_df.to_csv(index=False).encode("utf-8"),
+                        file_name="tutor_violation_ranking.csv",
+                        mime="text/csv"
+                    )
 
 
     # Кнопка обновления (на уровне with tab_charts:)
