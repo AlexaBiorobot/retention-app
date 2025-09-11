@@ -181,13 +181,20 @@ def _display_label(col_name: str, suffix: str = "") -> str:
 # ===================== Main =====================
 
 with st.spinner("Loading data…"):
-    df_raw = load_sheet_df(SHEET_ID, WS_NAME, rng="A:Q")
+    df_raw = load_sheet_df(SHEET_ID, WS_NAME, rng="A:Y")
 
 if df_raw.empty:
     st.warning(f"No data. Check access to the file and that the tab '{WS_NAME}' contains a header row in A:Q.""Also share the sheet with your service account e‑mail.")
     st.stop()
 
-_df = df_raw.copy()
+# --- оставляем только A:Q + T, X, Y ---
+# индексы столбцов по позиции: A..Q = 0..16, T=19, X=23, Y=24
+keep_idx = list(range(min(17, len(df_raw.columns))))  # A:Q
+for i in (19, 23, 24):  # T, X, Y
+    if i < len(df_raw.columns):
+        keep_idx.append(i)
+
+_df = df_raw.iloc[:, keep_idx].copy()
 col_order = list(_df.columns)
 
 colA_name = col_order[0] if len(col_order) >= 1 else None
