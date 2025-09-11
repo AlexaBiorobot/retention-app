@@ -357,7 +357,7 @@ with tab_data:
     st.caption(textwrap.dedent(
         f"""
         **Notes**
-        • Sheet ID: `{SHEET_ID}`  |  Tab: `{WS_NAME}`  |  Range: A:Y  (shown: A–Q + T, X, Y)
+        • Sheet ID: `{SHEET_ID}`  |  Tab: `{WS_NAME}`  |  Range: A:Z  (shown: A–Q + T, X, Y; Z used in charts)
         """
     ))
 
@@ -568,7 +568,12 @@ with tab_charts:
                         .encode(
                             x=alt.X("date:T", title=x_title2, axis=x_axis2),
                             y=alt.Y("count:Q", stack="normalize", title="Share"),
-                            color=alt.Color("status:N", title="Status", sort=status_order),
+                            color=alt.Color(
+                                "status:N",
+                                title="Status",
+                                sort=status_order,
+                                scale=alt.Scale(domain=status_order),
+                            ),
                             tooltip=[
                                 alt.Tooltip("date:T", title=x_title2),
                                 alt.Tooltip("status:N", title="Status"),
