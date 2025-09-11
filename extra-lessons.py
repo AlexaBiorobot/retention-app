@@ -370,14 +370,13 @@ with tab_charts:
     st.subheader("Dynamics by L (date of the class)")
     st.caption("Aggregate by day / week / month / year. Filter by teacher (column D).")
 
-    # Имена колонок для фильтра и дат
-    colD_name = col_order[3] if len(col_order) >= 4 else None   # колонка D (преподаватель)
-    colL_name = col_order[11] if len(col_order) >= 12 else None # колонка L (дата)
+    colD_name = col_order[3] if len(col_order) >= 4 else None   # D
+    colL_name = col_order[11] if len(col_order) >= 12 else None  # L
 
     if not colL_name or colL_name not in _df.columns:
         st.warning("Column L is not available in the selected view.")
     else:
-        # Фильтр по преподавателю (D)
+        # Фильтр по преподавателю
         if colD_name and colD_name in _df.columns:
             teachers = ["(All)"] + sorted(_df[colD_name].dropna().astype(str).unique())
             sel_teacher = st.selectbox("Teacher (column D):", teachers, index=0)
@@ -386,11 +385,10 @@ with tab_charts:
             sel_teacher = "(All)"
             df_ch = _df
 
-        # Берём сопоставимые даты из уже рассчитанной _dtL
+        # Даты для выбранных строк
         dtL_ch = _dtL.loc[df_ch.index] if len(df_ch) else pd.to_datetime(pd.Series([], dtype="object"))
-
-        # Валидные даты
         mask_valid = dtL_ch.notna()
+
         if not mask_valid.any():
             st.info("No valid dates in column L for the current selection.")
         else:
@@ -402,291 +400,177 @@ with tab_charts:
                 "Granularity:",
                 ["Day", "Week", "Month", "Year"],
                 horizontal=True,
-                index=2  # по умолчанию Month
+                index=2
             )
 
-            # Агрегация
+            # ===== Первый график =====
+            # Агрегируем и делаем полный временной ряд + ось
             def agg_counts(series: pd.Series, mode: str) -> pd.DataFrame:
                 s = series.copy()
                 if mode == "Day":
                     idx = s.dt.floor("D")
                 elif mode == "Week":
-                    idx = s.dt.to_period("W-MON").dt.start_time  # недели с понедельника
+                    idx = s.dt.to_period("W-MON").dt.start_time
                 elif mode == "Month":
                     idx = s.dt.to_period("M").dt.start_time
                 elif mode == "Year":
                     idx = s.dt.to_period("Y").dt.start_time
                 else:
                     idx = s.dt.floor("D")
-                out = idx.value_counts().sort_index().rename_axis("date").reset_index(name="count")
-                return out
+                return idx.value_counts().sort_index().rename_axis("date").reset_index(name="count")
 
             counts = agg_counts(dtL_ch, granularity)
 
             if counts.empty:
                 st.info("No data for the selected filters.")
             else:
-                # Полный ряд по выбранной гранулярности
                 counts = counts.sort_values("date").reset_index(drop=True)
                 dmin, dmax = counts["date"].min(), counts["date"].max()
-            
+
                 if granularity == "Day":
                     all_idx = pd.date_range(start=dmin, end=dmax, freq="D")
+                    x_axis = alt.Axis(values=all_idx.to_pydatetime().tolist(), format="%d %b %Y",
+                                      ticks=True, labelOverlap="greedy", labelAngle=-45)
+                    x_title = "Day"
                 elif granularity == "Week":
-                    start_w = dmin.to_period("W-MON").start_time
-                    end_w   = dmax.to_period("W-MON").start_time
-                    all_idx = pd.date_range(start=start_w, end=end_w, freq="W-MON")
-                elif granularity == "Month":
-                    start_m = dmin.to_period("M").start_time
-                    end_m   = dmax.to_period("M").start_time
-                    all_idx = pd.date_range(start=start_m, end=end_m, freq="MS")
-                else:  # Year
-                    start_y = dmin.to_period("Y").start_time
-                    end_y   = dmax.to_period("Y").start_time
-                    all_idx = pd.date_range(start=start_y, end=end_y, freq="YS")
-            
-                counts = (
-                    pd.DataFrame({"date": all_idx})
-                    .merge(counts, on="date", how="left")
-                    .fillna({"count": 0})
-                )
-            
-                # Ось X и тип графика под гранулярность
-                if granularity == "Day":
-                    x_axis = alt.Axis(
-                        values=all_idx.to_pydatetime().tolist(),
-                        format="%d %b %Y",
-                        ticks=True,
-                        labelOverlap="greedy",
-                        labelAngle=-45,
-                    )
-                    base = (
-                        alt.Chart(counts)
-                        .mark_line(point=True, interpolate="monotone")
-                        .encode(
-                            x=alt.X("date:T", title="Day", axis=x_axis),
-                            y=alt.Y("count:Q", title="Count"),
-                            tooltip=[alt.Tooltip("date:T"), alt.Tooltip("count:Q")]
-                        )
-                        .properties(height=320)
-                    )
-            
-                elif granularity == "Week":
-                    # 1) агрегируем именно по неделям как по Period
-                    weeks = dtL_ch.dt.to_period("W-MON")  # ISO-неделя с понедельника
-                    w_counts = (
-                        weeks.value_counts()
-                        .sort_index()
-                        .rename_axis("week")           # week: Period('2025-07-07/2025-07-13', 'W-MON')
-                        .reset_index(name="count")
-                    )
-                
-                    # 2) заполняем пропуски неделями (PeriodRange), а не Timestamp'ами
+                    # считаем по неделям Period → start_time
+                    weeks = dtL_ch.dt.to_period("W-MON")
+                    w_counts = (weeks.value_counts().sort_index()
+                                .rename_axis("week").reset_index(name="count"))
                     all_weeks = pd.period_range(start=weeks.min(), end=weeks.max(), freq="W-MON")
-                    w_counts = (
-                        pd.DataFrame({"week": all_weeks})
-                        .merge(w_counts, on="week", how="left")
-                        .fillna({"count": 0})
-                    )
-                
-                    # 3) преобразуем в даты начала недели для оси X
+                    w_counts = (pd.DataFrame({"week": all_weeks})
+                                .merge(w_counts, on="week", how="left")
+                                .fillna({"count": 0}))
                     w_counts["date"] = w_counts["week"].dt.start_time
                     counts = w_counts[["date", "count"]]
-                
-                    # 4) ось X: тики на каждом понедельнике, подпись = номер недели + дата старта
-                    x_axis = alt.Axis(
-                        values=counts["date"].to_list(),
-                        format="W%V (%d %b %Y)",  # ISO-неделя (%V) и дата начала
-                        ticks=True,
-                        labelOverlap="greedy",
-                        labelAngle=-45,
-                    )
-                
-                    # 5) линия с точками неделя-к-неделе
-                    base = (
-                        alt.Chart(counts)
-                        .mark_line(point=True, interpolate="monotone")
-                        .encode(
-                            x=alt.X("date:T", title="Week", axis=x_axis),
-                            y=alt.Y("count:Q", title="Count"),
-                            tooltip=[alt.Tooltip("date:T", title="Week start"),
-                                     alt.Tooltip("count:Q")]
-                        )
-                        .properties(height=320)
-                    )
-            
+                    x_axis = alt.Axis(values=counts["date"].to_list(), format="W%V (%d %b %Y)",
+                                      ticks=True, labelOverlap="greedy", labelAngle=-45)
+                    x_title = "Week"
                 elif granularity == "Month":
-                    # агрегируем по месячным Period и добиваем пропуски
                     months = dtL_ch.dt.to_period("M")
-                    m_counts = (
-                        months.value_counts()
-                        .sort_index()
-                        .rename_axis("month")
-                        .reset_index(name="count")
-                    )
-                
+                    m_counts = (months.value_counts().sort_index()
+                                .rename_axis("month").reset_index(name="count"))
                     all_months = pd.period_range(start=months.min(), end=months.max(), freq="M")
-                    m_counts = (
-                        pd.DataFrame({"month": all_months})
-                        .merge(m_counts, on="month", how="left")
-                        .fillna({"count": 0})
-                    )
-                
-                    # в дату начала месяца для оси X
+                    m_counts = (pd.DataFrame({"month": all_months})
+                                .merge(m_counts, on="month", how="left")
+                                .fillna({"count": 0}))
                     m_counts["date"] = m_counts["month"].dt.start_time
                     counts = m_counts[["date", "count"]]
-                
-                    # тики на каждом месяце
-                    x_axis = alt.Axis(
-                        values=counts["date"].to_list(),
-                        format="%b %Y",
-                        ticks=True,
-                        labelOverlap=True,
-                        labelAngle=0,
-                    )
-                
-                    base = (
-                        alt.Chart(counts)
-                        .mark_line(point=True, interpolate="monotone")
-                        .encode(
-                            x=alt.X("date:T", title="Month", axis=x_axis),
-                            y=alt.Y("count:Q", title="Count"),
-                            tooltip=[alt.Tooltip("date:T", title="Month"), alt.Tooltip("count:Q")]
-                        )
-                        .properties(height=320)
-                    )
-            
+                    x_axis = alt.Axis(values=counts["date"].to_list(), format="%b %Y",
+                                      ticks=True, labelOverlap=True)
+                    x_title = "Month"
                 else:  # Year
-                    # агрегируем по годовым Period и добиваем пропуски
                     years = dtL_ch.dt.to_period("Y")
-                    y_counts = (
-                        years.value_counts()
-                        .sort_index()
-                        .rename_axis("year")
-                        .reset_index(name="count")
-                    )
-                
+                    y_counts = (years.value_counts().sort_index()
+                                .rename_axis("year").reset_index(name="count"))
                     all_years = pd.period_range(start=years.min(), end=years.max(), freq="Y")
-                    y_counts = (
-                        pd.DataFrame({"year": all_years})
-                        .merge(y_counts, on="year", how="left")
-                        .fillna({"count": 0})
-                    )
-                
-                    # в 1 января каждого года для оси X
+                    y_counts = (pd.DataFrame({"year": all_years})
+                                .merge(y_counts, on="year", how="left")
+                                .fillna({"count": 0}))
                     y_counts["date"] = y_counts["year"].dt.start_time
                     counts = y_counts[["date", "count"]]
-                
-                    # тики на каждом годе
-                    x_axis = alt.Axis(
-                        values=counts["date"].to_list(),
-                        format="%Y",
-                        ticks=True,
-                        labelOverlap=True,
-                        labelAngle=0,
+                    x_axis = alt.Axis(values=counts["date"].to_list(), format="%Y",
+                                      ticks=True, labelOverlap=True)
+                    x_title = "Year"
+
+                base = (
+                    alt.Chart(counts)
+                    .mark_line(point=True, interpolate="monotone")
+                    .encode(
+                        x=alt.X("date:T", title=x_title, axis=x_axis),
+                        y=alt.Y("count:Q", title="Count"),
+                        tooltip=[alt.Tooltip("date:T", title=x_title), alt.Tooltip("count:Q")]
                     )
-                
-                    base = (
-                        alt.Chart(counts)
-                        .mark_line(point=True, interpolate="monotone")
-                        .encode(
-                            x=alt.X("date:T", title="Year", axis=x_axis),
-                            y=alt.Y("count:Q", title="Count"),
-                            tooltip=[alt.Tooltip("date:T", title="Year"), alt.Tooltip("count:Q")]
-                        )
-                        .properties(height=320)
-                    )
-            
+                    .properties(height=320)
+                )
                 st.altair_chart(base, use_container_width=True)
-                
-    st.divider()
-    st.subheader("Status mix by period (from column Z)")
-    st.caption("Stacked 100% bars. OK is treated as 'Recording is too short' when Recording check says so.")
-    
-    # имя колонки Z (26-я)
-    z_col = df_raw.columns[25] if len(df_raw.columns) > 25 else None
-    if not z_col:
-        st.info("Column Z is not available. Expand load range to A:Z.")
-    else:
-        # берем строки после фильтра по преподавателю и валидным датам (df_ch, dtL_ch уже рассчитаны выше)
-        z = df_raw.loc[df_ch.index, z_col].astype(str).str.strip()
-    
-        # override: если Recording check == "Recording is too short" и Z == "OK" → считаем как "Recording is too short"
-        rec_col = "Recording check"
-        rec = _df.loc[df_ch.index, rec_col].astype(str) if rec_col in _df.columns else pd.Series("", index=df_ch.index)
-        status = z.replace("", "(blank)")
-        override = (rec == "Recording is too short") & (status == "OK")
-        status = np.where(override, "Recording is too short", status)
-    
-        # ключ периода под гранулярность (день/нед/мес/год)
-        if granularity == "Day":
-            key = dtL_ch.dt.floor("D")
-            all_idx = pd.date_range(start=key.min(), end=key.max(), freq="D")
-            x_axis = alt.Axis(values=all_idx.to_pydatetime().tolist(), format="%d %b %Y", ticks=True, labelAngle=-45)
-            x_title = "Day"
-        elif granularity == "Week":
-            key = dtL_ch.dt.to_period("W-MON").dt.start_time
-            all_idx = pd.date_range(start=key.min().to_period("W-MON").start_time,
-                                    end=key.max().to_period("W-MON").start_time, freq="W-MON")
-            x_axis = alt.Axis(values=all_idx.to_pydatetime().tolist(), format="W%V (%d %b %Y)", ticks=True, labelAngle=-45)
-            x_title = "Week"
-        elif granularity == "Month":
-            key = dtL_ch.dt.to_period("M").dt.start_time
-            all_idx = pd.date_range(start=key.min().to_period("M").start_time,
-                                    end=key.max().to_period("M").start_time, freq="MS")
-            x_axis = alt.Axis(values=all_idx.to_pydatetime().tolist(), format="%b %Y", ticks=True)
-            x_title = "Month"
-        else:  # Year
-            key = dtL_ch.dt.to_period("Y").dt.start_time
-            all_idx = pd.date_range(start=key.min().to_period("Y").start_time,
-                                    end=key.max().to_period("Y").start_time, freq="YS")
-            x_axis = alt.Axis(values=all_idx.to_pydatetime().tolist(), format="%Y", ticks=True)
-            x_title = "Year"
-    
-        # агрегируем
-        df_status = pd.DataFrame({"date": key, "status": status}).dropna(subset=["date"])
-        counts = (df_status.groupby(["date", "status"], dropna=False)
-                            .size().reset_index(name="count"))
-    
-        # полный каркас по всем датам и фиксированному порядку статусов
-        status_order = ["Recording is too short", "Recording ID Error", "Duplicate", "OK", "(blank)"]
-        idx = pd.MultiIndex.from_product([all_idx, status_order], names=["date", "status"])
-        counts_full = (counts.set_index(["date", "status"])
-                             .reindex(idx, fill_value=0)
-                             .reset_index())
-    
-        # доли для тултипа
-        counts_full["total"] = counts_full.groupby("date")["count"].transform("sum").astype(float)
-        counts_full["pct"] = (counts_full["count"] / counts_full["total"]).fillna(0.0)
-    
-        chart2 = (
-            alt.Chart(counts_full)
-            .mark_bar()
-            .encode(
-                x=alt.X("date:T", title=x_title, axis=x_axis),
-                y=alt.Y("count:Q", stack="normalize", title="Share"),
-                color=alt.Color("status:N", title="Status", sort=status_order),
-                tooltip=[
-                    alt.Tooltip("date:T", title=x_title),
-                    alt.Tooltip("status:N", title="Status"),
-                    alt.Tooltip("count:Q", title="Count"),
-                    alt.Tooltip("pct:Q", title="Share", format=".0%")
-                ],
-            )
-            .properties(height=320)
-        )
-        st.altair_chart(chart2, use_container_width=True)
 
-
-            
+                # Сводка по первому графику (на 8 пробелах)
                 st.write("— **Total** rows:", int(counts["count"].sum()))
                 st.write("— **Span**:", f"{counts['date'].min().date()} → {counts['date'].max().date()}")
                 if sel_teacher != "(All)":
                     st.write("— **Teacher**:", sel_teacher)
-            
-            # Кнопка обновления
-            if st.button("Refresh data", key="refresh_charts"):
-                load_sheet_df.clear()
-                _unique_list_for_multiselect.clear()
-                st.rerun()
+
+                # ===== Второй график (Status mix) — внутри того же else, чтобы были df_ch/dtL_ch =====
+                st.divider()
+                st.subheader("Status mix by period (from column Z)")
+                st.caption("Stacked 100% bars. OK → 'Recording is too short' if Recording check says so.")
+
+                z_col = df_raw.columns[25] if len(df_raw.columns) > 25 else None
+                if not z_col:
+                    st.info("Column Z is not available. Expand load range to A:Z.")
+                else:
+                    z = df_raw.loc[df_ch.index, z_col].astype(str).str.strip()
+                    rec_col = "Recording check"
+                    rec = (_df.loc[df_ch.index, rec_col].astype(str)
+                           if rec_col in _df.columns else pd.Series("", index=df_ch.index))
+                    status = z.replace("", "(blank)")
+                    override = (rec == "Recording is too short") & (status == "OK")
+                    status = np.where(override, "Recording is too short", status)
+
+                    # ключ периода под гранулярность
+                    if granularity == "Day":
+                        key = dtL_ch.dt.floor("D")
+                        all_idx = pd.date_range(start=key.min(), end=key.max(), freq="D")
+                        x_axis2 = alt.Axis(values=all_idx.to_pydatetime().tolist(),
+                                           format="%d %b %Y", ticks=True, labelAngle=-45)
+                        x_title2 = "Day"
+                    elif granularity == "Week":
+                        key = dtL_ch.dt.to_period("W-MON").dt.start_time
+                        all_idx = pd.date_range(start=key.min().to_period("W-MON").start_time,
+                                                end=key.max().to_period("W-MON").start_time, freq="W-MON")
+                        x_axis2 = alt.Axis(values=all_idx.to_pydatetime().tolist(),
+                                           format="W%V (%d %b %Y)", ticks=True, labelAngle=-45)
+                        x_title2 = "Week"
+                    elif granularity == "Month":
+                        key = dtL_ch.dt.to_period("M").dt.start_time
+                        all_idx = pd.date_range(start=key.min().to_period("M").start_time,
+                                                end=key.max().to_period("M").start_time, freq="MS")
+                        x_axis2 = alt.Axis(values=all_idx.to_pydatetime().tolist(),
+                                           format="%b %Y", ticks=True)
+                        x_title2 = "Month"
+                    else:  # Year
+                        key = dtL_ch.dt.to_period("Y").dt.start_time
+                        all_idx = pd.date_range(start=key.min().to_period("Y").start_time,
+                                                end=key.max().to_period("Y").start_time, freq="YS")
+                        x_axis2 = alt.Axis(values=all_idx.to_pydatetime().tolist(),
+                                           format="%Y", ticks=True)
+                        x_title2 = "Year"
+
+                    df_status = pd.DataFrame({"date": key, "status": status}).dropna(subset=["date"])
+                    counts_s = (df_status.groupby(["date", "status"], dropna=False)
+                                          .size().reset_index(name="count"))
+
+                    status_order = ["Recording is too short", "Recording ID Error", "Duplicate", "OK", "(blank)"]
+                    idx = pd.MultiIndex.from_product([all_idx, status_order], names=["date", "status"])
+                    counts_full = (counts_s.set_index(["date", "status"])
+                                          .reindex(idx, fill_value=0)
+                                          .reset_index())
+
+                    counts_full["total"] = counts_full.groupby("date")["count"].transform("sum").astype(float)
+                    counts_full["pct"] = (counts_full["count"] / counts_full["total"]).fillna(0.0)
+
+                    chart2 = (
+                        alt.Chart(counts_full)
+                        .mark_bar()
+                        .encode(
+                            x=alt.X("date:T", title=x_title2, axis=x_axis2),
+                            y=alt.Y("count:Q", stack="normalize", title="Share"),
+                            color=alt.Color("status:N", title="Status", sort=status_order),
+                            tooltip=[
+                                alt.Tooltip("date:T", title=x_title2),
+                                alt.Tooltip("status:N", title="Status"),
+                                alt.Tooltip("count:Q", title="Count"),
+                                alt.Tooltip("pct:Q", title="Share", format=".0%")
+                            ],
+                        )
+                        .properties(height=320)
+                    )
+                    st.altair_chart(chart2, use_container_width=True)
+
+    # Кнопка обновления (на уровне with tab_charts:)
+    if st.button("Refresh data", key="refresh_charts"):
+        load_sheet_df.clear()
+        _unique_list_for_multiselect.clear()
+        st.rerun()
 
