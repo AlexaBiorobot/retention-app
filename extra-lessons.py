@@ -568,26 +568,36 @@ with tab_charts:
                 
                     # 5) дата для оси X = начало периода
                     counts_full["date"] = counts_full["period"].dt.start_time
-                    counts_full["date_end"] = (counts_full["period"] + 1).dt.start_time
-                
+                    
                     # 6) доли
                     counts_full["total"] = counts_full.groupby("period")["count"].transform("sum").astype(float)
                     counts_full["pct"] = (counts_full["count"] / counts_full["total"]).fillna(0.0)
-                
-                    # 7) ось X: тики на каждом шаге периода
-                    x_axis2 = alt.Axis(
-                        values=counts_full["date"].drop_duplicates().tolist(),
-                        format=x_fmt,
-                        ticks=True,
-                        labelAngle=x_angle,
-                        labelOverlap="greedy",
+                    
+                    # 7) категориальная подпись периода → широкие столбики
+                    if granularity == "Week":
+                        iso_week = counts_full["date"].dt.isocalendar().week.astype(str)
+                        counts_full["label"] = "W" + iso_week + " (" + counts_full["date"].dt.strftime("%d %b %Y") + ")"
+                    else:
+                        counts_full["label"] = counts_full["date"].dt.strftime(x_fmt)
+                    
+                    # порядок категорий по дате
+                    label_order = (
+                        counts_full[["label", "date"]]
+                        .drop_duplicates()
+                        .sort_values("date")["label"]
+                        .tolist()
                     )
+                    
                     chart2 = (
                         alt.Chart(counts_full)
                         .mark_bar()
                         .encode(
-                            x=alt.X("date:T", title=x_title2, axis=x_axis2),
-                            x2="date_end:T",  # ← ширина столбика = весь период
+                            x=alt.X(
+                                "label:N",
+                                title=x_title2,
+                                sort=label_order,
+                                axis=alt.Axis(labelAngle=x_angle)
+                            ),
                             y=alt.Y("count:Q", stack="normalize", title="Share"),
                             color=alt.Color(
                                 "status:N",
@@ -597,7 +607,6 @@ with tab_charts:
                             ),
                             tooltip=[
                                 alt.Tooltip("date:T", title=f"{x_title2} start"),
-                                alt.Tooltip("date_end:T", title=f"{x_title2} end"),
                                 alt.Tooltip("status:N", title="Status"),
                                 alt.Tooltip("count:Q", title="Count"),
                                 alt.Tooltip("pct:Q", title="Share", format=".0%"),
@@ -606,6 +615,7 @@ with tab_charts:
                         .properties(height=320)
                     )
                     st.altair_chart(chart2, use_container_width=True)
+
 
 
     # Кнопка обновления (на уровне with tab_charts:)
