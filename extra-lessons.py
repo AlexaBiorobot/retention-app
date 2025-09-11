@@ -18,16 +18,25 @@ st.set_page_config(
 )
 
 # --- Simple password gate (как в исходном коде) ---
+# --- Password gate ---
 st.session_state.setdefault("is_authed", False)
 if not st.session_state["is_authed"]:
     pwd = st.text_input("Password:", type="password")
-    target_pwd = os.getenv("APP_PASSWORD") or st.secrets.get("APP_PASSWORD") or "Kodland123"
-    if pwd == target_pwd:
-        st.session_state["is_authed"] = True
-        st.rerun()
-    else:
-        if pwd:
+    target_pwd = os.getenv("APP_PASSWORD") or st.secrets.get("APP_PASSWORD")
+
+    if not target_pwd:
+        st.error("APP_PASSWORD is not set in secrets or env")
+        st.stop()
+
+    if pwd:
+        if pwd == target_pwd:
+            st.session_state["is_authed"] = True
+            st.success("Access granted")
+            st.rerun()
+        else:
             st.error("Wrong password")
+            st.stop()
+    else:
         st.stop()
 
 st.title("📋 Extra-classes Latam")
