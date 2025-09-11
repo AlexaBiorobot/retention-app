@@ -426,19 +426,87 @@ with tab_charts:
             if counts.empty:
                 st.info("No data for the selected filters.")
             else:
-                chart = (
-                    alt.Chart(counts)
-                    .mark_bar()
-                    .encode(
-                        x=alt.X("date:T", title=f"{granularity}"),
-                        y=alt.Y("count:Q", title="Count"),
-                        tooltip=[alt.Tooltip("date:T"), alt.Tooltip("count:Q")]
-                    )
-                    .properties(height=320)  # ✅ только height/width/title
+                # 1) Полный временной ряд по выбранной гранулярности (день/нед/мес/год)
+                counts = counts.sort_values("date").reset_index(drop=True)
+                dmin, dmax = counts["date"].min(), counts["date"].max()
+            
+                if granularity == "Day":
+                    all_idx = pd.date_range(start=dmin, end=dmax, freq="D")
+                elif granularity == "Week":
+                    start_w = dmin.to_period("W-MON").start_time
+                    end_w   = dmax.to_period("W-MON").start_time
+                    all_idx = pd.date_range(start=start_w, end=end_w, freq="W-MON")
+                elif granularity == "Month":
+                    start_m = dmin.to_period("M").start_time
+                    end_m   = dmax.to_period("M").start_time
+                    all_idx = pd.date_range(start=start_m, end=end_m, freq="MS")
+                else:  # Year
+                    start_y = dmin.to_period("Y").start_time
+                    end_y   = dmax.to_period("Y").start_time
+                    all_idx = pd.date_range(start=start_y, end=end_y, freq="YS")
+            
+                counts = (
+                    pd.DataFrame({"date": all_idx})
+                    .merge(counts, on="date", how="left")
+                    .fillna({"count": 0})
                 )
-                st.altair_chart(chart, use_container_width=True)  # ✅ ширину задаём тут
-
-    if st.button("Refresh data", key="refresh_charts"):
-        load_sheet_df.clear()
-        _unique_list_for_multiselect.clear()
-        st.rerun()
+            
+                # 2) Скользящая средняя в той же гранулярности
+                win_map = {"Day": 7, "Week": 4, "Month": 3, "Year": 3}
+                win = win_map.get(granularity, 7)
+                counts["trend"] = counts["count"].rolling(window=win, min_periods=win).mean()
+            
+                # 3) Ось X и тип базового графика под гранулярность
+                fmt_map = {"Day": "%d %b %Y", "Week": "%d %b %Y", "Month": "%b %Y", "Year": "%Y"}
+                x_enc = alt.X("date:T", title=granularity, axis=alt.Axis(format=fmt_map[granularity]))
+            
+                if granularity in ("Day", "Week"):
+                    base = (
+                        alt.Chart(counts)
+                        .mark_line()
+                        .encode(
+                            x=x_enc,
+                            y=alt.Y("count:Q", title="Count"),
+                            tooltip=[alt.Tooltip("date:T"), alt.Tooltip("count:Q")]
+                        )
+                        .properties(height=320)
+                    )
+                else:  # Month/Year
+                    base = (
+                        alt.Chart(counts)
+                        .mark_bar()
+                        .encode(
+                            x=x_enc,
+                            y=alt.Y("count:Q", title="Count"),
+                            tooltip=[alt.Tooltip("date:T"), alt.Tooltip("count:Q")]
+                        )
+                        .properties(height=320)
+                    )
+            
+                add_curve = st.checkbox("Добавить кривую (скользящее среднее)", value=True)
+                if add_curve and counts["trend"].notna().any():
+                    curve = (
+                        alt.Chart(counts)
+                        .mark_line(interpolate="monotone")
+                        .encode(
+                            x=x_enc,
+                            y=alt.Y("trend:Q", title=None),
+                            tooltip=[alt.Tooltip("date:T"), alt.Tooltip("trend:Q", title="Trend")]
+                        )
+                    )
+                    chart = alt.layer(base, curve)
+                else:
+                    chart = base
+            
+                st.altair_chart(chart, use_container_width=True)
+            
+                st.write("— **Total** rows:", int(counts["count"].sum()))
+                st.write("— **Span**:", f"{counts['date'].min().date()} → {counts['date'].max().date()}")
+                if sel_teacher != "(All)":
+                    st.write("— **Teacher**:", sel_teacher)
+            
+            # кнопка обновления оставляем
+            if st.button("Refresh data", key="refresh_charts"):
+                load_sheet_df.clear()
+                _unique_list_for_multiselect.clear()
+                st.rerun()
