@@ -568,6 +568,7 @@ with tab_charts:
                 
                     # 5) дата для оси X = начало периода
                     counts_full["date"] = counts_full["period"].dt.start_time
+                    counts_full["date_end"] = (counts_full["period"] + 1).dt.start_time
                 
                     # 6) доли
                     counts_full["total"] = counts_full.groupby("period")["count"].transform("sum").astype(float)
@@ -581,21 +582,22 @@ with tab_charts:
                         labelAngle=x_angle,
                         labelOverlap="greedy",
                     )
-                
                     chart2 = (
                         alt.Chart(counts_full)
                         .mark_bar()
                         .encode(
                             x=alt.X("date:T", title=x_title2, axis=x_axis2),
+                            x2="date_end:T",  # ← ширина столбика = весь период
                             y=alt.Y("count:Q", stack="normalize", title="Share"),
                             color=alt.Color(
                                 "status:N",
                                 title="Status",
                                 sort=status_order,
-                                scale=alt.Scale(domain=status_order),  # фиксируем порядок цветов
+                                scale=alt.Scale(domain=status_order),
                             ),
                             tooltip=[
-                                alt.Tooltip("date:T", title=x_title2),
+                                alt.Tooltip("date:T", title=f"{x_title2} start"),
+                                alt.Tooltip("date_end:T", title=f"{x_title2} end"),
                                 alt.Tooltip("status:N", title="Status"),
                                 alt.Tooltip("count:Q", title="Count"),
                                 alt.Tooltip("pct:Q", title="Share", format=".0%"),
