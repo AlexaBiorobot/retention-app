@@ -736,7 +736,7 @@ with tab_charts:
 
             # ===== Рейтинг по преподавателям (D) =====
             st.divider()
-            st.subheader("Tutor violation ranking (monthly activity > 20)")
+            st.subheader("Tutor violation ranking")
             
             # Колонки
             colD_name = col_order[3] if len(col_order) >= 4 else None   # D: Tutor
@@ -753,9 +753,7 @@ with tab_charts:
             if not colD_name or colD_name not in df_rank.columns or not colE_name or colE_name not in df_rank.columns:
                 st.info("Required columns D (Tutor) or E (TL) are missing.")
             else:
-                # ---- Подготовка признаков нарушений ----
-            
-                # 1) Нормализация статуса Z
+                # ---- Нормализация статуса Z
                 def _canon_status(s: pd.Series) -> pd.Series:
                     x = (s.astype(str).str.lower().str.strip().str.replace(r"\s+", " ", regex=True))
                     out = np.select(
@@ -770,15 +768,12 @@ with tab_charts:
                     out = pd.Series(out, index=s.index).replace({"": "(blank)"})
                     return out
             
-                if z_col and z_col in df_rank.columns:
-                    status_z = _canon_status(df_rank[z_col])
-                else:
-                    status_z = pd.Series("(blank)", index=df_rank.index)
+                status_z = _canon_status(df_rank[z_col]) if (z_col and z_col in df_rank.columns) else pd.Series("(blank)", index=df_rank.index)
             
-                # 2) Recording check (short)
+                # Recording check → флаг "короткая запись"
                 rec_short = df_rank[rec_col].astype(str).eq("Recording is too short") if rec_col in df_rank.columns else pd.Series(False, index=df_rank.index)
             
-                # 3) Y != 1  (парсим число; поддержка '1,0', '%', текста)
+                # Y != 1 (парсим число; поддержка '1,0', '%', текста)
                 if y_col and y_col in df_rank.columns:
                     y_raw = df_rank[y_col].astype(str)
                     y_num = (
@@ -791,124 +786,99 @@ with tab_charts:
                 else:
                     y_not_one = pd.Series(False, index=df_rank.index)
             
-                # 4) Z != OK (исключаем пустое и 'Recording is too short', т.к. отдельная статья)
-                z_not_ok = (~status_z.isin(["OK", "(blank)", "Recording is too short"]))
+                # Любое нарушение в строке
+                z_not_ok_flag = ~status_z.isin(["OK", "(blank)", "Recording is too short"])
+                any_violation = z_not_ok_flag | y_not_one | rec_short
             
-                # 5) Общее нарушение в строке (объединение статей)
-                any_violation = z_not_ok | y_not_one | rec_short
+                # ---- База для агрегации
+                base = pd.DataFrame({
+                    "Tutor": df_rank[colD_name].astype(str),
+                    "TL": df_rank[colE_name].astype(str),
+                    "z": status_z,                        # нормализованный Z-статус
+                    "y_not_one": y_not_one.astype(bool),  # Y != 1
+                    "rec_short": rec_short.astype(bool),  # Recording too short
+                    "any_violation": any_violation.astype(bool),
+                }, index=df_rank.index)
             
-                # ---- Фильтр по активности >20 в ЛЮБОМ месяце ----
-                months = dtL_rank.dt.to_period("M")
-                by_tutor_month = (
-                    pd.DataFrame({
-                        "tutor": df_rank[colD_name].astype(str),
-                        "month": months
-                    })
-                    .groupby(["tutor", "month"], dropna=False)
-                    .size()
-                    .reset_index(name="n")
+                # --- Детализация по Z (каждое значение отдельной колонкой)
+                z_counts = (
+                    base.loc[~base["z"].isin(["OK", "(blank)"])]
+                        .groupby(["Tutor", "TL", "z"], dropna=False)
+                        .size()
+                        .reset_index(name="count")
                 )
-                tutors_over_20 = by_tutor_month.groupby("tutor")["n"].max()
-                tutors_over_20 = tutors_over_20[tutors_over_20 > 20].index
             
-                # Оставляем только таких
-                df_rank = df_rank[df_rank[colD_name].astype(str).isin(tutors_over_20)]
-                status_z = status_z.loc[df_rank.index]
-                rec_short = rec_short.loc[df_rank.index]
-                y_not_one = y_not_one.loc[df_rank.index]
-                any_violation = any_violation.loc[df_rank.index]
-            
-                if df_rank.empty:
-                    st.info("No tutors with >20 lessons in any month for the current filters.")
+                if z_counts.empty:
+                    z_pivot = pd.DataFrame(columns=["Tutor", "TL"])
                 else:
-                    # ---- Агрегация по (Tutor, TL) ----
-                    # База с нужными флагами
-                    base = pd.DataFrame({
-                        "Tutor": df_rank[colD_name].astype(str),
-                        "TL": df_rank[colE_name].astype(str),
-                        "z": status_z,                        # нормализованный Z-статус
-                        "y_not_one": y_not_one.astype(bool),  # Y != 1
-                        "rec_short": rec_short.astype(bool),  # Recording too short (из Recording check)
-                        "any_violation": any_violation.astype(bool),
-                    }, index=df_rank.index)
-                
-                    # --- Пивот по значениям Z (разбиваем "Z not OK" на колонки по значениям) ---
-                    # убираем OK и (blank) — они не считаются нарушениями по Z
-                    z_counts = (
-                        base.loc[~base["z"].isin(["OK", "(blank)"])]
-                            .groupby(["Tutor", "TL", "z"], dropna=False)
-                            .size()
-                            .reset_index(name="count")
-                    )
-                
-                    if z_counts.empty:
-                        z_pivot = pd.DataFrame(columns=["Tutor", "TL"])
-                    else:
-                        z_pivot = (
-                            z_counts
-                            .pivot_table(index=["Tutor", "TL"], columns="z", values="count", aggfunc="sum", fill_value=0)
-                            .reset_index()
-                        )
-                        # плоские имена колонок: "Z: <status> (count)"
-                        z_new_cols = []
-                        for c in z_pivot.columns:
-                            if c in ("Tutor", "TL"):
-                                z_new_cols.append(c)
-                            else:
-                                z_new_cols.append(f"Z: {str(c)} (count)")
-                        z_pivot.columns = z_new_cols
-                
-                    # --- Ядро агрегатов по преподавателю (без Z-детализации) ---
-                    agg_core = (
-                        base
-                        .groupby(["Tutor", "TL"], dropna=False)
-                        .agg(
-                            lessons_total=("any_violation", "size"),  # всего строк (уроков) в выборке
-                            y_not_one=("y_not_one", "sum"),
-                            rec_short=("rec_short", "sum"),
-                            violations_total=("any_violation", "sum"),  # строки с ЛЮБЫМ нарушением
-                        )
+                    z_pivot = (
+                        z_counts
+                        .pivot_table(index=["Tutor", "TL"], columns="z", values="count", aggfunc="sum", fill_value=0)
                         .reset_index()
                     )
-                
-                    # --- Объединяем с детализацией по Z ---
+                    z_pivot.columns = [
+                        "Tutor" if c == "Tutor" else "TL" if c == "TL" else f"Z: {str(c)} (count)"
+                        for c in z_pivot.columns
+                    ]
+            
+                # --- Агрегация верхнего уровня
+                agg_core = (
+                    base
+                    .groupby(["Tutor", "TL"], dropna=False)
+                    .agg(
+                        lessons_total=("any_violation", "size"),   # всего строк под преподом
+                        y_not_one=("y_not_one", "sum"),
+                        rec_short=("rec_short", "sum"),
+                        violations_total=("any_violation", "sum"), # строк с ЛЮБЫМ нарушением
+                    )
+                    .reset_index()
+                )
+            
+                # Только преподаватели с хотя бы 1 нарушением
+                agg_core = agg_core[agg_core["violations_total"] > 0]
+            
+                if agg_core.empty:
+                    st.info("No tutors with violations for the current filters.")
+                else:
+                    # Слияние с детализацией Z
                     table_df = agg_core.merge(z_pivot, on=["Tutor", "TL"], how="left").fillna(0)
-                
-                    # % нарушений (от общего числа строк под преподом)
+            
+                    # % нарушений
                     table_df["Violations (%)"] = (table_df["violations_total"] / table_df["lessons_total"] * 100).round(1)
-                
-                    # Сортировка рейтинга: сначала по % нарушений, затем по абсолюту
+            
+                    # Сортировка рейтинга
                     table_df = table_df.sort_values(["Violations (%)", "violations_total"], ascending=[False, False])
-                
-                    # Переименуем базовые колонки под финальные заголовки
+            
+                    # Переименования
                     table_df = table_df.rename(columns={
                         "lessons_total": "Lessons (total)",
                         "violations_total": "Violations (total)",
                         "y_not_one": "Y != 1 (count)",
                         "rec_short": "Recording too short (count)",
                     })
-                
-                    # Подсветка красным, если % > 20
-                    def _highlight_pct(s: pd.Series):
-                        return ['color: red; font-weight: 600' if (isinstance(v, (int, float)) and v > 20) else '' for v in s]
-                
-                    # Перенесём колонку "Violations (%)" ближе к итогу
-                    base_cols = ["Tutor", "TL", "Lessons (total)", "Violations (total)", "Violations (%)", "Y != 1 (count)", "Recording too short (count)"]
+            
+                    # Порядок колонок
+                    base_cols = ["Tutor", "TL", "Lessons (total)", "Violations (total)", "Violations (%)",
+                                 "Y != 1 (count)", "Recording too short (count)"]
                     z_cols = [c for c in table_df.columns if c.startswith("Z: ")]
                     ordered_cols = base_cols + z_cols
                     table_df = table_df.reindex(columns=[c for c in ordered_cols if c in table_df.columns])
-                
+            
+                    # Подсветка % > 20 красным
+                    def _highlight_pct(s: pd.Series):
+                        return ['color: red; font-weight: 600' if (isinstance(v, (int, float)) and v > 20) else '' for v in s]
+            
                     styled = table_df.style.apply(_highlight_pct, subset=["Violations (%)"])
-                
                     st.table(styled)
-                
-                    # Скачивание CSV
+            
+                    # Скачать CSV
                     st.download_button(
                         "⬇️ Download ranking (CSV)",
                         table_df.to_csv(index=False).encode("utf-8"),
                         file_name="tutor_violation_ranking.csv",
                         mime="text/csv"
                     )
+
 
     # Кнопка обновления (на уровне with tab_charts:)
     if st.button("Refresh data", key="refresh_charts"):
