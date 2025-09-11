@@ -577,6 +577,8 @@ with tab_charts:
                 
                     counts_full["total"] = counts_full.groupby("date")["count"].transform("sum").astype(float)
                     counts_full["pct"] = (counts_full["count"] / counts_full["total"]).fillna(0.0)
+
+                    st.write("DEBUG sample", counts_full.head(), counts_full.dtypes)
                 
                     chart2 = (
                         alt.Chart(counts_full)
