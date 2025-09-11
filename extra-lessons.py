@@ -472,15 +472,37 @@ with tab_charts:
                     )
             
                 elif granularity == "Week":
-                    # Недели считаются и подписываются как недели (понедельники)
+                    # 1) агрегируем именно по неделям как по Period
+                    weeks = dtL_ch.dt.to_period("W-MON")  # ISO-неделя с понедельника
+                    w_counts = (
+                        weeks.value_counts()
+                        .sort_index()
+                        .rename_axis("week")           # week: Period('2025-07-07/2025-07-13', 'W-MON')
+                        .reset_index(name="count")
+                    )
+                
+                    # 2) заполняем пропуски неделями (PeriodRange), а не Timestamp'ами
+                    all_weeks = pd.period_range(start=weeks.min(), end=weeks.max(), freq="W-MON")
+                    w_counts = (
+                        pd.DataFrame({"week": all_weeks})
+                        .merge(w_counts, on="week", how="left")
+                        .fillna({"count": 0})
+                    )
+                
+                    # 3) преобразуем в даты начала недели для оси X
+                    w_counts["date"] = w_counts["week"].dt.start_time
+                    counts = w_counts[["date", "count"]]
+                
+                    # 4) ось X: тики на каждом понедельнике, подпись = номер недели + дата старта
                     x_axis = alt.Axis(
-                        values=all_idx.to_pydatetime().tolist(),
-                        # d3-формат: %W — номер недели (понедельник как первый день)
-                        format="W%W (%d %b %Y)",
+                        values=counts["date"].to_list(),
+                        format="W%V (%d %b %Y)",  # ISO-неделя (%V) и дата начала
                         ticks=True,
                         labelOverlap="greedy",
                         labelAngle=-45,
                     )
+                
+                    # 5) линия с точками неделя-к-неделе
                     base = (
                         alt.Chart(counts)
                         .mark_line(point=True, interpolate="monotone")
