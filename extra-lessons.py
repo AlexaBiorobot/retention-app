@@ -188,10 +188,10 @@ if df_raw.empty:
     st.warning(f"No data. Check access to the file and that the tab '{WS_NAME}' contains a header row in A:Q.""Also share the sheet with your service account e‑mail.")
     st.stop()
 
-# --- оставляем только A:Q + T, X, Y ---
+# --- оставляем только A:Q + T, X, Y, Z ---
 # индексы столбцов по позиции: A..Q = 0..16, T=19, X=23, Y=24
 keep_idx = list(range(min(17, len(df_raw.columns))))  # A:Q
-for i in (19, 23, 24):  # T, X, Y
+for i in (19, 23, 24, 25):  # T, X, Y, Z
     if i < len(df_raw.columns):
         keep_idx.append(i)
 
