@@ -195,7 +195,45 @@ for i in (19, 23, 24):  # T, X, Y
         keep_idx.append(i)
 
 _df = df_raw.iloc[:, keep_idx].copy()
-col_order = list(_df.columns)
+
+# 3) колонка-проверка: если запись (T) <= (ожидание I - 15 минут) → "Recording is too short"
+#    I = 9-й столбец (индекс 8), формат "60 min"; T = 20-й (индекс 19), формат "hh:mm:ss"
+col_I_name = df_raw.columns[8]  if len(df_raw.columns) > 8  else None
+col_T_name = df_raw.columns[19] if len(df_raw.columns) > 19 else None
+
+def _parse_minutes_from_I(series: pd.Series) -> pd.Series:
+    mins = series.astype(str).str.extract(r'(\d+)')[0]
+    return pd.to_numeric(mins, errors="coerce")
+
+def _hhmmss_to_minutes(series: pd.Series) -> pd.Series:
+    def conv(x):
+        if pd.isna(x):
+            return np.nan
+        s = str(x).strip()
+        parts = s.split(":")
+        try:
+            if len(parts) == 3:
+                h, m, sec = [int(p) for p in parts]
+            elif len(parts) == 2:
+                h, m, sec = 0, int(parts[0]), int(parts[1])
+            else:
+                # если внезапно уже число минут
+                return float(s)
+            return (h * 3600 + m * 60 + sec) / 60.0
+        except Exception:
+            return np.nan
+    return series.map(conv)
+
+if col_I_name in _df.columns and col_T_name in _df.columns:
+    I_min = _parse_minutes_from_I(_df[col_I_name])
+    T_min = _hhmmss_to_minutes(_df[col_T_name])
+    too_short = (T_min.notna() & I_min.notna()) & (T_min <= I_min - 15)
+    _df["Recording check"] = np.where(too_short, "Recording is too short", "")
+    # ставим новую колонку в конец
+    col_order = [c for c in _df.columns if c != "Recording check"] + ["Recording check"]
+    _df = _df.loc[:, col_order]
+else:
+    col_order = list(_df.columns)
 
 colA_name = col_order[0] if len(col_order) >= 1 else None
 colL_name = col_order[11] if len(col_order) >= 12 else None
