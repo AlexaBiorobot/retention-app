@@ -9,6 +9,7 @@ import pandas as pd
 import streamlit as st
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+import altair as alt
 
 # ===================== Page / UX =====================
 st.set_page_config(
@@ -325,28 +326,118 @@ with st.sidebar.expander("More filters", expanded=False):
                 mask = base.isin([s for s in sel if s != "(blank)"]) | (col_series.isna() if "(blank)" in sel else False)
                 _df = _df[mask]
 
-# ===================== Output =====================
+# ===================== Output (вкладки Data / Charts) =====================
 
-st.success(f"Rows: {len(_df)} (of {len(df_raw)})")
+tab_data, tab_charts = st.tabs(["📄 Data", "📈 Charts"])
 
-show_cols = [c for c in col_order if c in _df.columns]
-view = _df.loc[:, show_cols].copy()
+with tab_data:
+    st.success(f"Rows: {len(_df)} (of {len(df_raw)})")
 
-ROW, HEADER = 34, 44
-height = min(900, HEADER + ROW * max(1, min(len(view), 200)))
+    show_cols = [c for c in col_order if c in _df.columns]
+    view = _df.loc[:, show_cols].copy()
 
-st.dataframe(view, use_container_width=True, height=height)
+    ROW, HEADER = 34, 44
+    height = min(900, HEADER + ROW * max(1, min(len(view), 200)))
 
-st.download_button("⬇️ Download CSV", view.to_csv(index=False).encode("utf-8"), file_name="filtered.csv", mime="text/csv")
+    st.dataframe(view, use_container_width=True, height=height)
 
-st.caption(textwrap.dedent(
-    f"""
-    **Notes**
-    • Sheet ID: `{SHEET_ID}`  |  Tab: `{WS_NAME}`  |  Range: A:Q
-    """
-))
+    st.download_button(
+        "⬇️ Download CSV",
+        view.to_csv(index=False).encode("utf-8"),
+        file_name="filtered.csv",
+        mime="text/csv"
+    )
 
-if st.button("Refresh"):
-    load_sheet_df.clear()
-    _unique_list_for_multiselect.clear()
-    st.rerun()
+    st.caption(textwrap.dedent(
+        f"""
+        **Notes**
+        • Sheet ID: `{SHEET_ID}`  |  Tab: `{WS_NAME}`  |  Range: A:Y  (shown: A–Q + T, X, Y)
+        """
+    ))
+
+    if st.button("Refresh data", key="refresh_data"):
+        load_sheet_df.clear()
+        _unique_list_for_multiselect.clear()
+        st.rerun()
+
+with tab_charts:
+    st.subheader("Dynamics by L (date of the class)")
+    st.caption("Aggregate by day / week / month / year. Filter by teacher (column D).")
+
+    # Имена колонок для фильтра и дат
+    colD_name = col_order[3] if len(col_order) >= 4 else None   # колонка D (преподаватель)
+    colL_name = col_order[11] if len(col_order) >= 12 else None # колонка L (дата)
+
+    if not colL_name or colL_name not in _df.columns:
+        st.warning("Column L is not available in the selected view.")
+    else:
+        # Фильтр по преподавателю (D)
+        if colD_name and colD_name in _df.columns:
+            teachers = ["(All)"] + sorted(_df[colD_name].dropna().astype(str).unique())
+            sel_teacher = st.selectbox("Teacher (column D):", teachers, index=0)
+            df_ch = _df if sel_teacher == "(All)" else _df[_df[colD_name].astype(str) == sel_teacher]
+        else:
+            sel_teacher = "(All)"
+            df_ch = _df
+
+        # Берём сопоставимые даты из уже рассчитанной _dtL
+        dtL_ch = _dtL.loc[df_ch.index] if len(df_ch) else pd.to_datetime(pd.Series([], dtype="object"))
+
+        # Валидные даты
+        mask_valid = dtL_ch.notna()
+        if not mask_valid.any():
+            st.info("No valid dates in column L for the current selection.")
+        else:
+            dtL_ch = dtL_ch[mask_valid]
+            df_ch = df_ch.loc[mask_valid]
+
+            # Гранулярность
+            granularity = st.radio(
+                "Granularity:",
+                ["Day", "Week", "Month", "Year"],
+                horizontal=True,
+                index=2  # по умолчанию Month
+            )
+
+            # Агрегация
+            def agg_counts(series: pd.Series, mode: str) -> pd.DataFrame:
+                s = series.copy()
+                if mode == "Day":
+                    idx = s.dt.floor("D")
+                elif mode == "Week":
+                    idx = s.dt.to_period("W-MON").dt.start_time  # недели с понедельника
+                elif mode == "Month":
+                    idx = s.dt.to_period("M").dt.start_time
+                elif mode == "Year":
+                    idx = s.dt.to_period("Y").dt.start_time
+                else:
+                    idx = s.dt.floor("D")
+                out = idx.value_counts().sort_index().rename_axis("date").reset_index(name="count")
+                return out
+
+            counts = agg_counts(dtL_ch, granularity)
+
+            if counts.empty:
+                st.info("No data for the selected filters.")
+            else:
+                chart = (
+                    alt.Chart(counts)
+                    .mark_bar()
+                    .encode(
+                        x=alt.X("date:T", title=f"{granularity}"),
+                        y=alt.Y("count:Q", title="Count"),
+                        tooltip=[alt.Tooltip("date:T"), alt.Tooltip("count:Q")]
+                    )
+                    .properties(use_container_width=True, height=320)
+                )
+                st.altair_chart(chart, use_container_width=True)
+
+                st.write("— **Total** rows:", int(counts["count"].sum()))
+                st.write("— **Span**:", f"{counts['date'].min().date()} → {counts['date'].max().date()}")
+                if sel_teacher != "(All)":
+                    st.write("— **Teacher**:", sel_teacher)
+
+    if st.button("Refresh data", key="refresh_charts"):
+        load_sheet_df.clear()
+        _unique_list_for_multiselect.clear()
+        st.rerun()
