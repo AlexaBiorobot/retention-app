@@ -617,7 +617,7 @@ with tab_charts:
                     )
                     st.altair_chart(chart2, use_container_width=True)
 
-            # ===== Третий график: Average of Y by period =====
+            # ===== Третий график: Average of Y by period + pie распределения =====
             st.divider()
             st.subheader("Average of Y by period")
             
@@ -630,8 +630,8 @@ with tab_charts:
                 y_raw = df_ch[y_col].astype(str)
                 y_num = (
                     y_raw.str.replace("%", "", regex=False)
-                          .str.replace(",", ".", regex=False)
-                          .str.extract(r"([-+]?\d*\.?\d+)")[0]
+                         .str.replace(",", ".", regex=False)
+                         .str.extract(r"([-+]?\d*\.?\d+)")[0]
                 )
                 y_num = pd.to_numeric(y_num, errors="coerce")
             
@@ -650,6 +650,7 @@ with tab_charts:
                 if df_y.empty:
                     st.info("No numeric values in column Y for the current selection.")
                 else:
+                    # агрегаты для линии среднего
                     mean_y   = df_y.groupby("period", dropna=False)["y"].mean().reset_index(name="avg")
                     counts_n = df_y.groupby("period", dropna=False).size().reset_index(name="n")
                     out = mean_y.merge(counts_n, on="period", how="left")
@@ -658,10 +659,8 @@ with tab_charts:
                     all_periods = pd.period_range(start=period.min(), end=period.max(), freq=freq)
                     out = pd.DataFrame({"period": all_periods}).merge(out, on="period", how="left")
             
-                    # дата старта периода
+                    # дата старта периода + подписи категорий для X
                     out["date"] = out["period"].dt.start_time
-            
-                    # подписи категорий для оси X (чтобы красиво и одинаково с 2-м графиком)
                     if granularity == "Week":
                         iso_week = out["date"].dt.isocalendar().week.astype(str)
                         out["label"] = "W" + iso_week + " (" + out["date"].dt.strftime("%d %b %Y") + ")"
@@ -669,22 +668,72 @@ with tab_charts:
                         out["label"] = out["date"].dt.strftime(x_fmt)
                     label_order = out[["label", "date"]].drop_duplicates().sort_values("date")["label"].tolist()
             
-                    # линия среднего по периодам
-                    chart3 = (
-                        alt.Chart(out)
-                        .mark_line(point=True, interpolate="monotone")
-                        .encode(
-                            x=alt.X("label:N", title=x_title3, sort=label_order, axis=alt.Axis(labelAngle=x_angle)),
-                            y=alt.Y("avg:Q", title=f"Average of {y_col}"),
-                            tooltip=[
-                                alt.Tooltip("date:T", title=x_title3),
-                                alt.Tooltip("avg:Q",  title="Average", format=".2f"),
-                                alt.Tooltip("n:Q",    title="N"),
-                            ],
+                    # раскладка: слева линия среднего, справа пирог распределения значений Y
+                    col_left, col_right = st.columns([3, 2], gap="large")
+            
+                    with col_left:
+                        chart3 = (
+                            alt.Chart(out)
+                            .mark_line(point=True, interpolate="monotone")
+                            .encode(
+                                x=alt.X("label:N", title=x_title3, sort=label_order, axis=alt.Axis(labelAngle=x_angle)),
+                                y=alt.Y("avg:Q", title=f"Average of {y_col}"),
+                                tooltip=[
+                                    alt.Tooltip("date:T", title=x_title3),
+                                    alt.Tooltip("avg:Q",  title="Average", format=".2f"),
+                                    alt.Tooltip("n:Q",    title="N"),
+                                ],
+                            )
+                            .properties(height=320)
                         )
-                        .properties(height=320)
-                    )
-                    st.altair_chart(chart3, use_container_width=True)
+                        st.altair_chart(chart3, use_container_width=True)
+            
+                    with col_right:
+                        st.caption("Y value distribution (counts)")
+                        # распределение значений Y: если уникальных значений мало — по значениям; иначе — по бинам
+                        y_clean = df_y["y"].dropna()
+                        if y_clean.empty:
+                            st.info("No numeric values in Y to plot distribution.")
+                        else:
+                            nunique = y_clean.nunique()
+                            if nunique <= 12:
+                                freq = (y_clean.value_counts()
+                                                 .sort_index()
+                                                 .reset_index())
+                                freq.columns = ["value", "count"]
+                                freq["label"] = freq["value"].map(lambda v: f"{v:.2f}")
+                                color_field = "label:N"
+                                legend_title = "Y value"
+                            else:
+                                # 10 бинов по диапазону
+                                bins = 10
+                                binned = pd.cut(y_clean, bins=bins, include_lowest=True)
+                                freq = (binned.value_counts()
+                                               .sort_index()
+                                               .reset_index())
+                                freq.columns = ["bin", "count"]
+                                freq["label"] = freq["bin"].astype(str)
+                                color_field = "label:N"
+                                legend_title = "Y bin"
+            
+                            freq["pct"] = freq["count"] / freq["count"].sum()
+            
+                            pie = (
+                                alt.Chart(freq)
+                                .mark_arc()
+                                .encode(
+                                    theta=alt.Theta("count:Q"),
+                                    color=alt.Color(color_field, title=legend_title),
+                                    tooltip=[
+                                        alt.Tooltip("label:N", title=legend_title),
+                                        alt.Tooltip("count:Q", title="Count"),
+                                        alt.Tooltip("pct:Q",   title="Share", format=".0%"),
+                                    ],
+                                )
+                                .properties(height=320)
+                            )
+                            st.altair_chart(pie, use_container_width=True)
+
 
 
     # Кнопка обновления (на уровне with tab_charts:)
