@@ -508,6 +508,7 @@ with tab_charts:
                     override = (rec == "Recording is too short") & (status == "OK")
                     status = pd.Series(np.where(override, "Recording is too short", status), index=df_ch.index)
 
+
                     # ключ периода под гранулярность
                     if granularity == "Day":
                         key = dtL_ch.dt.floor("D")
@@ -552,16 +553,16 @@ with tab_charts:
                     df_status = pd.DataFrame({"date": key, "status": status}).dropna(subset=["date"])
                     counts_s = (df_status.groupby(["date", "status"], dropna=False)
                                           .size().reset_index(name="count"))
-
+                    
                     status_order = ["Recording is too short", "Recording ID Error", "Duplicate", "OK", "(blank)"]
                     idx = pd.MultiIndex.from_product([all_idx, status_order], names=["date", "status"])
                     counts_full = (counts_s.set_index(["date", "status"])
                                           .reindex(idx, fill_value=0)
                                           .reset_index())
-
+                    
                     counts_full["total"] = counts_full.groupby("date")["count"].transform("sum").astype(float)
                     counts_full["pct"] = (counts_full["count"] / counts_full["total"]).fillna(0.0)
-
+                    
                     chart2 = (
                         alt.Chart(counts_full)
                         .mark_bar()
@@ -572,7 +573,7 @@ with tab_charts:
                                 "status:N",
                                 title="Status",
                                 sort=status_order,
-                                scale=alt.Scale(domain=status_order),
+                                scale=alt.Scale(domain=status_order),  # фиксируем домен
                             ),
                             tooltip=[
                                 alt.Tooltip("date:T", title=x_title2),
@@ -584,6 +585,7 @@ with tab_charts:
                         .properties(height=320)
                     )
                     st.altair_chart(chart2, use_container_width=True)
+
 
     # Кнопка обновления (на уровне with tab_charts:)
     if st.button("Refresh data", key="refresh_charts"):
