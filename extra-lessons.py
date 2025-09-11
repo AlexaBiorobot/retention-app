@@ -598,6 +598,86 @@ with tab_charts:
                     )
             
                 st.altair_chart(base, use_container_width=True)
+                
+    st.divider()
+    st.subheader("Status mix by period (from column Z)")
+    st.caption("Stacked 100% bars. OK is treated as 'Recording is too short' when Recording check says so.")
+    
+    # имя колонки Z (26-я)
+    z_col = df_raw.columns[25] if len(df_raw.columns) > 25 else None
+    if not z_col:
+        st.info("Column Z is not available. Expand load range to A:Z.")
+    else:
+        # берем строки после фильтра по преподавателю и валидным датам (df_ch, dtL_ch уже рассчитаны выше)
+        z = df_raw.loc[df_ch.index, z_col].astype(str).str.strip()
+    
+        # override: если Recording check == "Recording is too short" и Z == "OK" → считаем как "Recording is too short"
+        rec_col = "Recording check"
+        rec = _df.loc[df_ch.index, rec_col].astype(str) if rec_col in _df.columns else pd.Series("", index=df_ch.index)
+        status = z.replace("", "(blank)")
+        override = (rec == "Recording is too short") & (status == "OK")
+        status = np.where(override, "Recording is too short", status)
+    
+        # ключ периода под гранулярность (день/нед/мес/год)
+        if granularity == "Day":
+            key = dtL_ch.dt.floor("D")
+            all_idx = pd.date_range(start=key.min(), end=key.max(), freq="D")
+            x_axis = alt.Axis(values=all_idx.to_pydatetime().tolist(), format="%d %b %Y", ticks=True, labelAngle=-45)
+            x_title = "Day"
+        elif granularity == "Week":
+            key = dtL_ch.dt.to_period("W-MON").dt.start_time
+            all_idx = pd.date_range(start=key.min().to_period("W-MON").start_time,
+                                    end=key.max().to_period("W-MON").start_time, freq="W-MON")
+            x_axis = alt.Axis(values=all_idx.to_pydatetime().tolist(), format="W%V (%d %b %Y)", ticks=True, labelAngle=-45)
+            x_title = "Week"
+        elif granularity == "Month":
+            key = dtL_ch.dt.to_period("M").dt.start_time
+            all_idx = pd.date_range(start=key.min().to_period("M").start_time,
+                                    end=key.max().to_period("M").start_time, freq="MS")
+            x_axis = alt.Axis(values=all_idx.to_pydatetime().tolist(), format="%b %Y", ticks=True)
+            x_title = "Month"
+        else:  # Year
+            key = dtL_ch.dt.to_period("Y").dt.start_time
+            all_idx = pd.date_range(start=key.min().to_period("Y").start_time,
+                                    end=key.max().to_period("Y").start_time, freq="YS")
+            x_axis = alt.Axis(values=all_idx.to_pydatetime().tolist(), format="%Y", ticks=True)
+            x_title = "Year"
+    
+        # агрегируем
+        df_status = pd.DataFrame({"date": key, "status": status}).dropna(subset=["date"])
+        counts = (df_status.groupby(["date", "status"], dropna=False)
+                            .size().reset_index(name="count"))
+    
+        # полный каркас по всем датам и фиксированному порядку статусов
+        status_order = ["Recording is too short", "Recording ID Error", "Duplicate", "OK", "(blank)"]
+        idx = pd.MultiIndex.from_product([all_idx, status_order], names=["date", "status"])
+        counts_full = (counts.set_index(["date", "status"])
+                             .reindex(idx, fill_value=0)
+                             .reset_index())
+    
+        # доли для тултипа
+        counts_full["total"] = counts_full.groupby("date")["count"].transform("sum").astype(float)
+        counts_full["pct"] = (counts_full["count"] / counts_full["total"]).fillna(0.0)
+    
+        chart2 = (
+            alt.Chart(counts_full)
+            .mark_bar()
+            .encode(
+                x=alt.X("date:T", title=x_title, axis=x_axis),
+                y=alt.Y("count:Q", stack="normalize", title="Share"),
+                color=alt.Color("status:N", title="Status", sort=status_order),
+                tooltip=[
+                    alt.Tooltip("date:T", title=x_title),
+                    alt.Tooltip("status:N", title="Status"),
+                    alt.Tooltip("count:Q", title="Count"),
+                    alt.Tooltip("pct:Q", title="Share", format=".0%")
+                ],
+            )
+            .properties(height=320)
+        )
+        st.altair_chart(chart2, use_container_width=True)
+
+
             
                 st.write("— **Total** rows:", int(counts["count"].sum()))
                 st.write("— **Span**:", f"{counts['date'].min().date()} → {counts['date'].max().date()}")
