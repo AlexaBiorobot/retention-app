@@ -506,7 +506,7 @@ with tab_charts:
                            if rec_col in _df.columns else pd.Series("", index=df_ch.index))
                     status = z.replace("", "(blank)")
                     override = (rec == "Recording is too short") & (status == "OK")
-                    status = np.where(override, "Recording is too short", status)
+                    status = pd.Series(np.where(override, "Recording is too short", status), index=df_ch.index)
 
                     # ключ периода под гранулярность
                     if granularity == "Day":
@@ -516,12 +516,69 @@ with tab_charts:
                                            format="%d %b %Y", ticks=True, labelAngle=-45)
                         x_title2 = "Day"
                     elif granularity == "Week":
-                        key = dtL_ch.dt.to_period("W-MON").dt.start_time
-                        all_idx = pd.date_range(start=key.min().to_period("W-MON").start_time,
-                                                end=key.max().to_period("W-MON").start_time, freq="W-MON")
-                        x_axis2 = alt.Axis(values=all_idx.to_pydatetime().tolist(),
-                                           format="W%V (%d %b %Y)", ticks=True, labelAngle=-45)
                         x_title2 = "Week"
+                    
+                        # убедимся, что status — Series, выровненная по df_ch
+                        if not isinstance(status, pd.Series):
+                            status = pd.Series(status, index=df_ch.index)
+                    
+                        # 1) Недели как Period + заполнение пропусков
+                        weeks = dtL_ch.dt.to_period("W-MON")
+                        df_status_w = pd.DataFrame({"week": weeks, "status": status}).dropna(subset=["week"])
+                    
+                        counts_s = (
+                            df_status_w.groupby(["week", "status"], dropna=False)
+                            .size()
+                            .reset_index(name="count")
+                        )
+                    
+                        status_order = ["Recording is too short", "Recording ID Error", "Duplicate", "OK", "(blank)"]
+                        all_weeks = pd.period_range(start=weeks.min(), end=weeks.max(), freq="W-MON")
+                    
+                        counts_full = (
+                            counts_s.set_index(["week", "status"])
+                            .reindex(pd.MultiIndex.from_product([all_weeks, status_order], names=["week", "status"]),
+                                     fill_value=0)
+                            .reset_index()
+                        )
+                    
+                        # 2) Для оси X берём дату начала недели
+                        counts_full["date"] = counts_full["week"].dt.start_time
+                    
+                        # 3) Доли и ось X (тики на каждом понедельнике)
+                        counts_full["total"] = counts_full.groupby("date")["count"].transform("sum").astype(float)
+                        counts_full["pct"] = (counts_full["count"] / counts_full["total"]).fillna(0.0)
+                    
+                        x_axis2 = alt.Axis(
+                            values=counts_full["date"].drop_duplicates().tolist(),
+                            format="W%V (%d %b %Y)",
+                            ticks=True,
+                            labelAngle=-45,
+                            labelOverlap="greedy",
+                        )
+                    
+                        chart2 = (
+                            alt.Chart(counts_full)
+                            .mark_bar()
+                            .encode(
+                                x=alt.X("date:T", title=x_title2, axis=x_axis2),
+                                y=alt.Y("count:Q", stack="normalize", title="Share"),
+                                color=alt.Color(
+                                    "status:N",
+                                    title="Status",
+                                    sort=status_order,
+                                    scale=alt.Scale(domain=status_order),
+                                ),
+                                tooltip=[
+                                    alt.Tooltip("date:T", title="Week start"),
+                                    alt.Tooltip("status:N", title="Status"),
+                                    alt.Tooltip("count:Q", title="Count"),
+                                    alt.Tooltip("pct:Q", title="Share", format=".0%"),
+                                ],
+                            )
+                            .properties(height=320)
+                        )
+
                     elif granularity == "Month":
                         key = dtL_ch.dt.to_period("M").dt.start_time
                         all_idx = pd.date_range(start=key.min().to_period("M").start_time,
