@@ -516,37 +516,83 @@ with tab_charts:
                     )
             
                 elif granularity == "Month":
+                    # агрегируем по месячным Period и добиваем пропуски
+                    months = dtL_ch.dt.to_period("M")
+                    m_counts = (
+                        months.value_counts()
+                        .sort_index()
+                        .rename_axis("month")
+                        .reset_index(name="count")
+                    )
+                
+                    all_months = pd.period_range(start=months.min(), end=months.max(), freq="M")
+                    m_counts = (
+                        pd.DataFrame({"month": all_months})
+                        .merge(m_counts, on="month", how="left")
+                        .fillna({"count": 0})
+                    )
+                
+                    # в дату начала месяца для оси X
+                    m_counts["date"] = m_counts["month"].dt.start_time
+                    counts = m_counts[["date", "count"]]
+                
+                    # тики на каждом месяце
                     x_axis = alt.Axis(
-                        values=all_idx.to_pydatetime().tolist(),
+                        values=counts["date"].to_list(),
                         format="%b %Y",
                         ticks=True,
                         labelOverlap=True,
+                        labelAngle=0,
                     )
+                
                     base = (
                         alt.Chart(counts)
-                        .mark_bar()
+                        .mark_line(point=True, interpolate="monotone")
                         .encode(
                             x=alt.X("date:T", title="Month", axis=x_axis),
                             y=alt.Y("count:Q", title="Count"),
-                            tooltip=[alt.Tooltip("date:T"), alt.Tooltip("count:Q")]
+                            tooltip=[alt.Tooltip("date:T", title="Month"), alt.Tooltip("count:Q")]
                         )
                         .properties(height=320)
                     )
             
                 else:  # Year
+                    # агрегируем по годовым Period и добиваем пропуски
+                    years = dtL_ch.dt.to_period("Y")
+                    y_counts = (
+                        years.value_counts()
+                        .sort_index()
+                        .rename_axis("year")
+                        .reset_index(name="count")
+                    )
+                
+                    all_years = pd.period_range(start=years.min(), end=years.max(), freq="Y")
+                    y_counts = (
+                        pd.DataFrame({"year": all_years})
+                        .merge(y_counts, on="year", how="left")
+                        .fillna({"count": 0})
+                    )
+                
+                    # в 1 января каждого года для оси X
+                    y_counts["date"] = y_counts["year"].dt.start_time
+                    counts = y_counts[["date", "count"]]
+                
+                    # тики на каждом годе
                     x_axis = alt.Axis(
-                        values=all_idx.to_pydatetime().tolist(),
+                        values=counts["date"].to_list(),
                         format="%Y",
                         ticks=True,
                         labelOverlap=True,
+                        labelAngle=0,
                     )
+                
                     base = (
                         alt.Chart(counts)
-                        .mark_bar()
+                        .mark_line(point=True, interpolate="monotone")
                         .encode(
                             x=alt.X("date:T", title="Year", axis=x_axis),
                             y=alt.Y("count:Q", title="Count"),
-                            tooltip=[alt.Tooltip("date:T"), alt.Tooltip("count:Q")]
+                            tooltip=[alt.Tooltip("date:T", title="Year"), alt.Tooltip("count:Q")]
                         )
                         .properties(height=320)
                     )
