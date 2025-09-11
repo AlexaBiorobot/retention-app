@@ -426,7 +426,7 @@ with tab_charts:
             if counts.empty:
                 st.info("No data for the selected filters.")
             else:
-                # Полный временной ряд по выбранной гранулярности
+                # Полный ряд по выбранной гранулярности
                 counts = counts.sort_values("date").reset_index(drop=True)
                 dmin, dmax = counts["date"].min(), counts["date"].max()
             
@@ -451,43 +451,85 @@ with tab_charts:
                     .fillna({"count": 0})
                 )
             
-                # Оформляем ось X с «засечками» на каждом шаге периода
-                fmt_map = {"Day": "%d %b %Y", "Week": "%d %b %Y", "Month": "%b %Y", "Year": "%Y"}
-                x_axis = alt.Axis(
-                    values=all_idx.to_pydatetime().tolist(),  # тики на каждом шаге
-                    format=fmt_map[granularity],
-                    ticks=True,
-                    labelOverlap="greedy",
-                    labelAngle=-45 if granularity in ("Day", "Week") else 0,
-                )
-                x_enc = alt.X("date:T", title=granularity, axis=x_axis)
-            
-                if granularity in ("Day", "Week"):
-                    # Линия + точки на каждом значении
-                    chart = (
+                # Ось X и тип графика под гранулярность
+                if granularity == "Day":
+                    x_axis = alt.Axis(
+                        values=all_idx.to_pydatetime().tolist(),
+                        format="%d %b %Y",
+                        ticks=True,
+                        labelOverlap="greedy",
+                        labelAngle=-45,
+                    )
+                    base = (
                         alt.Chart(counts)
                         .mark_line(point=True, interpolate="monotone")
                         .encode(
-                            x=x_enc,
-                            y=alt.Y("count:Q", title="Count"),
-                            tooltip=[alt.Tooltip("date:T"), alt.Tooltip("count:Q")]
-                        )
-                        .properties(height=320)
-                    )
-                else:
-                    # Для месяца/года — столбики, тики на каждом месяце/годе
-                    chart = (
-                        alt.Chart(counts)
-                        .mark_bar()
-                        .encode(
-                            x=x_enc,
+                            x=alt.X("date:T", title="Day", axis=x_axis),
                             y=alt.Y("count:Q", title="Count"),
                             tooltip=[alt.Tooltip("date:T"), alt.Tooltip("count:Q")]
                         )
                         .properties(height=320)
                     )
             
-                st.altair_chart(chart, use_container_width=True)
+                elif granularity == "Week":
+                    # Недели считаются и подписываются как недели (понедельники)
+                    x_axis = alt.Axis(
+                        values=all_idx.to_pydatetime().tolist(),
+                        # d3-формат: %W — номер недели (понедельник как первый день)
+                        format="W%W (%d %b %Y)",
+                        ticks=True,
+                        labelOverlap="greedy",
+                        labelAngle=-45,
+                    )
+                    base = (
+                        alt.Chart(counts)
+                        .mark_line(point=True, interpolate="monotone")
+                        .encode(
+                            x=alt.X("date:T", title="Week", axis=x_axis),
+                            y=alt.Y("count:Q", title="Count"),
+                            tooltip=[alt.Tooltip("date:T", title="Week start"),
+                                     alt.Tooltip("count:Q")]
+                        )
+                        .properties(height=320)
+                    )
+            
+                elif granularity == "Month":
+                    x_axis = alt.Axis(
+                        values=all_idx.to_pydatetime().tolist(),
+                        format="%b %Y",
+                        ticks=True,
+                        labelOverlap=True,
+                    )
+                    base = (
+                        alt.Chart(counts)
+                        .mark_bar()
+                        .encode(
+                            x=alt.X("date:T", title="Month", axis=x_axis),
+                            y=alt.Y("count:Q", title="Count"),
+                            tooltip=[alt.Tooltip("date:T"), alt.Tooltip("count:Q")]
+                        )
+                        .properties(height=320)
+                    )
+            
+                else:  # Year
+                    x_axis = alt.Axis(
+                        values=all_idx.to_pydatetime().tolist(),
+                        format="%Y",
+                        ticks=True,
+                        labelOverlap=True,
+                    )
+                    base = (
+                        alt.Chart(counts)
+                        .mark_bar()
+                        .encode(
+                            x=alt.X("date:T", title="Year", axis=x_axis),
+                            y=alt.Y("count:Q", title="Count"),
+                            tooltip=[alt.Tooltip("date:T"), alt.Tooltip("count:Q")]
+                        )
+                        .properties(height=320)
+                    )
+            
+                st.altair_chart(base, use_container_width=True)
             
                 st.write("— **Total** rows:", int(counts["count"].sum()))
                 st.write("— **Span**:", f"{counts['date'].min().date()} → {counts['date'].max().date()}")
