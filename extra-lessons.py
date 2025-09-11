@@ -598,7 +598,8 @@ with tab_charts:
                                 sort=label_order,
                                 axis=alt.Axis(labelAngle=x_angle)
                             ),
-                            y=alt.Y("count:Q", stack="normalize", title="Share"),
+                            # ⬇️ теперь высота столбика = абсолютное число строк за период
+                            y=alt.Y("count:Q", stack="zero", title="Count"),
                             color=alt.Color(
                                 "status:N",
                                 title="Status",
@@ -608,15 +609,13 @@ with tab_charts:
                             tooltip=[
                                 alt.Tooltip("date:T", title=f"{x_title2} start"),
                                 alt.Tooltip("status:N", title="Status"),
-                                alt.Tooltip("count:Q", title="Count"),
-                                alt.Tooltip("pct:Q", title="Share", format=".0%"),
+                                alt.Tooltip("count:Q", title="Count"),          # абсолют
+                                alt.Tooltip("pct:Q", title="Share", format=".0%")  # доля внутри периода
                             ],
                         )
                         .properties(height=320)
                     )
                     st.altair_chart(chart2, use_container_width=True)
-
-
 
     # Кнопка обновления (на уровне with tab_charts:)
     if st.button("Refresh data", key="refresh_charts"):
