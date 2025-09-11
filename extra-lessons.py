@@ -428,14 +428,9 @@ with tab_charts:
                         y=alt.Y("count:Q", title="Count"),
                         tooltip=[alt.Tooltip("date:T"), alt.Tooltip("count:Q")]
                     )
-                    .properties(use_container_width=True, height=320)
+                    .properties(height=320)  # ✅ только height/width/title
                 )
-                st.altair_chart(chart, use_container_width=True)
-
-                st.write("— **Total** rows:", int(counts["count"].sum()))
-                st.write("— **Span**:", f"{counts['date'].min().date()} → {counts['date'].max().date()}")
-                if sel_teacher != "(All)":
-                    st.write("— **Teacher**:", sel_teacher)
+                st.altair_chart(chart, use_container_width=True)  # ✅ ширину задаём тут
 
     if st.button("Refresh data", key="refresh_charts"):
         load_sheet_df.clear()
