@@ -182,7 +182,7 @@ def _display_label(col_name: str, suffix: str = "") -> str:
 # ===================== Main =====================
 
 with st.spinner("Loading data…"):
-    df_raw = load_sheet_df(SHEET_ID, WS_NAME, rng="A:Y")
+    df_raw = load_sheet_df(SHEET_ID, WS_NAME, rng="A:Z")
 
 if df_raw.empty:
     st.warning(f"No data. Check access to the file and that the tab '{WS_NAME}' contains a header row in A:Q.""Also share the sheet with your service account e‑mail.")
