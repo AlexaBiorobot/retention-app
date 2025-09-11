@@ -197,6 +197,12 @@ for i in (19, 23, 24):  # T, X, Y
 
 _df = df_raw.iloc[:, keep_idx].copy()
 
+# --- оставляем только строки, где есть содержимое ---
+# 1) превращаем строки из одних пробелов в NaN
+_df.replace(r'^\s*$', pd.NA, regex=True, inplace=True)
+# 2) убираем строки, где вообще все колонки пусты
+_df = _df.dropna(how='all')
+
 # 3) колонка-проверка: если запись (T) <= (ожидание I - 15 минут) → "Recording is too short"
 #    I = 9-й столбец (индекс 8), формат "60 min"; T = 20-й (индекс 19), формат "hh:mm:ss"
 col_I_name = df_raw.columns[8]  if len(df_raw.columns) > 8  else None
