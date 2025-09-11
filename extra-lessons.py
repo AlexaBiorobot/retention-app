@@ -617,6 +617,76 @@ with tab_charts:
                     )
                     st.altair_chart(chart2, use_container_width=True)
 
+            # ===== Третий график: Average of Y by period =====
+            st.divider()
+            st.subheader("Average of Y by period")
+            
+            # имя колонки Y (25-я, индекс 24)
+            y_col = df_raw.columns[24] if len(df_raw.columns) > 24 else None
+            if not y_col or y_col not in df_ch.columns:
+                st.info("Column Y is not available.")
+            else:
+                # берём Y и конвертируем в число (12,3 → 12.3; убираем %, лишний текст)
+                y_raw = df_ch[y_col].astype(str)
+                y_num = (
+                    y_raw.str.replace("%", "", regex=False)
+                          .str.replace(",", ".", regex=False)
+                          .str.extract(r"([-+]?\d*\.?\d+)")[0]
+                )
+                y_num = pd.to_numeric(y_num, errors="coerce")
+            
+                # периоды под выбранную гранулярность
+                if granularity == "Day":
+                    period = dtL_ch.dt.to_period("D"); freq = "D"; x_title3 = "Day";   x_fmt = "%d %b %Y"; x_angle = -45
+                elif granularity == "Week":
+                    period = dtL_ch.dt.to_period("W-MON"); freq = "W-MON"; x_title3 = "Week"; x_fmt = "W%V (%d %b %Y)"; x_angle = -45
+                elif granularity == "Month":
+                    period = dtL_ch.dt.to_period("M"); freq = "M"; x_title3 = "Month"; x_fmt = "%b %Y"; x_angle = 0
+                else:
+                    period = dtL_ch.dt.to_period("Y"); freq = "Y"; x_title3 = "Year";  x_fmt = "%Y"; x_angle = 0
+            
+                # оставляем строки, где есть число
+                df_y = pd.DataFrame({"period": period, "y": y_num}).dropna(subset=["period", "y"])
+                if df_y.empty:
+                    st.info("No numeric values in column Y for the current selection.")
+                else:
+                    mean_y   = df_y.groupby("period", dropna=False)["y"].mean().reset_index(name="avg")
+                    counts_n = df_y.groupby("period", dropna=False).size().reset_index(name="n")
+                    out = mean_y.merge(counts_n, on="period", how="left")
+            
+                    # добиваем пропуски периодов
+                    all_periods = pd.period_range(start=period.min(), end=period.max(), freq=freq)
+                    out = pd.DataFrame({"period": all_periods}).merge(out, on="period", how="left")
+            
+                    # дата старта периода
+                    out["date"] = out["period"].dt.start_time
+            
+                    # подписи категорий для оси X (чтобы красиво и одинаково с 2-м графиком)
+                    if granularity == "Week":
+                        iso_week = out["date"].dt.isocalendar().week.astype(str)
+                        out["label"] = "W" + iso_week + " (" + out["date"].dt.strftime("%d %b %Y") + ")"
+                    else:
+                        out["label"] = out["date"].dt.strftime(x_fmt)
+                    label_order = out[["label", "date"]].drop_duplicates().sort_values("date")["label"].tolist()
+            
+                    # линия среднего по периодам
+                    chart3 = (
+                        alt.Chart(out)
+                        .mark_line(point=True, interpolate="monotone")
+                        .encode(
+                            x=alt.X("label:N", title=x_title3, sort=label_order, axis=alt.Axis(labelAngle=x_angle)),
+                            y=alt.Y("avg:Q", title=f"Average of {y_col}"),
+                            tooltip=[
+                                alt.Tooltip("date:T", title=x_title3),
+                                alt.Tooltip("avg:Q",  title="Average", format=".2f"),
+                                alt.Tooltip("n:Q",    title="N"),
+                            ],
+                        )
+                        .properties(height=320)
+                    )
+                    st.altair_chart(chart3, use_container_width=True)
+
+
     # Кнопка обновления (на уровне with tab_charts:)
     if st.button("Refresh data", key="refresh_charts"):
         load_sheet_df.clear()
