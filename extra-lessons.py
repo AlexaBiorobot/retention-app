@@ -370,6 +370,38 @@ with tab_charts:
     st.subheader("Dynamics by L (date of the class)")
     st.caption("Aggregate by day / week / month / year. Filter by teacher (column D).")
 
+    # --- Sticky bar with Granularity ---  ← ТЕПЕРЬ ВНУТРИ БЛОКА
+    st.markdown(
+        """
+        <style>
+        .sticky-granularity {
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            background: rgba(255,255,255,0.92);
+            backdrop-filter: blur(2px);
+            padding: 6px 8px 10px;
+            border-bottom: 1px solid rgba(0,0,0,0.08);
+            margin: -8px -8px 6px -8px;
+        }
+        @media (prefers-color-scheme: dark) {
+          .sticky-granularity { background: rgba(20,20,20,0.85); border-bottom-color: rgba(255,255,255,0.08); }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown('<div class="sticky-granularity">', unsafe_allow_html=True)
+    granularity = st.radio(
+        "Granularity:",
+        ["Day", "Week", "Month", "Year"],
+        horizontal=True,
+        index=2,
+        key="granularity",
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
+
     colD_name = col_order[3] if len(col_order) >= 4 else None   # D
     colL_name = col_order[11] if len(col_order) >= 12 else None  # L
 
@@ -394,14 +426,6 @@ with tab_charts:
         else:
             dtL_ch = dtL_ch[mask_valid]
             df_ch = df_ch.loc[mask_valid]
-
-            # Гранулярность
-            granularity = st.radio(
-                "Granularity:",
-                ["Day", "Week", "Month", "Year"],
-                horizontal=True,
-                index=2
-            )
 
             # ===== Первый график =====
             # Агрегируем и делаем полный временной ряд + ось
