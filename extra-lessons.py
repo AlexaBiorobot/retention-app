@@ -878,6 +878,105 @@ with tab_charts:
                         file_name="tutor_violation_ranking.csv",
                         mime="text/csv"
                     )
+            # ===== Распределение по Q и S во времени (как во 2-м графике) =====
+            st.divider()
+            st.subheader("Distribution over time by Q and S")
+            
+            # индексы колонок: Q=16, S=18
+            q_col = df_raw.columns[16] if len(df_raw.columns) > 16 else None
+            s_col = df_raw.columns[18] if len(df_raw.columns) > 18 else None
+            
+            def _dist_chart_for_series(values: pd.Series, series_name: str):
+                """Строит стековый столбчатый график: распределение категорий values по периодам granularity."""
+                # нормализация значений
+                cats = values.astype(str).str.strip()
+                cats = cats.replace("", "(blank)")
+            
+                # периоды по выбранной гранулярности
+                if granularity == "Day":
+                    period = dtL_ch.dt.to_period("D"); pfreq = "D"; x_title = "Day";   x_fmt = "%d %b %Y"; x_angle = -45
+                elif granularity == "Week":
+                    period = dtL_ch.dt.to_period("W-MON"); pfreq = "W-MON"; x_title = "Week"; x_fmt = "W%V (%d %b %Y)"; x_angle = -45
+                elif granularity == "Month":
+                    period = dtL_ch.dt.to_period("M"); pfreq = "M"; x_title = "Month"; x_fmt = "%b %Y"; x_angle = 0
+                else:
+                    period = dtL_ch.dt.to_period("Y"); pfreq = "Y"; x_title = "Year";  x_fmt = "%Y"; x_angle = 0
+            
+                df_cat = pd.DataFrame({"period": period, "cat": cats}).dropna(subset=["period"])
+                if df_cat.empty:
+                    return None
+            
+                counts = (df_cat.groupby(["period", "cat"], dropna=False)
+                                 .size().reset_index(name="count"))
+            
+                # полный список периодов и порядок категорий (по общей частоте ↓)
+                all_periods = pd.period_range(start=period.min(), end=period.max(), freq=pfreq)
+                cat_order = (counts.groupby("cat")["count"].sum()
+                                    .sort_values(ascending=False).index.tolist())
+            
+                idx = pd.MultiIndex.from_product([all_periods, cat_order], names=["period", "cat"])
+                counts_full = (counts.set_index(["period", "cat"])
+                                     .reindex(idx, fill_value=0)
+                                     .reset_index())
+            
+                # дата старта периода и подписи-метки для X
+                counts_full["date"] = counts_full["period"].dt.start_time
+                if granularity == "Week":
+                    iso_week = counts_full["date"].dt.isocalendar().week.astype(str)
+                    counts_full["label"] = "W" + iso_week + " (" + counts_full["date"].dt.strftime("%d %b %Y") + ")"
+                else:
+                    counts_full["label"] = counts_full["date"].dt.strftime(x_fmt)
+            
+                label_order = (counts_full[["label", "date"]]
+                               .drop_duplicates()
+                               .sort_values("date")["label"].tolist())
+            
+                # доля в периоде для тултипа
+                counts_full["total"] = counts_full.groupby("period")["count"].transform("sum").astype(float)
+                counts_full["pct"] = (counts_full["count"] / counts_full["total"]).fillna(0.0)
+            
+                chart = (
+                    alt.Chart(counts_full)
+                    .mark_bar()
+                    .encode(
+                        x=alt.X("label:N", title=x_title, sort=label_order, axis=alt.Axis(labelAngle=x_angle)),
+                        y=alt.Y("count:Q", stack="zero", title="Count"),      # как во 2-м графике: абсолюты
+                        color=alt.Color("cat:N", title=series_name, sort=cat_order),
+                        tooltip=[
+                            alt.Tooltip("date:T",  title=f"{x_title} start"),
+                            alt.Tooltip("cat:N",   title=series_name),
+                            alt.Tooltip("count:Q", title="Count"),
+                            alt.Tooltip("pct:Q",   title="Share", format=".0%"),
+                        ],
+                    )
+                    .properties(height=320)
+                )
+                return chart
+            
+            cols = st.columns(2, gap="large")
+            with cols[0]:
+                st.caption(f"{q_col if q_col else 'Q'} distribution")
+                if not q_col:
+                    st.info("Column Q is not available.")
+                else:
+                    q_vals = df_raw.loc[df_ch.index, q_col]  # берём значения Q на тех же строках, что и выборка
+                    chart_q = _dist_chart_for_series(q_vals, q_col)
+                    if chart_q is None:
+                        st.info("No data to plot for Q.")
+                    else:
+                        st.altair_chart(chart_q, use_container_width=True)
+            
+            with cols[1]:
+                st.caption(f"{s_col if s_col else 'S'} distribution")
+                if not s_col:
+                    st.info("Column S is not available.")
+                else:
+                    s_vals = df_raw.loc[df_ch.index, s_col]
+                    chart_s = _dist_chart_for_series(s_vals, s_col)
+                    if chart_s is None:
+                        st.info("No data to plot for S.")
+                    else:
+                        st.altair_chart(chart_s, use_container_width=True)
 
 
     # Кнопка обновления (на уровне with tab_charts:)
