@@ -191,7 +191,7 @@ if df_raw.empty:
 # --- оставляем только A:Q + T, X, Y, Z ---
 # индексы столбцов по позиции: A..Q = 0..16, T=19, X=23, Y=24
 keep_idx = list(range(min(17, len(df_raw.columns))))  # A:Q
-for i in (19, 23, 24, 25):  # T, X, Y, Z
+for i in (19, 22, 23, 24, 25):  # T, X, Y, Z
     if i < len(df_raw.columns):
         keep_idx.append(i)
 
@@ -641,122 +641,170 @@ with tab_charts:
                     )
                     st.altair_chart(chart2, use_container_width=True)
 
-            # ===== Третий график: Average of Y by period + pie распределения =====
+            # ===== Графики по W: частоты упоминаний и среднее кол-во упоминаний =====
             st.divider()
-            st.subheader("Average of Y by period")
+            st.subheader("Mentions in W: counts & average")
             
-            # имя колонки Y (25-я, индекс 24)
-            y_col = df_raw.columns[24] if len(df_raw.columns) > 24 else None
-            if not y_col or y_col not in df_ch.columns:
-                st.info("Column Y is not available.")
+            # имя колонки W (23-я, индекс 22)
+            w_col = df_raw.columns[22] if len(df_raw.columns) > 22 else None
+            if not w_col:
+                st.info("Column W is not available.")
             else:
-                # берём Y и конвертируем в число (12,3 → 12.3; убираем %, лишний текст)
-                y_raw = df_ch[y_col].astype(str)
-                y_num = (
-                    y_raw.str.replace("%", "", regex=False)
-                         .str.replace(",", ".", regex=False)
-                         .str.extract(r"([-+]?\d*\.?\d+)")[0]
-                )
-                y_num = pd.to_numeric(y_num, errors="coerce")
+                # Берём значения W на тех же строках, что и df_ch (после фильтров)
+                w_series = df_raw.loc[df_ch.index, w_col].astype(str)
             
-                # периоды под выбранную гранулярность
+                # --- Нормализация и сплит упоминаний ---
+                # разделители: запятая, точка с запятой, слэш, вертикальная черта, перенос строки/таб
+                # приводим к нижнему регистру и обрезаем пробелы
+                def _split_mentions(s: pd.Series) -> pd.Series:
+                    cleaned = (
+                        s.str.replace(r"[\r\n\t]", " ", regex=True)
+                         .str.replace(r"[;/|]", ",", regex=True)
+                         .str.replace(r"\s*,\s*", ",", regex=True)
+                         .str.strip()
+                         .str.lower()
+                    )
+                    # пустые -> NaN
+                    cleaned = cleaned.replace({"": pd.NA})
+                    return cleaned
+            
+                w_clean = _split_mentions(w_series)
+            
+                # считаем кол-во упоминаний на строку (для среднего)
+                def _count_mentions_row(x: str) -> float:
+                    if pd.isna(x):
+                        return np.nan
+                    parts = [p.strip() for p in x.split(",") if p.strip() != ""]
+                    return float(len(parts))
+            
+                mentions_per_row = w_clean.map(_count_mentions_row)
+            
+                # периоды под выбранную гранулярность (как выше)
                 if granularity == "Day":
-                    period = dtL_ch.dt.to_period("D"); freq = "D"; x_title3 = "Day";   x_fmt = "%d %b %Y"; x_angle = -45
+                    period = dtL_ch.dt.to_period("D"); pfreq = "D"; x_titleW = "Day";   x_fmtW = "%d %b %Y"; x_angleW = -45
                 elif granularity == "Week":
-                    period = dtL_ch.dt.to_period("W-MON"); freq = "W-MON"; x_title3 = "Week"; x_fmt = "W%V (%d %b %Y)"; x_angle = -45
+                    period = dtL_ch.dt.to_period("W-MON"); pfreq = "W-MON"; x_titleW = "Week"; x_fmtW = "W%V (%d %b %Y)"; x_angleW = -45
                 elif granularity == "Month":
-                    period = dtL_ch.dt.to_period("M"); freq = "M"; x_title3 = "Month"; x_fmt = "%b %Y"; x_angle = 0
+                    period = dtL_ch.dt.to_period("M"); pfreq = "M"; x_titleW = "Month"; x_fmtW = "%b %Y"; x_angleW = 0
                 else:
-                    period = dtL_ch.dt.to_period("Y"); freq = "Y"; x_title3 = "Year";  x_fmt = "%Y"; x_angle = 0
+                    period = dtL_ch.dt.to_period("Y"); pfreq = "Y"; x_titleW = "Year";  x_fmtW = "%Y"; x_angleW = 0
             
-                # оставляем строки, где есть число
-                df_y = pd.DataFrame({"period": period, "y": y_num}).dropna(subset=["period", "y"])
-                if df_y.empty:
-                    st.info("No numeric values in column Y for the current selection.")
+                # === (A) Среднее число упоминаний в W за период ===
+                df_avg = pd.DataFrame({"period": period, "n_mentions": mentions_per_row}).dropna(subset=["period"])
+                avg_out = (
+                    df_avg.groupby("period", dropna=False)["n_mentions"]
+                          .mean()
+                          .reset_index(name="avg_mentions")
+                )
+            
+                # добьём пропуски периодов
+                all_periods_w = pd.period_range(start=period.min(), end=period.max(), freq=pfreq)
+                avg_out = pd.DataFrame({"period": all_periods_w}).merge(avg_out, on="period", how="left")
+            
+                # дата старта периода + подписи X
+                avg_out["date"] = avg_out["period"].dt.start_time
+                if granularity == "Week":
+                    iso_week = avg_out["date"].dt.isocalendar().week.astype(str)
+                    avg_out["label"] = "W" + iso_week + " (" + avg_out["date"].dt.strftime("%d %b %Y") + ")"
                 else:
-                    # агрегаты для линии среднего
-                    mean_y   = df_y.groupby("period", dropna=False)["y"].mean().reset_index(name="avg")
-                    counts_n = df_y.groupby("period", dropna=False).size().reset_index(name="n")
-                    out = mean_y.merge(counts_n, on="period", how="left")
+                    avg_out["label"] = avg_out["date"].dt.strftime(x_fmtW)
+                label_order_avg = avg_out[["label", "date"]].drop_duplicates().sort_values("date")["label"].tolist()
             
-                    # добиваем пропуски периодов
-                    all_periods = pd.period_range(start=period.min(), end=period.max(), freq=freq)
-                    out = pd.DataFrame({"period": all_periods}).merge(out, on="period", how="left")
+                # === (B) Частоты одинаковых упоминаний (top-N) по периодам ===
+                # развернём упоминания в строки
+                def _explode_mentions(s_clean: pd.Series) -> pd.DataFrame:
+                    # индекс сохраняем, чтобы связать с period (по индексу df_ch)
+                    base = s_clean.dropna()
+                    if base.empty:
+                        return pd.DataFrame(columns=["idx", "mention"])
+                    rows = []
+                    for idx, val in base.items():
+                        parts = [p.strip() for p in val.split(",") if p.strip() != ""]
+                        for p in parts:
+                            rows.append((idx, p))
+                    return pd.DataFrame(rows, columns=["idx", "mention"])
             
-                    # дата старта периода + подписи категорий для X
-                    out["date"] = out["period"].dt.start_time
+                exploded = _explode_mentions(w_clean)
+                if exploded.empty:
+                    st.info("No mentions found in column W for the current selection.")
+                else:
+                    # присоединяем период по индексу (совпадает с df_ch/dtL_ch)
+                    exploded["period"] = period.loc[exploded["idx"]].values
+            
+                    # группируем: period x mention -> count
+                    counts_w = (exploded.groupby(["period", "mention"], dropna=False)
+                                        .size()
+                                        .reset_index(name="count"))
+            
+                    # Top-N по общей частоте; остальные → Other
+                    TOP_N = 12
+                    total_by_mention = counts_w.groupby("mention")["count"].sum().sort_values(ascending=False)
+                    top_mentions = total_by_mention.head(TOP_N).index.tolist()
+                    counts_w["mention_top"] = np.where(counts_w["mention"].isin(top_mentions), counts_w["mention"], "Other")
+            
+                    counts_w_top = (counts_w.groupby(["period", "mention_top"], dropna=False)["count"]
+                                          .sum()
+                                          .reset_index())
+                    # добиваем пропуски периодов для (period x mention_top)
+                    mention_order = (counts_w_top.groupby("mention_top")["count"].sum().sort_values(ascending=False).index.tolist())
+                    idx_full = pd.MultiIndex.from_product([all_periods_w, mention_order], names=["period", "mention_top"])
+                    counts_full_w = (counts_w_top.set_index(["period", "mention_top"])
+                                               .reindex(idx_full, fill_value=0)
+                                               .reset_index())
+            
+                    counts_full_w["date"] = counts_full_w["period"].dt.start_time
                     if granularity == "Week":
-                        iso_week = out["date"].dt.isocalendar().week.astype(str)
-                        out["label"] = "W" + iso_week + " (" + out["date"].dt.strftime("%d %b %Y") + ")"
+                        iso_week2 = counts_full_w["date"].dt.isocalendar().week.astype(str)
+                        counts_full_w["label"] = "W" + iso_week2 + " (" + counts_full_w["date"].dt.strftime("%d %b %Y") + ")"
                     else:
-                        out["label"] = out["date"].dt.strftime(x_fmt)
-                    label_order = out[["label", "date"]].drop_duplicates().sort_values("date")["label"].tolist()
+                        counts_full_w["label"] = counts_full_w["date"].dt.strftime(x_fmtW)
+                    label_order_w = (counts_full_w[["label", "date"]]
+                                     .drop_duplicates()
+                                     .sort_values("date")["label"].tolist())
             
-                    # раскладка: слева линия среднего, справа пирог распределения значений Y
-                    col_left, col_right = st.columns([3, 2], gap="large")
+                    # === Рендер: слева — среднее, справа — стек по top-N ===
+                    col_left_w, col_right_w = st.columns([3, 2], gap="large")
             
-                    with col_left:
-                        chart3 = (
-                            alt.Chart(out)
+                    with col_left_w:
+                        chart_avg = (
+                            alt.Chart(avg_out)
                             .mark_line(point=True, interpolate="monotone")
                             .encode(
-                                x=alt.X("label:N", title=x_title3, sort=label_order, axis=alt.Axis(labelAngle=x_angle)),
-                                y=alt.Y("avg:Q", title=f"Average of {y_col}"),
+                                x=alt.X("label:N", title=x_titleW, sort=label_order_avg, axis=alt.Axis(labelAngle=x_angleW)),
+                                y=alt.Y("avg_mentions:Q", title=f"Average mentions in {w_col}"),
                                 tooltip=[
-                                    alt.Tooltip("date:T", title=x_title3),
-                                    alt.Tooltip("avg:Q",  title="Average", format=".2f"),
-                                    alt.Tooltip("n:Q",    title="N"),
+                                    alt.Tooltip("date:T",        title=x_titleW),
+                                    alt.Tooltip("avg_mentions:Q", title="Average", format=".2f"),
                                 ],
                             )
                             .properties(height=320)
                         )
-                        st.altair_chart(chart3, use_container_width=True)
+                        st.altair_chart(chart_avg, use_container_width=True)
             
-                    with col_right:
-                        st.caption("Y value distribution (counts)")
-                        # распределение значений Y: если уникальных значений мало — по значениям; иначе — по бинам
-                        y_clean = df_y["y"].dropna()
-                        if y_clean.empty:
-                            st.info("No numeric values in Y to plot distribution.")
-                        else:
-                            nunique = y_clean.nunique()
-                            if nunique <= 12:
-                                freq = (y_clean.value_counts()
-                                                 .sort_index()
-                                                 .reset_index())
-                                freq.columns = ["value", "count"]
-                                freq["label"] = freq["value"].map(lambda v: f"{v:.2f}")
-                                color_field = "label:N"
-                                legend_title = "Y value"
-                            else:
-                                # 10 бинов по диапазону
-                                bins = 10
-                                binned = pd.cut(y_clean, bins=bins, include_lowest=True)
-                                freq = (binned.value_counts()
-                                               .sort_index()
-                                               .reset_index())
-                                freq.columns = ["bin", "count"]
-                                freq["label"] = freq["bin"].astype(str)
-                                color_field = "label:N"
-                                legend_title = "Y bin"
-            
-                            freq["pct"] = freq["count"] / freq["count"].sum()
-            
-                            pie = (
-                                alt.Chart(freq)
-                                .mark_arc()
-                                .encode(
-                                    theta=alt.Theta("count:Q"),
-                                    color=alt.Color(color_field, title=legend_title),
-                                    tooltip=[
-                                        alt.Tooltip("label:N", title=legend_title),
-                                        alt.Tooltip("count:Q", title="Count"),
-                                        alt.Tooltip("pct:Q",   title="Share", format=".0%"),
-                                    ],
-                                )
-                                .properties(height=320)
+                    with col_right_w:
+                        st.caption("Top mentions in W by period (stacked counts)")
+                        chart_stack = (
+                            alt.Chart(counts_full_w)
+                            .mark_bar()
+                            .encode(
+                                x=alt.X("label:N", title=x_titleW, sort=label_order_w, axis=alt.Axis(labelAngle=x_angleW)),
+                                y=alt.Y("count:Q", stack="zero", title="Count"),
+                                color=alt.Color("mention_top:N", title="Mention", sort=mention_order),
+                                tooltip=[
+                                    alt.Tooltip("date:T",         title=f"{x_titleW} start"),
+                                    alt.Tooltip("mention_top:N",  title="Mention"),
+                                    alt.Tooltip("count:Q",        title="Count"),
+                                ],
                             )
-                            st.altair_chart(pie, use_container_width=True)
+                            .properties(height=320)
+                        )
+                        st.altair_chart(chart_stack, use_container_width=True)
+            
+                    # Итоги под графиками
+                    st.write("— **Unique mentions (top set)**:", len([m for m in mention_order if m != "Other"]))
+                    st.write("— **All mentions observed**:", int(total_by_mention.shape[0]))
+                    st.write("— **Total mention events**:", int(total_by_mention.sum()))
+
 
             # ===== Рейтинг по преподавателям (D) =====
             st.divider()
