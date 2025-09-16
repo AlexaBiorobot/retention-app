@@ -3,6 +3,7 @@ import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import altair as alt
+import json
 
 SPREADSHEET_ID = "1fR8_Ay7jpzmPCAl6dWSCC7sWw5VJOaNpu5Zp8b78LRg"
 SHEET_NAME = "Form Responses 1"
@@ -11,9 +12,9 @@ SHEET_NAME = "Form Responses 1"
 scope = ["https://spreadsheets.google.com/feeds",
          "https://www.googleapis.com/auth/drive"]
 
-# В secrets должен быть раздел [gcp_service_account] с полями сервис-аккаунта
-creds_dict = dict(st.secrets["gcp_service_account"])
-creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+# В secrets должен быть ключ GCP_SERVICE_ACCOUNT = '''{...json...}'''
+sa_info = json.loads(st.secrets["GCP_SERVICE_ACCOUNT"])
+creds = ServiceAccountCredentials.from_json_keyfile_dict(sa_info, scope)
 client = gspread.authorize(creds)
 
 # ---- Загрузка данных ----
