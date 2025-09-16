@@ -191,86 +191,133 @@ with col2:
         )
         st.altair_chart(chart2, use_container_width=True)
 
-# ---------- НИЖНИЙ РЯД: РАСПРЕДЕЛЕНИЯ (stacked bars, без бинов) ----------
+# ---------- НИЖНИЙ РЯД: РАСПРЕДЕЛЕНИЯ (широкие stacked bars с % по значению) ----------
 st.markdown("---")
 st.subheader(f"Распределение значений (гранулярность: {granularity.lower()})")
 
-# Подписи периода для толще-столбцов (делаем ось категориальной)
-def add_bucket_label(dff: pd.DataFrame, granularity: str) -> pd.DataFrame:
-    if dff.empty:
-        return dff
-    if granularity == "День":
-        fmt = "%Y-%m-%d"
-    elif granularity == "Неделя":
-        # показываем старт недели
-        fmt = "W%W (%Y-%m-%d)"
-    else:  # "Месяц"
-        fmt = "%Y-%m"
-    dff["bucket_label"] = dff["bucket"].dt.strftime(fmt)
-    return dff
+# утилита: готовим агрегат с % и правильным порядком дат
+def prep_distribution(df_f: pd.DataFrame, value_col: str, allowed_values: list, label_title: str):
+    if df_f.empty:
+        return pd.DataFrame(), []
+    # оставляем нужные значения (например, 1..5 или 1..10)
+    d = df_f[df_f[value_col].isin(allowed_values)].copy()
+    if d.empty:
+        return pd.DataFrame(), []
+    d["val"] = d[value_col].astype(int)
+    d["val_str"] = d["val"].astype(str)
 
-df1_f = add_bucket_label(df1_f, granularity) if not df1_f.empty else df1_f
-df2_f = add_bucket_label(df2_f, granularity) if not df2_f.empty else df2_f
+    # группировка: по периоду (bucket) и значению
+    grp = (d.groupby(["bucket", "bucket_label", "val", "val_str"], as_index=False)
+             .size()
+             .rename(columns={"size": "count"}))
+
+    # общий итог по периоду
+    totals = (grp.groupby(["bucket", "bucket_label"], as_index=False)["count"]
+                .sum()
+                .rename(columns={"count": "total"}))
+
+    out = grp.merge(totals, on=["bucket", "bucket_label"], how="left")
+    out["pct"] = out["count"] / out["total"]
+    # подпись для текста на графике (показываем только сегменты ≥10%, чтобы не мусорить)
+    out["label"] = out["pct"].apply(lambda x: f"{x:.0%}" if x >= 0.10 else "")
+
+    # порядок категорий по дате
+    bucket_order = (out[["bucket", "bucket_label"]]
+                    .drop_duplicates()
+                    .sort_values("bucket")["bucket_label"].tolist())
+
+    # порядок значений в легенде
+    val_order = [str(v) for v in allowed_values]
+
+    return out, bucket_order, val_order, label_title
+
+# Подготовка данных
+# FR1: G = 1..5
+fr1_allowed = [1, 2, 3, 4, 5]
+fr1_out, fr1_bucket_order, fr1_val_order, fr1_title = prep_distribution(df1_f, "G", fr1_allowed, "G")
+
+# FR2: I = 1..10
+fr2_allowed = list(range(1, 11))
+fr2_out, fr2_bucket_order, fr2_val_order, fr2_title = prep_distribution(df2_f, "I", fr2_allowed, "I")
 
 col3, col4 = st.columns([1, 1])
 
 with col3:
     st.markdown("**Form Responses 1 — распределение G (1–5)**")
-    if df1_f.empty:
+    if fr1_out.empty:
         st.info("Нет данных (FR1).")
     else:
-        fr1_vals = [1, 2, 3, 4, 5]
-        df1_counts = df1_f[df1_f["G"].isin(fr1_vals)].copy()
-        df1_counts["G_str"] = df1_counts["G"].astype(int).astype(str)
-        sort_values = [str(v) for v in fr1_vals]
-
-        chart1_dist = (
-            alt.Chart(df1_counts)
-              .mark_bar(size=28)  # <-- толще столбцы
+        bars1 = (
+            alt.Chart(fr1_out)
+              .mark_bar(size=48)  # шире столбцы; увеличь при необходимости
               .encode(
                   x=alt.X("bucket_label:N",
                           title="Период",
-                          sort=alt.SortField(field="bucket", order="ascending")),
-                  y=alt.Y("count():Q", title="Кол-во ответов"),
-                  color=alt.Color("G_str:N", title="G", sort=sort_values),
-                  order=alt.Order("G_str:N", sort="ascending"),
+                          sort=fr1_bucket_order),
+                  y=alt.Y("sum(pct):Q",
+                          title="% ответов",
+                          axis=alt.Axis(format="%")),
+                  color=alt.Color("val_str:N",
+                                  title=fr1_title,
+                                  sort=fr1_val_order),
+                  order=alt.Order("val_str:N", sort="ascending"),
                   tooltip=[
                       alt.Tooltip("bucket_label:N", title="Период"),
-                      alt.Tooltip("G_str:N", title="G"),
-                      alt.Tooltip("count():Q", title="Кол-во ответов")
+                      alt.Tooltip("val_str:N", title=fr1_title),
+                      alt.Tooltip("count:Q", title="Кол-во"),
+                      alt.Tooltip("pct:Q", title="% внутри периода", format=".0%")
                   ]
               )
-              .properties(height=380)
         )
-        st.altair_chart(chart1_dist, use_container_width=True)
+        # подписи % внутри сегментов (по центру стека)
+        labels1 = (
+            alt.Chart(fr1_out)
+              .mark_text(baseline="middle")
+              .encode(
+                  x=alt.X("bucket_label:N", sort=fr1_bucket_order),
+                  y=alt.Y("sum(pct):Q", stack="center"),
+                  detail="val_str:N",
+                  text=alt.Text("label:N")
+              )
+        )
+        st.altair_chart((bars1 + labels1).properties(height=420), use_container_width=True)
 
 with col4:
     st.markdown("**Form Responses 2 — распределение I (1–10)**")
-    if df2_f.empty:
+    if fr2_out.empty:
         st.info("Нет данных (FR2).")
     else:
-        fr2_vals = list(range(1, 11))  # 1..10
-        df2_counts = df2_f[df2_f["I"].isin(fr2_vals)].copy()
-        df2_counts["I_str"] = df2_counts["I"].astype(int).astype(str)
-        sort_values2 = [str(v) for v in fr2_vals]
-
-        chart2_dist = (
-            alt.Chart(df2_counts)
-              .mark_bar(size=28)  # <-- толще столбцы
+        bars2 = (
+            alt.Chart(fr2_out)
+              .mark_bar(size=48)  # шире столбцы
               .encode(
                   x=alt.X("bucket_label:N",
                           title="Период",
-                          sort=alt.SortField(field="bucket", order="ascending")),
-                  y=alt.Y("count():Q", title="Кол-во ответов"),
-                  color=alt.Color("I_str:N", title="I", sort=sort_values2),
-                  order=alt.Order("I_str:N", sort="ascending"),
+                          sort=fr2_bucket_order),
+                  y=alt.Y("sum(pct):Q",
+                          title="% ответов",
+                          axis=alt.Axis(format="%")),
+                  color=alt.Color("val_str:N",
+                                  title=fr2_title,
+                                  sort=fr2_val_order),
+                  order=alt.Order("val_str:N", sort="ascending"),
                   tooltip=[
                       alt.Tooltip("bucket_label:N", title="Период"),
-                      alt.Tooltip("I_str:N", title="I"),
-                      alt.Tooltip("count():Q", title="Кол-во ответов")
+                      alt.Tooltip("val_str:N", title=fr2_title),
+                      alt.Tooltip("count:Q", title="Кол-во"),
+                      alt.Tooltip("pct:Q", title="% внутри периода", format=".0%")
                   ]
               )
-              .properties(height=380)
         )
-        st.altair_chart(chart2_dist, use_container_width=True)
+        labels2 = (
+            alt.Chart(fr2_out)
+              .mark_text(baseline="middle")
+              .encode(
+                  x=alt.X("bucket_label:N", sort=fr2_bucket_order),
+                  y=alt.Y("sum(pct):Q", stack="center"),
+                  detail="val_str:N",
+                  text=alt.Text("label:N")
+              )
+        )
+        st.altair_chart((bars2 + labels2).properties(height=420), use_container_width=True)
 
