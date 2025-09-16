@@ -191,7 +191,7 @@ with col2:
         )
         st.altair_chart(chart2, use_container_width=True)
 
-# ---------- НИЖНИЙ РЯД: РАСПРЕДЕЛЕНИЯ ----------
+# ---------- НИЖНИЙ РЯД: РАСПРЕДЕЛЕНИЯ (stacked bars: высота = count, внутри — распределение по значениям) ----------
 st.markdown("---")
 st.subheader(f"Распределение значений (гранулярность: {granularity.lower()})")
 
@@ -202,25 +202,57 @@ with col3:
     if df1_f.empty:
         st.info("Нет данных (FR1).")
     else:
-        base1 = alt.Chart(df1_f).transform_calculate(
-            course='datum.N'
+        # Строим стеки по бинам G (шаг 1). Бин-границы покажем в тултипе.
+        chart1_dist = (
+            alt.Chart(df1_f)
+              .transform_bin(
+                  as_=["G_bin", "G_bin_end"],  # создаём поля начала и конца бина
+                  field="G",
+                  bin=alt.Bin(step=1)          # при необходимости поставь step=0.5
+              )
+              .mark_bar()
+              .encode(
+                  x=alt.X("bucket:T", title="Период"),
+                  y=alt.Y("count():Q", title="Кол-во ответов"),
+                  color=alt.Color("G_bin:Q", title="G (бин)"),
+                  tooltip=[
+                      alt.Tooltip("bucket:T", title="Период"),
+                      alt.Tooltip("count():Q", title="Кол-во в бине"),
+                      alt.Tooltip("G_bin:Q", title="G от"),
+                      alt.Tooltip("G_bin_end:Q", title="G до")
+                  ]
+              )
+              .properties(height=380)
         )
-        # Boxplot по периодам
-        box1 = base1.mark_boxplot().encode(
-            x=alt.X("bucket:T", title="Период"),
-            y=alt.Y("G:Q", title="G")
+        st.altair_chart(chart1_dist, use_container_width=True)
+
+with col4:
+    st.markdown("**Form Responses 2 — распределение I**")
+    if df2_f.empty:
+        st.info("Нет данных (FR2).")
+    else:
+        chart2_dist = (
+            alt.Chart(df2_f)
+              .transform_bin(
+                  as_=["I_bin", "I_bin_end"],
+                  field="I",
+                  bin=alt.Bin(step=1)          # при необходимости поставь step=0.5
+              )
+              .mark_bar()
+              .encode(
+                  x=alt.X("bucket:T", title="Период"),
+                  y=alt.Y("count():Q", title="Кол-во ответов"),
+                  color=alt.Color("I_bin:Q", title="I (бин)"),
+                  tooltip=[
+                      alt.Tooltip("bucket:T", title="Период"),
+                      alt.Tooltip("count():Q", title="Кол-во в бине"),
+                      alt.Tooltip("I_bin:Q", title="I от"),
+                      alt.Tooltip("I_bin_end:Q", title="I до")
+                  ]
+              )
+              .properties(height=380)
         )
-        # Точки для тултипов
-        pts1 = base1.mark_circle(size=28, opacity=0.35).encode(
-            x=alt.X("bucket:T", title="Период"),
-            y=alt.Y("G:Q", title="G"),
-            tooltip=[
-                alt.Tooltip("A:T", title="Дата"),
-                alt.Tooltip("N:N", title="Курс"),
-                alt.Tooltip("G:Q", title="Значение G", format=".2f")
-            ]
-        )
-        st.altair_chart((box1 + pts1).properties(height=380), use_container_width=True)
+        st.altair_chart(chart2_dist, use_container_width=True)
 
 with col4:
     st.markdown("**Form Responses 2 — распределение I**")
