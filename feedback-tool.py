@@ -191,9 +191,26 @@ with col2:
         )
         st.altair_chart(chart2, use_container_width=True)
 
-# ---------- НИЖНИЙ РЯД: РАСПРЕДЕЛЕНИЯ (stacked bars по УСЛОВНЫМ ЗНАЧЕНИЯМ, без бинов) ----------
+# ---------- НИЖНИЙ РЯД: РАСПРЕДЕЛЕНИЯ (stacked bars, без бинов) ----------
 st.markdown("---")
 st.subheader(f"Распределение значений (гранулярность: {granularity.lower()})")
+
+# Подписи периода для толще-столбцов (делаем ось категориальной)
+def add_bucket_label(dff: pd.DataFrame, granularity: str) -> pd.DataFrame:
+    if dff.empty:
+        return dff
+    if granularity == "День":
+        fmt = "%Y-%m-%d"
+    elif granularity == "Неделя":
+        # показываем старт недели
+        fmt = "W%W (%Y-%m-%d)"
+    else:  # "Месяц"
+        fmt = "%Y-%m"
+    dff["bucket_label"] = dff["bucket"].dt.strftime(fmt)
+    return dff
+
+df1_f = add_bucket_label(df1_f, granularity) if not df1_f.empty else df1_f
+df2_f = add_bucket_label(df2_f, granularity) if not df2_f.empty else df2_f
 
 col3, col4 = st.columns([1, 1])
 
@@ -202,21 +219,23 @@ with col3:
     if df1_f.empty:
         st.info("Нет данных (FR1).")
     else:
-        # Берём только точные значения 1..5
-        df1_counts = df1_f[df1_f["G"].isin([1, 2, 3, 4, 5])].copy()
-        # Строковая категория для аккуратной сортировки легенды/стека
+        fr1_vals = [1, 2, 3, 4, 5]
+        df1_counts = df1_f[df1_f["G"].isin(fr1_vals)].copy()
         df1_counts["G_str"] = df1_counts["G"].astype(int).astype(str)
+        sort_values = [str(v) for v in fr1_vals]
 
         chart1_dist = (
             alt.Chart(df1_counts)
-              .mark_bar()
+              .mark_bar(size=28)  # <-- толще столбцы
               .encode(
-                  x=alt.X("bucket:T", title="Период"),
+                  x=alt.X("bucket_label:N",
+                          title="Период",
+                          sort=alt.SortField(field="bucket", order="ascending")),
                   y=alt.Y("count():Q", title="Кол-во ответов"),
-                  color=alt.Color("G_str:N", title="G", sort=["1","2","3","4","5"]),
+                  color=alt.Color("G_str:N", title="G", sort=sort_values),
                   order=alt.Order("G_str:N", sort="ascending"),
                   tooltip=[
-                      alt.Tooltip("bucket:T", title="Период"),
+                      alt.Tooltip("bucket_label:N", title="Период"),
                       alt.Tooltip("G_str:N", title="G"),
                       alt.Tooltip("count():Q", title="Кол-во ответов")
                   ]
@@ -226,23 +245,27 @@ with col3:
         st.altair_chart(chart1_dist, use_container_width=True)
 
 with col4:
-    st.markdown("**Form Responses 2 — распределение I (1–5)**")
+    st.markdown("**Form Responses 2 — распределение I (1–10)**")
     if df2_f.empty:
         st.info("Нет данных (FR2).")
     else:
-        df2_counts = df2_f[df2_f["I"].isin([1, 2, 3, 4, 5])].copy()
+        fr2_vals = list(range(1, 11))  # 1..10
+        df2_counts = df2_f[df2_f["I"].isin(fr2_vals)].copy()
         df2_counts["I_str"] = df2_counts["I"].astype(int).astype(str)
+        sort_values2 = [str(v) for v in fr2_vals]
 
         chart2_dist = (
             alt.Chart(df2_counts)
-              .mark_bar()
+              .mark_bar(size=28)  # <-- толще столбцы
               .encode(
-                  x=alt.X("bucket:T", title="Период"),
+                  x=alt.X("bucket_label:N",
+                          title="Период",
+                          sort=alt.SortField(field="bucket", order="ascending")),
                   y=alt.Y("count():Q", title="Кол-во ответов"),
-                  color=alt.Color("I_str:N", title="I", sort=["1","2","3","4","5"]),
+                  color=alt.Color("I_str:N", title="I", sort=sort_values2),
                   order=alt.Order("I_str:N", sort="ascending"),
                   tooltip=[
-                      alt.Tooltip("bucket:T", title="Период"),
+                      alt.Tooltip("bucket_label:N", title="Период"),
                       alt.Tooltip("I_str:N", title="I"),
                       alt.Tooltip("count():Q", title="Кол-во ответов")
                   ]
@@ -250,3 +273,4 @@ with col4:
               .properties(height=380)
         )
         st.altair_chart(chart2_dist, use_container_width=True)
+
