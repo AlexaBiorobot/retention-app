@@ -37,25 +37,43 @@ df["G"] = pd.to_numeric(df["G"], errors="coerce")
 # ---- Фильтры ----
 st.sidebar.header("Фильтры")
 
-# Курсы (N) с кнопками Выбрать все / Снять все
-courses = sorted([c for c in df["N"].dropna().unique()])
+courses_all = sorted([c for c in df["N"].dropna().unique()])
 
-# состояние выбора курсов
-if "courses_selected" not in st.session_state:
-    st.session_state["courses_selected"] = courses.copy()
+# Состояния выбора
+if "courses_include" not in st.session_state:
+    st.session_state["courses_include"] = courses_all.copy()
+if "courses_exclude" not in st.session_state:
+    st.session_state["courses_exclude"] = []
 
+# Кнопки быстрого выбора
 c1, c2 = st.sidebar.columns(2)
 if c1.button("Выбрать все"):
-    st.session_state["courses_selected"] = courses.copy()
+    st.session_state["courses_include"] = courses_all.copy()
+    st.session_state["courses_exclude"] = []
 if c2.button("Снять все"):
-    st.session_state["courses_selected"] = []
+    st.session_state["courses_include"] = []
+    st.session_state["courses_exclude"] = []
 
-selected_courses = st.sidebar.multiselect(
-    "Курсы (N)",
-    options=courses,
-    default=st.session_state["courses_selected"],
-    key="courses_selected"  # синхронизация с кнопками
+# Включить курсы
+include_selected = st.sidebar.multiselect(
+    "Курсы — включить",
+    options=courses_all,
+    default=st.session_state["courses_include"],
+    key="courses_include"
 )
+
+# Исключить курсы (из доступных лучше показывать весь список, чтобы можно было вычеркнуть прямо здесь)
+exclude_selected = st.sidebar.multiselect(
+    "Курсы — исключить",
+    options=courses_all,
+    default=st.session_state["courses_exclude"],
+    key="courses_exclude"
+)
+
+# Итоговый набор курсов
+courses_final = sorted(list(set(include_selected) - set(exclude_selected)))
+
+st.sidebar.caption(f"Итого выбрано курсов: {len(courses_final)}")
 
 # Дата фидбека (A)
 min_date = df["A"].min()
@@ -68,8 +86,8 @@ else:
 # ---- Применение фильтров ----
 df_f = df.copy()
 
-if selected_courses:
-    df_f = df_f[df_f["N"].isin(selected_courses)]
+if courses_final:
+    df_f = df_f[df_f["N"].isin(courses_final)]
 else:
     df_f = df_f.iloc[0:0]  # пусто, если ничего не выбрано
 
@@ -92,7 +110,7 @@ st.title("40 week courses")
 if agg.empty:
     st.info("Нет данных для выбранных фильтров.")
 else:
-    # нижняя граница оси Y = 4, если минимум >= 4
+    # Нижняя граница оси Y = 4, если минимум >= 4
     y_scale = None
     y_min = agg["avg_G"].min()
     y_max = agg["avg_G"].max()
