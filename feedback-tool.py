@@ -267,17 +267,11 @@ with col3:
     else:
         bars1 = (
             alt.Chart(fr1_out)
-              .mark_bar(size=48)  # шире столбцы
+              .mark_bar(size=48)
               .encode(
-                  x=alt.X("bucket_label:N",
-                          title="Период",
-                          sort=fr1_bucket_order),
-                  y=alt.Y("sum(pct):Q",
-                          title="% ответов",
-                          axis=alt.Axis(format="%")),
-                  color=alt.Color("val_str:N",
-                                  title=fr1_title,
-                                  sort=fr1_val_order),
+                  x=alt.X("bucket_label:N", title="Период", sort=fr1_bucket_order),
+                  y=alt.Y("sum(count):Q", title="Кол-во ответов"),  # <-- высота по числу ответов
+                  color=alt.Color("val_str:N", title=fr1_title, sort=fr1_val_order),
                   order=alt.Order("val_str:N", sort="ascending"),
                   tooltip=[
                       alt.Tooltip("bucket_label:N", title="Период"),
@@ -286,18 +280,9 @@ with col3:
                       alt.Tooltip("pct:Q", title="% внутри периода", format=".0%")
                   ]
               )
+              .properties(height=420)
         )
-        labels1 = (
-            alt.Chart(fr1_out)
-              .mark_text(baseline="middle")
-              .encode(
-                  x=alt.X("bucket_label:N", sort=fr1_bucket_order),
-                  y=alt.Y("sum(pct):Q", stack="center"),
-                  detail="val_str:N",
-                  text=alt.Text("label:N")
-              )
-        )
-        st.altair_chart((bars1 + labels1).properties(height=420), use_container_width=True)
+        st.altair_chart(bars1, use_container_width=True)
 
 with col4:
     st.markdown("**Form Responses 2 — распределение I (1–10)**")
@@ -306,17 +291,11 @@ with col4:
     else:
         bars2 = (
             alt.Chart(fr2_out)
-              .mark_bar(size=48)  # шире столбцы
+              .mark_bar(size=48)
               .encode(
-                  x=alt.X("bucket_label:N",
-                          title="Период",
-                          sort=fr2_bucket_order),
-                  y=alt.Y("sum(pct):Q",
-                          title="% ответов",
-                          axis=alt.Axis(format="%")),
-                  color=alt.Color("val_str:N",
-                                  title=fr2_title,
-                                  sort=fr2_val_order),
+                  x=alt.X("bucket_label:N", title="Период", sort=fr2_bucket_order),
+                  y=alt.Y("sum(count):Q", title="Кол-во ответов"),  # <-- высота по числу ответов
+                  color=alt.Color("val_str:N", title=fr2_title, sort=fr2_val_order),
                   order=alt.Order("val_str:N", sort="ascending"),
                   tooltip=[
                       alt.Tooltip("bucket_label:N", title="Период"),
@@ -325,15 +304,6 @@ with col4:
                       alt.Tooltip("pct:Q", title="% внутри периода", format=".0%")
                   ]
               )
+              .properties(height=420)
         )
-        labels2 = (
-            alt.Chart(fr2_out)
-              .mark_text(baseline="middle")
-              .encode(
-                  x=alt.X("bucket_label:N", sort=fr2_bucket_order),
-                  y=alt.Y("sum(pct):Q", stack="center"),
-                  detail="val_str:N",
-                  text=alt.Text("label:N")
-              )
-        )
-        st.altair_chart((bars2 + labels2).properties(height=420), use_container_width=True)
+        st.altair_chart(bars2, use_container_width=True)
