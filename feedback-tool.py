@@ -191,35 +191,34 @@ with col2:
         )
         st.altair_chart(chart2, use_container_width=True)
 
-# ---------- НИЖНИЙ РЯД: РАСПРЕДЕЛЕНИЯ (stacked bars: высота = count, внутри — распределение по значениям) ----------
+# ---------- НИЖНИЙ РЯД: РАСПРЕДЕЛЕНИЯ (stacked bars по УСЛОВНЫМ ЗНАЧЕНИЯМ, без бинов) ----------
 st.markdown("---")
 st.subheader(f"Распределение значений (гранулярность: {granularity.lower()})")
 
 col3, col4 = st.columns([1, 1])
 
 with col3:
-    st.markdown("**Form Responses 1 — распределение G**")
+    st.markdown("**Form Responses 1 — распределение G (1–5)**")
     if df1_f.empty:
         st.info("Нет данных (FR1).")
     else:
-        # Строим стеки по бинам G (шаг 1). Бин-границы покажем в тултипе.
+        # Берём только точные значения 1..5
+        df1_counts = df1_f[df1_f["G"].isin([1, 2, 3, 4, 5])].copy()
+        # Строковая категория для аккуратной сортировки легенды/стека
+        df1_counts["G_str"] = df1_counts["G"].astype(int).astype(str)
+
         chart1_dist = (
-            alt.Chart(df1_f)
-              .transform_bin(
-                  as_=["G_bin", "G_bin_end"],  # создаём поля начала и конца бина
-                  field="G",
-                  bin=alt.Bin(step=1)          # при необходимости поставь step=0.5
-              )
+            alt.Chart(df1_counts)
               .mark_bar()
               .encode(
                   x=alt.X("bucket:T", title="Период"),
                   y=alt.Y("count():Q", title="Кол-во ответов"),
-                  color=alt.Color("G_bin:Q", title="G (бин)"),
+                  color=alt.Color("G_str:N", title="G", sort=["1","2","3","4","5"]),
+                  order=alt.Order("G_str:N", sort="ascending"),
                   tooltip=[
                       alt.Tooltip("bucket:T", title="Период"),
-                      alt.Tooltip("count():Q", title="Кол-во в бине"),
-                      alt.Tooltip("G_bin:Q", title="G от"),
-                      alt.Tooltip("G_bin_end:Q", title="G до")
+                      alt.Tooltip("G_str:N", title="G"),
+                      alt.Tooltip("count():Q", title="Кол-во ответов")
                   ]
               )
               .properties(height=380)
@@ -227,27 +226,25 @@ with col3:
         st.altair_chart(chart1_dist, use_container_width=True)
 
 with col4:
-    st.markdown("**Form Responses 2 — распределение I**")
+    st.markdown("**Form Responses 2 — распределение I (1–5)**")
     if df2_f.empty:
         st.info("Нет данных (FR2).")
     else:
+        df2_counts = df2_f[df2_f["I"].isin([1, 2, 3, 4, 5])].copy()
+        df2_counts["I_str"] = df2_counts["I"].astype(int).astype(str)
+
         chart2_dist = (
-            alt.Chart(df2_f)
-              .transform_bin(
-                  as_=["I_bin", "I_bin_end"],
-                  field="I",
-                  bin=alt.Bin(step=1)          # при необходимости поставь step=0.5
-              )
+            alt.Chart(df2_counts)
               .mark_bar()
               .encode(
                   x=alt.X("bucket:T", title="Период"),
                   y=alt.Y("count():Q", title="Кол-во ответов"),
-                  color=alt.Color("I_bin:Q", title="I (бин)"),
+                  color=alt.Color("I_str:N", title="I", sort=["1","2","3","4","5"]),
+                  order=alt.Order("I_str:N", sort="ascending"),
                   tooltip=[
                       alt.Tooltip("bucket:T", title="Период"),
-                      alt.Tooltip("count():Q", title="Кол-во в бине"),
-                      alt.Tooltip("I_bin:Q", title="I от"),
-                      alt.Tooltip("I_bin_end:Q", title="I до")
+                      alt.Tooltip("I_str:N", title="I"),
+                      alt.Tooltip("count():Q", title="Кол-во ответов")
                   ]
               )
               .properties(height=380)
