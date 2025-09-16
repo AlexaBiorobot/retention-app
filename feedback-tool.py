@@ -253,26 +253,3 @@ with col4:
               .properties(height=380)
         )
         st.altair_chart(chart2_dist, use_container_width=True)
-
-with col4:
-    st.markdown("**Form Responses 2 — распределение I**")
-    if df2_f.empty:
-        st.info("Нет данных (FR2).")
-    else:
-        base2 = alt.Chart(df2_f).transform_calculate(
-            course='datum.M'
-        )
-        box2 = base2.mark_boxplot().encode(
-            x=alt.X("bucket:T", title="Период"),
-            y=alt.Y("I:Q", title="I")
-        )
-        pts2 = base2.mark_circle(size=28, opacity=0.35).encode(
-            x=alt.X("bucket:T", title="Период"),
-            y=alt.Y("I:Q", title="I"),
-            tooltip=[
-                alt.Tooltip("A:T", title="Дата"),
-                alt.Tooltip("M:N", title="Курс"),
-                alt.Tooltip("I:Q", title="Значение I", format=".2f")
-            ]
-        )
-        st.altair_chart((box2 + pts2).properties(height=380), use_container_width=True)
