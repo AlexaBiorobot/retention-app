@@ -17,6 +17,8 @@ sa_info = json.loads(st.secrets["GCP_SERVICE_ACCOUNT"])
 creds = ServiceAccountCredentials.from_json_keyfile_dict(sa_info, scope)
 client = gspread.authorize(creds)
 
+# ==================== УТИЛИТЫ ====================
+
 def load_sheet_as_letter_df(sheet_name: str) -> pd.DataFrame:
     ws = client.open_by_key(SPREADSHEET_ID).worksheet(sheet_name)
     values = ws.get_all_values()
@@ -26,82 +28,22 @@ def load_sheet_as_letter_df(sheet_name: str) -> pd.DataFrame:
     letters = list(string.ascii_uppercase)[:num_cols]  # A..Z
     return pd.DataFrame(values[1:], columns=letters)
 
-# ---------- ДАННЫЕ ----------
-df1 = load_sheet_as_letter_df("Form Responses 1")   # A=date, N=course, S=x, G=y
-df2 = load_sheet_as_letter_df("Form Responses 2")   # A=date, M=course, R=x, I=y
-
-# Приведение типов
-for df, date_col, x_col, y_col in [
-    (df1, "A", "S", "G"),
-    (df2, "A", "R", "I"),
-]:
-    if df.empty:
-        continue
-    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
-    df[x_col] = pd.to_numeric(df[x_col], errors="coerce")
-    df[y_col] = pd.to_numeric(df[y_col], errors="coerce")
-
-# ---------- ЕДИНЫЕ ФИЛЬТРЫ ----------
-st.sidebar.header("Фильтры")
-
-# Курсы: объединяем множества из обеих таблиц
-courses_union = sorted(list(set(
-    ([] if df1.empty else df1["N"].dropna().unique().tolist()) +
-    ([] if df2.empty else df2["M"].dropna().unique().tolist())
-)))
-
-if "courses_selected" not in st.session_state:
-    st.session_state["courses_selected"] = courses_union.copy()
-
-b1, b2 = st.sidebar.columns(2)
-if b1.button("Select all"):
-    st.session_state["courses_selected"] = courses_union.copy()
-    st.rerun()
-if b2.button("Clear"):
-    st.session_state["courses_selected"] = []
-    st.rerun()
-
-selected_courses = st.sidebar.multiselect(
-    "Курсы",
-    options=courses_union,
-    default=st.session_state["courses_selected"],
-    key="courses_selected",
-    help="Можно выбрать несколько; поиск поддерживается."
-)
-st.sidebar.caption(f"Выбрано: {len(selected_courses)} из {len(courses_union)}")
-
-# Дата: общий диапазон по двум таблицам
 def safe_minmax(dt1_min, dt1_max, dt2_min, dt2_max):
     mins = [d for d in [dt1_min, dt2_min] if pd.notna(d)]
     maxs = [d for d in [dt1_max, dt2_max] if pd.notna(d)]
     return (min(mins) if mins else pd.NaT, max(maxs) if maxs else pd.NaT)
 
-min1, max1 = (df1["A"].min(), df1["A"].max()) if not df1.empty else (pd.NaT, pd.NaT)
-min2, max2 = (df2["A"].min(), df2["A"].max()) if not df2.empty else (pd.NaT, pd.NaT)
-glob_min, glob_max = safe_minmax(min1, max1, min2, max2)
-
-if pd.isna(glob_min) or pd.isna(glob_max):
-    date_range = st.sidebar.date_input("Дата фидбека (A)", [])
-else:
-    date_range = st.sidebar.date_input("Дата фидбека (A)", [glob_min.date(), glob_max.date()])
-
-# Гранулярность для распределений
-granularity = st.sidebar.selectbox("Гранулярность для распределения", ["День", "Неделя", "Месяц", "Год"])
-
-# ширина столбиков в зависимости от гранулярности
-BAR_SIZE = {"День": 18, "Неделя": 44, "Месяц": 56, "Год": 64}
-bar_size = BAR_SIZE.get(granularity, 36)
-
-# ---------- ФУНКЦИИ ФИЛЬТРАЦИИ/АГРЕГАЦИИ ----------
 def filter_df(df: pd.DataFrame, course_col: str, date_col: str,
               selected_courses, date_range):
     if df.empty:
         return df
     dff = df.copy()
+    # по курсам
     if selected_courses:
         dff = dff[dff[course_col].isin(selected_courses)]
     else:
         return dff.iloc[0:0]  # пусто
+    # по датам
     if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
         start_dt = pd.to_datetime(date_range[0])
         end_dt = pd.to_datetime(date_range[1])
@@ -112,7 +54,8 @@ def filter_df(df: pd.DataFrame, course_col: str, date_col: str,
     return dff
 
 def apply_filters_and_aggregate(df: pd.DataFrame, course_col: str, date_col: str,
-                                x_col: str, y_col: str):
+                                x_col: str, y_col: str,
+                                selected_courses=None, date_range=None):
     dff = filter_df(df, course_col, date_col, selected_courses, date_range)
     grp = dff.dropna(subset=[x_col, y_col])
     if grp.empty:
@@ -150,7 +93,7 @@ def ensure_bucket_and_label(dff: pd.DataFrame, date_col: str, granularity: str) 
     if granularity == "День":
         fmt = "%Y-%m-%d"
     elif granularity == "Неделя":
-        fmt = "W%W (%Y-%m-%d)"  # показываем старт недели
+        fmt = "W%W (%Y-%m-%d)"  # дата старта недели
     elif granularity == "Месяц":
         fmt = "%Y-%m"
     elif granularity == "Год":
@@ -161,13 +104,121 @@ def ensure_bucket_and_label(dff: pd.DataFrame, date_col: str, granularity: str) 
     out["bucket_label"] = out["bucket"].dt.strftime(fmt)
     return out
 
-# ---------- ПРИМЕНЕНИЕ ----------
-agg1 = apply_filters_and_aggregate(df1, course_col="N", date_col="A", x_col="S", y_col="G")
-agg2 = apply_filters_and_aggregate(df2, course_col="M", date_col="A", x_col="R", y_col="I")
+def prep_distribution(df_f: pd.DataFrame, value_col: str, allowed_values: list, label_title: str):
+    """
+    Возвращает:
+      out: DataFrame со столбцами [bucket, bucket_label, val, val_str, count, total, pct]
+      bucket_order: порядок оси X по дате
+      val_order: порядок легенды по значениям
+      label_title: заголовок легенды (например, 'G' или 'I')
+    """
+    if df_f.empty:
+        return pd.DataFrame(), [], [], label_title
+    d = df_f[df_f[value_col].isin(allowed_values)].copy()
+    if d.empty:
+        return pd.DataFrame(), [], [], label_title
 
-# для распределений нужны отфильтрованные «сырые» значения
-df1_f = filter_df(df1, course_col="N", date_col="A", selected_courses=selected_courses, date_range=date_range)
-df2_f = filter_df(df2, course_col="M", date_col="A", selected_courses=selected_courses, date_range=date_range)
+    d["val"] = d[value_col].astype(int)
+    d["val_str"] = d["val"].astype(str)
+
+    grp = (d.groupby(["bucket", "bucket_label", "val", "val_str"], as_index=False)
+             .size()
+             .rename(columns={"size": "count"}))
+
+    totals = (grp.groupby(["bucket", "bucket_label"], as_index=False)["count"]
+                .sum()
+                .rename(columns={"count": "total"}))
+
+    out = grp.merge(totals, on=["bucket", "bucket_label"], how="left")
+    out["pct"] = out["count"] / out["total"]
+
+    # порядок дат строго по bucket (datetime)
+    bucket_order = (out[["bucket", "bucket_label"]]
+                    .drop_duplicates()
+                    .sort_values("bucket")["bucket_label"].tolist())
+
+    val_order = [str(v) for v in allowed_values]
+    return out, bucket_order, val_order, label_title
+
+# ==================== ДАННЫЕ ====================
+
+df1 = load_sheet_as_letter_df("Form Responses 1")   # A=date, N=course, S=x, G=y
+df2 = load_sheet_as_letter_df("Form Responses 2")   # A=date, M=course, R=x, I=y
+
+# Приведение типов
+for df, date_col, x_col, y_col in [
+    (df1, "A", "S", "G"),
+    (df2, "A", "R", "I"),
+]:
+    if df.empty:
+        continue
+    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+    df[x_col] = pd.to_numeric(df[x_col], errors="coerce")
+    df[y_col] = pd.to_numeric(df[y_col], errors="coerce")
+
+# ==================== ЕДИНЫЕ ФИЛЬТРЫ ====================
+
+st.sidebar.header("Фильтры")
+
+# Курсы: объединяем множества из обеих таблиц
+courses_union = sorted(list(set(
+    ([] if df1.empty else df1["N"].dropna().unique().tolist()) +
+    ([] if df2.empty else df2["M"].dropna().unique().tolist())
+)))
+
+if "courses_selected" not in st.session_state:
+    st.session_state["courses_selected"] = courses_union.copy()
+
+b1, b2 = st.sidebar.columns(2)
+if b1.button("Select all"):
+    st.session_state["courses_selected"] = courses_union.copy()
+    st.rerun()
+if b2.button("Clear"):
+    st.session_state["courses_selected"] = []
+    st.rerun()
+
+selected_courses = st.sidebar.multiselect(
+    "Курсы",
+    options=courses_union,
+    default=st.session_state["courses_selected"],
+    key="courses_selected",
+    help="Можно выбрать несколько; поиск поддерживается."
+)
+st.sidebar.caption(f"Выбрано: {len(selected_courses)} из {len(courses_union)}")
+
+# Дата: общий диапазон по двум таблицам
+min1, max1 = (df1["A"].min(), df1["A"].max()) if not df1.empty else (pd.NaT, pd.NaT)
+min2, max2 = (df2["A"].min(), df2["A"].max()) if not df2.empty else (pd.NaT, pd.NaT)
+glob_min, glob_max = safe_minmax(min1, max1, min2, max2)
+
+if pd.isna(glob_min) or pd.isna(glob_max):
+    date_range = st.sidebar.date_input("Дата фидбека (A)", [])
+else:
+    date_range = st.sidebar.date_input("Дата фидбека (A)", [glob_min.date(), glob_max.date()])
+
+# Гранулярность + ширина столбиков
+granularity = st.sidebar.selectbox("Гранулярность для распределения", ["День", "Неделя", "Месяц", "Год"])
+BAR_SIZE = {"День": 18, "Неделя": 44, "Месяц": 56, "Год": 64}
+bar_size = BAR_SIZE.get(granularity, 36)
+
+# ==================== ПРИМЕНЕНИЕ ФИЛЬТРОВ ====================
+
+# Верхние графики (средние)
+agg1 = apply_filters_and_aggregate(df1, course_col="N", date_col="A",
+                                   x_col="S", y_col="G",
+                                   selected_courses=selected_courses,
+                                   date_range=date_range)
+
+agg2 = apply_filters_and_aggregate(df2, course_col="M", date_col="A",
+                                   x_col="R", y_col="I",
+                                   selected_courses=selected_courses,
+                                   date_range=date_range)
+
+# Нижние распределения: «сырые» значения + bucket/bucket_label
+df1_f = filter_df(df1, course_col="N", date_col="A",
+                  selected_courses=selected_courses, date_range=date_range)
+df2_f = filter_df(df2, course_col="M", date_col="A",
+                  selected_courses=selected_courses, date_range=date_range)
 
 if not df1_f.empty:
     df1_f = df1_f.dropna(subset=["A", "G"])
@@ -179,10 +230,19 @@ if not df2_f.empty:
     df2_f = add_bucket(df2_f, "A", granularity)
     df2_f = ensure_bucket_and_label(df2_f, "A", granularity)
 
-# ---------- ВЕРХНИЙ РЯД: СРЕДНИЕ ----------
+# Готовим данные для нижних графиков
+fr1_allowed = [1, 2, 3, 4, 5]
+fr1_out, fr1_bucket_order, fr1_val_order, fr1_title = prep_distribution(df1_f, "G", fr1_allowed, "G")
+
+fr2_allowed = list(range(1, 11))
+fr2_out, fr2_bucket_order, fr2_val_order, fr2_title = prep_distribution(df2_f, "I", fr2_allowed, "I")
+
+# ==================== ОТРИСОВКА ====================
+
 st.title("40 week courses")
 
 col1, col2 = st.columns([1, 1])
+
 with col1:
     st.subheader("Form Responses 1 — Average by S")
     if agg1.empty:
@@ -229,20 +289,6 @@ with col2:
 st.markdown("---")
 st.subheader(f"Распределение значений (гранулярность: {granularity.lower()})")
 
-# если нужно, гарантируем bucket/bucket_label (на случай, если выше что-то поменялось)
-if not df1_f.empty:
-    df1_f = ensure_bucket_and_label(df1_f, "A", granularity)
-if not df2_f.empty:
-    df2_f = ensure_bucket_and_label(df2_f, "A", granularity)
-
-# подготовка данных (если уже посчитаны раньше — оставь как есть)
-fr1_allowed = [1, 2, 3, 4, 5]
-fr1_out, fr1_bucket_order, fr1_val_order, fr1_title = prep_distribution(df1_f, "G", fr1_allowed, "G")
-
-fr2_allowed = list(range(1, 11))
-fr2_out, fr2_bucket_order, fr2_val_order, fr2_title = prep_distribution(df2_f, "I", fr2_allowed, "I")
-
-# >>> ВОТ ЭТОЙ СТРОКИ НЕ ХВАТАЛО <<<
 col3, col4 = st.columns([1, 1])
 
 with col3:
@@ -252,12 +298,12 @@ with col3:
     else:
         bars1 = (
             alt.Chart(fr1_out)
-              .mark_bar(size=bar_size)  # bar_size зависит от гранулярности
+              .mark_bar(size=bar_size)
               .encode(
                   x=alt.X("bucket_label:N", title="Период", sort=fr1_bucket_order),
                   y=alt.Y("sum(count):Q", title="Кол-во ответов"),
                   color=alt.Color("val_str:N", title=fr1_title, sort=fr1_val_order),
-                  order=alt.Order("val:Q", sort="ascending"),  # порядок стека по числу
+                  order=alt.Order("val:Q", sort="ascending"),
                   tooltip=[
                       alt.Tooltip("bucket_label:N", title="Период"),
                       alt.Tooltip("val_str:N", title=fr1_title),
@@ -292,5 +338,3 @@ with col4:
               .properties(height=420)
         )
         st.altair_chart(bars2, use_container_width=True)
-
-
