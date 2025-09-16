@@ -16,9 +16,9 @@ sa_info = json.loads(st.secrets["GCP_SERVICE_ACCOUNT"])
 creds = ServiceAccountCredentials.from_json_keyfile_dict(sa_info, scope)
 client = gspread.authorize(creds)
 
-# ---- Загрузка данных (без заголовков, присваиваем буквы колонкам) ----
+# ---- Загрузка данных (берём все значения и назначаем буквенные заголовки) ----
 ws = client.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
-values = ws.get_all_values()  # 2D-список: первая строка — заголовки/данные
+values = ws.get_all_values()
 
 if not values or len(values) < 2:
     st.warning("Недостаточно данных на листе.")
@@ -26,7 +26,7 @@ if not values or len(values) < 2:
 
 num_cols = len(values[0])
 letters = list(string.ascii_uppercase)[:num_cols]  # ["A","B","C",...]
-df = pd.DataFrame(values[1:], columns=letters)     # игнорируем текстовые заголовки, используем буквы
+df = pd.DataFrame(values[1:], columns=letters)
 
 # ---- Приведение типов ----
 # A — дата фидбека, N — курс, S — неделя, G — оценка
@@ -37,11 +37,15 @@ df["G"] = pd.to_numeric(df["G"], errors="coerce")
 # ---- Фильтры ----
 st.sidebar.header("Фильтры")
 
-# Курс (N)
+# 1) Курс (N): multiselect
 courses = sorted([c for c in df["N"].dropna().unique()])
-selected_courses = st.sidebar.multiselect("Курс (N)", courses, default=courses if courses else [])
+selected_courses = st.sidebar.multiselect(
+    "Курсы (N)",
+    options=courses,
+    default=courses
+)
 
-# Дата фидбека (A)
+# 2) Дата фидбека (A)
 min_date = df["A"].min()
 max_date = df["A"].max()
 if pd.isna(min_date) or pd.isna(max_date):
@@ -49,10 +53,14 @@ if pd.isna(min_date) or pd.isna(max_date):
 else:
     date_range = st.sidebar.date_input("Дата фидбека (A)", [min_date.date(), max_date.date()])
 
-# Применение фильтров (аккуратно, если дата не выбрана)
+# ---- Применение фильтров ----
 df_f = df.copy()
+
 if selected_courses:
     df_f = df_f[df_f["N"].isin(selected_courses)]
+else:
+    # Если ничего не выбрано — отдаём пустой результат
+    df_f = df_f.iloc[0:0]
 
 if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
     start_dt = pd.to_datetime(date_range[0])
@@ -68,15 +76,26 @@ agg = (
        .sort_values("S")
 )
 
-# ---- График ----
 st.title("40 week courses")
-chart = (
-    alt.Chart(agg)
-      .mark_line(point=True)
-      .encode(
-          x=alt.X("S:Q", title="S"),
-          y=alt.Y("avg_G:Q", title="Average G"),
-          tooltip=["S", "avg_G"]
-      )
-)
-st.altair_chart(chart, use_container_width=True)
+
+if agg.empty:
+    st.info("Нет данных для выбранных фильтров.")
+else:
+    # Если минимум >= 4, фиксируем нижнюю границу на 4, иначе даём автодиапазон
+    y_scale = None
+    y_min = agg["avg_G"].min()
+    y_max = agg["avg_G"].max()
+    if pd.notna(y_min) and y_min >= 4:
+        y_scale = alt.Scale(domain=[4, float(y_max)])
+
+    chart = (
+        alt.Chart(agg)
+          .mark_line(point=True)
+          .encode(
+              x=alt.X("S:Q", title="S"),
+              y=alt.Y("avg_G:Q", title="Average G", scale=y_scale),
+              tooltip=[alt.Tooltip("S:Q", title="S"),
+                       alt.Tooltip("avg_G:Q", title="Average G", format=".2f")]
+          )
+    )
+    st.altair_chart(chart, use_container_width=True)
