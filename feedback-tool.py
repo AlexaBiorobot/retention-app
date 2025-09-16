@@ -5,6 +5,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 import altair as alt
 import json
 import string
+from datetime import datetime
 
 SPREADSHEET_ID = "1fR8_Ay7jpzmPCAl6dWSCC7sWw5VJOaNpu5Zp8b78LRg"
 SHEET_NAME = "Form Responses 1"
@@ -37,44 +38,27 @@ df["G"] = pd.to_numeric(df["G"], errors="coerce")
 # ==================== ФИЛЬТРЫ ====================
 st.sidebar.header("Фильтры")
 
-# --- Курс (N): один выпадающий список с поиском и Select all внутри ---
+# --- Курсы (N): дефолтный multiselect + Select all / Clear ---
 courses_all = sorted([c for c in df["N"].dropna().unique()])
 
 if "courses_selected" not in st.session_state:
     st.session_state["courses_selected"] = courses_all.copy()
 
-label_text = f"Курсы (N): {len(st.session_state['courses_selected'])}/{len(courses_all)} выбрано"
-with st.sidebar.popover(label_text):
-    # Поиск по значениям
-    search = st.text_input("Search value", placeholder="Начните вводить название курса...")
-    if search:
-        filtered = [c for c in courses_all if search.lower() in str(c).lower()]
-    else:
-        filtered = courses_all
+b1, b2 = st.sidebar.columns(2)
+if b1.button("Select all"):
+    st.session_state["courses_selected"] = courses_all.copy()
+    st.rerun()
+if b2.button("Clear"):
+    st.session_state["courses_selected"] = []
+    st.rerun()
 
-    # Чекбокс Select all применим к текущему отфильтрованному списку
-    all_in_selected = set(filtered).issubset(set(st.session_state["courses_selected"]))
-    select_all = st.checkbox("Select all", value=all_in_selected)
-
-    # Мультивыбор по отфильтрованному списку
-    selected_in_filtered = st.multiselect(
-        label="Выбор курсов",
-        options=filtered,
-        default=[c for c in filtered if c in st.session_state["courses_selected"]],
-        label_visibility="collapsed",
-        placeholder="Выберите курсы…"
-    )
-
-    # Логика обновления общего набора выбранных курсов
-    current = set(st.session_state["courses_selected"])
-    if select_all:
-        # Добавляем все из filtered
-        current = current.union(filtered)
-    else:
-        # Сохраняем выбор вне filtered и заменяем внутри filtered на то, что отмечено
-        current = (current - set(filtered)).union(selected_in_filtered)
-
-    st.session_state["courses_selected"] = sorted(current)
+selected_courses = st.sidebar.multiselect(
+    "Курсы (N)",
+    options=courses_all,
+    default=st.session_state["courses_selected"],
+    key="courses_selected",
+    help="Начни печатать для поиска. Можно выбрать несколько."
+)
 
 # --- Дата фидбека (A) ---
 min_date = df["A"].min()
@@ -82,20 +66,28 @@ max_date = df["A"].max()
 if pd.isna(min_date) or pd.isna(max_date):
     date_range = st.sidebar.date_input("Дата фидбека (A)", [])
 else:
-    date_range = st.sidebar.date_input("Дата фидбека (A)", [min_date.date(), max_date.date()])
+    date_range = st.sidebar.date_input(
+        "Дата фидбека (A)",
+        [min_date.date(), max_date.date()]
+    )
 
 # ==================== ПРИМЕНЕНИЕ ФИЛЬТРОВ ====================
 df_f = df.copy()
 
-if st.session_state["courses_selected"]:
-    df_f = df_f[df_f["N"].isin(st.session_state["courses_selected"])]
+# по курсам
+if selected_courses:
+    df_f = df_f[df_f["N"].isin(selected_courses)]
 else:
-    df_f = df_f.iloc[0:0]  # пустой df, если ничего не выбрано
+    df_f = df_f.iloc[0:0]  # пусто, если ничего не выбрано
 
+# по датам (учитываем, если пользователь выбрал одну дату)
 if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
     start_dt = pd.to_datetime(date_range[0])
     end_dt = pd.to_datetime(date_range[1])
     df_f = df_f[(df_f["A"] >= start_dt) & (df_f["A"] <= end_dt)]
+elif isinstance(date_range, (list, tuple)) and len(date_range) == 1:
+    only_dt = pd.to_datetime(date_range[0])
+    df_f = df_f[df_f["A"].dt.date == only_dt.date()]
 
 # ==================== АГРЕГАЦИЯ ====================
 grp = df_f.dropna(subset=["S", "G"])
@@ -117,7 +109,7 @@ else:
           .mark_line(point=True)
           .encode(
               x=alt.X("S:Q", title="S"),
-              y=alt.Y("avg_G:Q", title="Average G"),  # динамическая шкала по данным
+              y=alt.Y("avg_G:Q", title="Average G"),  # динамическая шкала
               tooltip=[
                   alt.Tooltip("S:Q", title="S"),
                   alt.Tooltip("avg_G:Q", title="Average G", format=".2f"),
