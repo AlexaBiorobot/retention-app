@@ -112,19 +112,12 @@ st.title("40 week courses")
 if agg.empty:
     st.info("Нет данных для выбранных фильтров.")
 else:
-    # Нижняя граница оси Y = 4, если минимум >= 4 (убираем «пустоту» снизу)
-    y_scale = None
-    y_min = float(agg["avg_G"].min())
-    y_max = float(agg["avg_G"].max())
-    if y_min >= 4:
-        y_scale = alt.Scale(domain=[4, max(4.0, y_max)])
-
     chart = (
         alt.Chart(agg)
           .mark_line(point=True)
           .encode(
               x=alt.X("S:Q", title="S"),
-              y=alt.Y("avg_G:Q", title="Average G", scale=y_scale),
+              y=alt.Y("avg_G:Q", title="Average G"),  # динамическая шкала по данным
               tooltip=[
                   alt.Tooltip("S:Q", title="S"),
                   alt.Tooltip("avg_G:Q", title="Average G", format=".2f"),
