@@ -229,6 +229,22 @@ with col2:
 st.markdown("---")
 st.subheader(f"Распределение значений (гранулярность: {granularity.lower()})")
 
+# если нужно, гарантируем bucket/bucket_label (на случай, если выше что-то поменялось)
+if not df1_f.empty:
+    df1_f = ensure_bucket_and_label(df1_f, "A", granularity)
+if not df2_f.empty:
+    df2_f = ensure_bucket_and_label(df2_f, "A", granularity)
+
+# подготовка данных (если уже посчитаны раньше — оставь как есть)
+fr1_allowed = [1, 2, 3, 4, 5]
+fr1_out, fr1_bucket_order, fr1_val_order, fr1_title = prep_distribution(df1_f, "G", fr1_allowed, "G")
+
+fr2_allowed = list(range(1, 11))
+fr2_out, fr2_bucket_order, fr2_val_order, fr2_title = prep_distribution(df2_f, "I", fr2_allowed, "I")
+
+# >>> ВОТ ЭТОЙ СТРОКИ НЕ ХВАТАЛО <<<
+col3, col4 = st.columns([1, 1])
+
 with col3:
     st.markdown("**Form Responses 1 — распределение G (1–5)**")
     if fr1_out.empty:
@@ -236,20 +252,20 @@ with col3:
     else:
         bars1 = (
             alt.Chart(fr1_out)
-            .mark_bar(size=bar_size)
-            .encode(
-                x=alt.X("bucket_label:N", title="Период", sort=fr1_bucket_order),
-                y=alt.Y("sum(count):Q", title="Кол-во ответов"),
-                color=alt.Color("val_str:N", title=fr1_title, sort=fr1_val_order),
-                order=alt.Order("val:Q", sort="ascending"),
-                tooltip=[
-                    alt.Tooltip("bucket_label:N", title="Период"),
-                    alt.Tooltip("val_str:N", title=fr1_title),
-                    alt.Tooltip("count:Q", title="Кол-во"),
-                    alt.Tooltip("pct:Q", title="% внутри периода", format=".0%")
-                ],
-            )
-            .properties(height=420)
+              .mark_bar(size=bar_size)  # bar_size зависит от гранулярности
+              .encode(
+                  x=alt.X("bucket_label:N", title="Период", sort=fr1_bucket_order),
+                  y=alt.Y("sum(count):Q", title="Кол-во ответов"),
+                  color=alt.Color("val_str:N", title=fr1_title, sort=fr1_val_order),
+                  order=alt.Order("val:Q", sort="ascending"),  # порядок стека по числу
+                  tooltip=[
+                      alt.Tooltip("bucket_label:N", title="Период"),
+                      alt.Tooltip("val_str:N", title=fr1_title),
+                      alt.Tooltip("count:Q", title="Кол-во"),
+                      alt.Tooltip("pct:Q", title="% внутри периода", format=".0%")
+                  ]
+              )
+              .properties(height=420)
         )
         st.altair_chart(bars1, use_container_width=True)
 
@@ -260,20 +276,21 @@ with col4:
     else:
         bars2 = (
             alt.Chart(fr2_out)
-            .mark_bar(size=bar_size)
-            .encode(
-                x=alt.X("bucket_label:N", title="Период", sort=fr2_bucket_order),
-                y=alt.Y("sum(count):Q", title="Кол-во ответов"),
-                color=alt.Color("val_str:N", title=fr2_title, sort=fr2_val_order),
-                order=alt.Order("val:Q", sort="ascending"),
-                tooltip=[
-                    alt.Tooltip("bucket_label:N", title="Период"),
-                    alt.Tooltip("val_str:N", title=fr2_title),
-                    alt.Tooltip("count:Q", title="Кол-во"),
-                    alt.Tooltip("pct:Q", title="% внутри периода", format=".0%")
-                ],
-            )
-            .properties(height=420)
+              .mark_bar(size=bar_size)
+              .encode(
+                  x=alt.X("bucket_label:N", title="Период", sort=fr2_bucket_order),
+                  y=alt.Y("sum(count):Q", title="Кол-во ответов"),
+                  color=alt.Color("val_str:N", title=fr2_title, sort=fr2_val_order),
+                  order=alt.Order("val:Q", sort="ascending"),
+                  tooltip=[
+                      alt.Tooltip("bucket_label:N", title="Период"),
+                      alt.Tooltip("val_str:N", title=fr2_title),
+                      alt.Tooltip("count:Q", title="Кол-во"),
+                      alt.Tooltip("pct:Q", title="% внутри периода", format=".0%")
+                  ]
+              )
+              .properties(height=420)
         )
         st.altair_chart(bars2, use_container_width=True)
+
 
