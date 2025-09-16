@@ -86,7 +86,11 @@ else:
     date_range = st.sidebar.date_input("Дата фидбека (A)", [glob_min.date(), glob_max.date()])
 
 # Гранулярность для распределений
-granularity = st.sidebar.selectbox("Гранулярность для распределения", ["День", "Неделя", "Месяц"])
+granularity = st.sidebar.selectbox("Гранулярность для распределения", ["День", "Неделя", "Месяц", "Год"])
+
+# ширина столбиков в зависимости от гранулярности
+BAR_SIZE = {"День": 18, "Неделя": 44, "Месяц": 56, "Год": 64}
+bar_size = BAR_SIZE.get(granularity, 36)
 
 # ---------- ФУНКЦИИ ФИЛЬТРАЦИИ/АГРЕГАЦИИ ----------
 def filter_df(df: pd.DataFrame, course_col: str, date_col: str,
@@ -126,10 +130,13 @@ def add_bucket(dff: pd.DataFrame, date_col: str, granularity: str) -> pd.DataFra
     if granularity == "День":
         out["bucket"] = out[date_col].dt.floor("D")
     elif granularity == "Неделя":
-        # понедельник недели
-        out["bucket"] = out[date_col].dt.to_period("W-MON").dt.start_time
-    else:  # "Месяц"
+        out["bucket"] = out[date_col].dt.to_period("W-MON").dt.start_time  # старт недели (Пн)
+    elif granularity == "Месяц":
         out["bucket"] = out[date_col].dt.to_period("M").dt.to_timestamp()
+    elif granularity == "Год":
+        out["bucket"] = out[date_col].dt.to_period("Y").dt.to_timestamp()
+    else:
+        out["bucket"] = out[date_col].dt.floor("D")
     return out
 
 def ensure_bucket_and_label(dff: pd.DataFrame, date_col: str, granularity: str) -> pd.DataFrame:
@@ -137,16 +144,20 @@ def ensure_bucket_and_label(dff: pd.DataFrame, date_col: str, granularity: str) 
     if dff.empty:
         return dff.copy()
     out = dff.copy()
-    # bucket уже создаём выше через add_bucket; но на всякий случай пересоздадим, если его нет
     if "bucket" not in out.columns or not pd.api.types.is_datetime64_any_dtype(out["bucket"]):
         out = add_bucket(out, date_col, granularity)
-    # метка периода для оси X
+
     if granularity == "День":
         fmt = "%Y-%m-%d"
     elif granularity == "Неделя":
-        fmt = "W%W (%Y-%m-%d)"  # старт недели
-    else:
+        fmt = "W%W (%Y-%m-%d)"  # показываем старт недели
+    elif granularity == "Месяц":
         fmt = "%Y-%m"
+    elif granularity == "Год":
+        fmt = "%Y"
+    else:
+        fmt = "%Y-%m-%d"
+
     out["bucket_label"] = out["bucket"].dt.strftime(fmt)
     return out
 
@@ -267,7 +278,7 @@ with col3:
     else:
         bars1 = (
             alt.Chart(fr1_out)
-              .mark_bar(size=48)
+              .mark_bar(size=bar_size)
               .encode(
                   x=alt.X("bucket_label:N", title="Период", sort=fr1_bucket_order),
                   y=alt.Y("sum(count):Q", title="Кол-во ответов"),  # <-- высота по числу ответов
@@ -291,7 +302,7 @@ with col4:
     else:
         bars2 = (
             alt.Chart(fr2_out)
-              .mark_bar(size=48)
+              .mark_bar(size=bar_size)
               .encode(
                   x=alt.X("bucket_label:N", title="Период", sort=fr2_bucket_order),
                   y=alt.Y("sum(count):Q", title="Кол-во ответов"),  # <-- высота по числу ответов
