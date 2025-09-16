@@ -121,6 +121,8 @@ def apply_filters_and_aggregate(df: pd.DataFrame, course_col: str, date_col: str
 
 def add_bucket(dff: pd.DataFrame, date_col: str, granularity: str) -> pd.DataFrame:
     out = dff.copy()
+    if out.empty:
+        return out
     if granularity == "День":
         out["bucket"] = out[date_col].dt.floor("D")
     elif granularity == "Неделя":
@@ -128,6 +130,24 @@ def add_bucket(dff: pd.DataFrame, date_col: str, granularity: str) -> pd.DataFra
         out["bucket"] = out[date_col].dt.to_period("W-MON").dt.start_time
     else:  # "Месяц"
         out["bucket"] = out[date_col].dt.to_period("M").dt.to_timestamp()
+    return out
+
+def ensure_bucket_and_label(dff: pd.DataFrame, date_col: str, granularity: str) -> pd.DataFrame:
+    """Гарантируем наличие столбцов bucket (datetime) и bucket_label (подпись)."""
+    if dff.empty:
+        return dff.copy()
+    out = dff.copy()
+    # bucket уже создаём выше через add_bucket; но на всякий случай пересоздадим, если его нет
+    if "bucket" not in out.columns or not pd.api.types.is_datetime64_any_dtype(out["bucket"]):
+        out = add_bucket(out, date_col, granularity)
+    # метка периода для оси X
+    if granularity == "День":
+        fmt = "%Y-%m-%d"
+    elif granularity == "Неделя":
+        fmt = "W%W (%Y-%m-%d)"  # старт недели
+    else:
+        fmt = "%Y-%m"
+    out["bucket_label"] = out["bucket"].dt.strftime(fmt)
     return out
 
 # ---------- ПРИМЕНЕНИЕ ----------
@@ -141,9 +161,12 @@ df2_f = filter_df(df2, course_col="M", date_col="A", selected_courses=selected_c
 if not df1_f.empty:
     df1_f = df1_f.dropna(subset=["A", "G"])
     df1_f = add_bucket(df1_f, "A", granularity)
+    df1_f = ensure_bucket_and_label(df1_f, "A", granularity)
+
 if not df2_f.empty:
     df2_f = df2_f.dropna(subset=["A", "I"])
     df2_f = add_bucket(df2_f, "A", granularity)
+    df2_f = ensure_bucket_and_label(df2_f, "A", granularity)
 
 # ---------- ВЕРХНИЙ РЯД: СРЕДНИЕ ----------
 st.title("40 week courses")
@@ -198,35 +221,30 @@ st.subheader(f"Распределение значений (гранулярно
 # утилита: готовим агрегат с % и правильным порядком дат
 def prep_distribution(df_f: pd.DataFrame, value_col: str, allowed_values: list, label_title: str):
     if df_f.empty:
-        return pd.DataFrame(), []
-    # оставляем нужные значения (например, 1..5 или 1..10)
+        return pd.DataFrame(), [], [], label_title
     d = df_f[df_f[value_col].isin(allowed_values)].copy()
     if d.empty:
-        return pd.DataFrame(), []
+        return pd.DataFrame(), [], [], label_title
+
     d["val"] = d[value_col].astype(int)
     d["val_str"] = d["val"].astype(str)
 
-    # группировка: по периоду (bucket) и значению
     grp = (d.groupby(["bucket", "bucket_label", "val", "val_str"], as_index=False)
              .size()
              .rename(columns={"size": "count"}))
 
-    # общий итог по периоду
     totals = (grp.groupby(["bucket", "bucket_label"], as_index=False)["count"]
                 .sum()
                 .rename(columns={"count": "total"}))
 
     out = grp.merge(totals, on=["bucket", "bucket_label"], how="left")
     out["pct"] = out["count"] / out["total"]
-    # подпись для текста на графике (показываем только сегменты ≥10%, чтобы не мусорить)
     out["label"] = out["pct"].apply(lambda x: f"{x:.0%}" if x >= 0.10 else "")
 
-    # порядок категорий по дате
     bucket_order = (out[["bucket", "bucket_label"]]
                     .drop_duplicates()
                     .sort_values("bucket")["bucket_label"].tolist())
 
-    # порядок значений в легенде
     val_order = [str(v) for v in allowed_values]
 
     return out, bucket_order, val_order, label_title
@@ -249,7 +267,7 @@ with col3:
     else:
         bars1 = (
             alt.Chart(fr1_out)
-              .mark_bar(size=48)  # шире столбцы; увеличь при необходимости
+              .mark_bar(size=48)  # шире столбцы
               .encode(
                   x=alt.X("bucket_label:N",
                           title="Период",
@@ -269,7 +287,6 @@ with col3:
                   ]
               )
         )
-        # подписи % внутри сегментов (по центру стека)
         labels1 = (
             alt.Chart(fr1_out)
               .mark_text(baseline="middle")
@@ -320,4 +337,3 @@ with col4:
               )
         )
         st.altair_chart((bars2 + labels2).properties(height=420), use_container_width=True)
-
