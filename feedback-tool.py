@@ -85,21 +85,19 @@ if pd.isna(glob_min) or pd.isna(glob_max):
 else:
     date_range = st.sidebar.date_input("Дата фидбека (A)", [glob_min.date(), glob_max.date()])
 
-# ---------- Применение фильтров и агрегация ----------
-def apply_filters_and_aggregate(df: pd.DataFrame, course_col: str, date_col: str,
-                                x_col: str, y_col: str,
-                                selected_courses, date_range):
-    if df.empty:
-        return pd.DataFrame(columns=[x_col, "avg_y", "count"])
-    dff = df.copy()
+# Гранулярность для распределений
+granularity = st.sidebar.selectbox("Гранулярность для распределения", ["День", "Неделя", "Месяц"])
 
-    # по курсам
+# ---------- ФУНКЦИИ ФИЛЬТРАЦИИ/АГРЕГАЦИИ ----------
+def filter_df(df: pd.DataFrame, course_col: str, date_col: str,
+              selected_courses, date_range):
+    if df.empty:
+        return df
+    dff = df.copy()
     if selected_courses:
         dff = dff[dff[course_col].isin(selected_courses)]
     else:
-        return pd.DataFrame(columns=[x_col, "avg_y", "count"])
-
-    # по датам
+        return dff.iloc[0:0]  # пусто
     if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
         start_dt = pd.to_datetime(date_range[0])
         end_dt = pd.to_datetime(date_range[1])
@@ -107,33 +105,52 @@ def apply_filters_and_aggregate(df: pd.DataFrame, course_col: str, date_col: str
     elif isinstance(date_range, (list, tuple)) and len(date_range) == 1:
         only_dt = pd.to_datetime(date_range[0])
         dff = dff[dff[date_col].dt.date == only_dt.date()]
+    return dff
 
+def apply_filters_and_aggregate(df: pd.DataFrame, course_col: str, date_col: str,
+                                x_col: str, y_col: str):
+    dff = filter_df(df, course_col, date_col, selected_courses, date_range)
     grp = dff.dropna(subset=[x_col, y_col])
     if grp.empty:
         return pd.DataFrame(columns=[x_col, "avg_y", "count"])
-
     agg = (grp.groupby(x_col, as_index=False)
              .agg(avg_y=(y_col, "mean"),
                   count=(y_col, "size"))
              .sort_values(x_col))
     return agg
 
-agg1 = apply_filters_and_aggregate(df1, course_col="N", date_col="A",
-                                   x_col="S", y_col="G",
-                                   selected_courses=selected_courses,
-                                   date_range=date_range)
+def add_bucket(dff: pd.DataFrame, date_col: str, granularity: str) -> pd.DataFrame:
+    out = dff.copy()
+    if granularity == "День":
+        out["bucket"] = out[date_col].dt.floor("D")
+    elif granularity == "Неделя":
+        # понедельник недели
+        out["bucket"] = out[date_col].dt.to_period("W-MON").dt.start_time
+    else:  # "Месяц"
+        out["bucket"] = out[date_col].dt.to_period("M").dt.to_timestamp()
+    return out
 
-agg2 = apply_filters_and_aggregate(df2, course_col="M", date_col="A",
-                                   x_col="R", y_col="I",
-                                   selected_courses=selected_courses,
-                                   date_range=date_range)
+# ---------- ПРИМЕНЕНИЕ ----------
+agg1 = apply_filters_and_aggregate(df1, course_col="N", date_col="A", x_col="S", y_col="G")
+agg2 = apply_filters_and_aggregate(df2, course_col="M", date_col="A", x_col="R", y_col="I")
 
-# ---------- Отрисовка (шире) ----------
+# для распределений нужны отфильтрованные «сырые» значения
+df1_f = filter_df(df1, course_col="N", date_col="A", selected_courses=selected_courses, date_range=date_range)
+df2_f = filter_df(df2, course_col="M", date_col="A", selected_courses=selected_courses, date_range=date_range)
+
+if not df1_f.empty:
+    df1_f = df1_f.dropna(subset=["A", "G"])
+    df1_f = add_bucket(df1_f, "A", granularity)
+if not df2_f.empty:
+    df2_f = df2_f.dropna(subset=["A", "I"])
+    df2_f = add_bucket(df2_f, "A", granularity)
+
+# ---------- ВЕРХНИЙ РЯД: СРЕДНИЕ ----------
 st.title("40 week courses")
 
-col1, col2 = st.columns([1, 1])  # на wide-лейауте оба графика широкие
+col1, col2 = st.columns([1, 1])
 with col1:
-    st.subheader("Form Responses 1")
+    st.subheader("Form Responses 1 — Average by S")
     if agg1.empty:
         st.info("Нет данных для выбранных фильтров.")
     else:
@@ -154,7 +171,7 @@ with col1:
         st.altair_chart(chart1, use_container_width=True)
 
 with col2:
-    st.subheader("Form Responses 2")
+    st.subheader("Form Responses 2 — Average by R")
     if agg2.empty:
         st.info("Нет данных для выбранных фильтров.")
     else:
@@ -173,3 +190,57 @@ with col2:
               .properties(height=380)
         )
         st.altair_chart(chart2, use_container_width=True)
+
+# ---------- НИЖНИЙ РЯД: РАСПРЕДЕЛЕНИЯ ----------
+st.markdown("---")
+st.subheader(f"Распределение значений (гранулярность: {granularity.lower()})")
+
+col3, col4 = st.columns([1, 1])
+
+with col3:
+    st.markdown("**Form Responses 1 — распределение G**")
+    if df1_f.empty:
+        st.info("Нет данных (FR1).")
+    else:
+        base1 = alt.Chart(df1_f).transform_calculate(
+            course='datum.N'
+        )
+        # Boxplot по периодам
+        box1 = base1.mark_boxplot().encode(
+            x=alt.X("bucket:T", title="Период"),
+            y=alt.Y("G:Q", title="G")
+        )
+        # Точки для тултипов
+        pts1 = base1.mark_circle(size=28, opacity=0.35).encode(
+            x=alt.X("bucket:T", title="Период"),
+            y=alt.Y("G:Q", title="G"),
+            tooltip=[
+                alt.Tooltip("A:T", title="Дата"),
+                alt.Tooltip("N:N", title="Курс"),
+                alt.Tooltip("G:Q", title="Значение G", format=".2f")
+            ]
+        )
+        st.altair_chart((box1 + pts1).properties(height=380), use_container_width=True)
+
+with col4:
+    st.markdown("**Form Responses 2 — распределение I**")
+    if df2_f.empty:
+        st.info("Нет данных (FR2).")
+    else:
+        base2 = alt.Chart(df2_f).transform_calculate(
+            course='datum.M'
+        )
+        box2 = base2.mark_boxplot().encode(
+            x=alt.X("bucket:T", title="Период"),
+            y=alt.Y("I:Q", title="I")
+        )
+        pts2 = base2.mark_circle(size=28, opacity=0.35).encode(
+            x=alt.X("bucket:T", title="Период"),
+            y=alt.Y("I:Q", title="I"),
+            tooltip=[
+                alt.Tooltip("A:T", title="Дата"),
+                alt.Tooltip("M:N", title="Курс"),
+                alt.Tooltip("I:Q", title="Значение I", format=".2f")
+            ]
+        )
+        st.altair_chart((box2 + pts2).properties(height=380), use_container_width=True)
