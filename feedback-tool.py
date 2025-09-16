@@ -276,23 +276,23 @@ with col3:
     if fr1_out.empty:
         st.info("Нет данных (FR1).")
     else:
-        bars1 = (
-            alt.Chart(fr1_out)
-              .mark_bar(size=bar_size)
-              .encode(
-                  x=alt.X("bucket_label:N", title="Период", sort=fr1_bucket_order),
-                  y=alt.Y("sum(count):Q", title="Кол-во ответов"),  # <-- высота по числу ответов
-                  color=alt.Color("val_str:N", title=fr1_title, sort=fr1_val_order),
-                  order=alt.Order("val_str:N", sort="ascending"),
-                  tooltip=[
-                      alt.Tooltip("bucket_label:N", title="Период"),
-                      alt.Tooltip("val_str:N", title=fr1_title),
-                      alt.Tooltip("count:Q", title="Кол-во"),
-                      alt.Tooltip("pct:Q", title="% внутри периода", format=".0%")
-                  ]
-              )
-              .properties(height=420)
-        )
+         bars1 = (
+             alt.Chart(fr1_out)
+               .mark_bar(size=bar_size)
+               .encode(
+                   x=alt.X("bucket_label:N", title="Период", sort=fr1_bucket_order),
+                   y=alt.Y("sum(count):Q", title="Кол-во ответов"),
+                   color=alt.Color("val_str:N", title=fr1_title, sort=fr1_val_order),
+                   order=alt.Order("val:Q", sort="ascending"),   # <-- вот это
+                   tooltip=[
+                       alt.Tooltip("bucket_label:N", title="Период"),
+                       alt.Tooltip("val_str:N", title=fr1_title),
+                       alt.Tooltip("count:Q", title="Кол-во"),
+                       alt.Tooltip("pct:Q", title="% внутри периода", format=".0%")
+                   ]
+               )
+               .properties(height=420)
+         )
         st.altair_chart(bars1, use_container_width=True)
 
 with col4:
@@ -300,21 +300,22 @@ with col4:
     if fr2_out.empty:
         st.info("Нет данных (FR2).")
     else:
-        bars2 = (
-            alt.Chart(fr2_out)
-              .mark_bar(size=bar_size)
-              .encode(
-                  x=alt.X("bucket_label:N", title="Период", sort=fr2_bucket_order),
-                  y=alt.Y("sum(count):Q", title="Кол-во ответов"),  # <-- высота по числу ответов
-                  color=alt.Color("val_str:N", title=fr2_title, sort=fr2_val_order),
-                  order=alt.Order("val_str:N", sort="ascending"),
-                  tooltip=[
-                      alt.Tooltip("bucket_label:N", title="Период"),
-                      alt.Tooltip("val_str:N", title=fr2_title),
-                      alt.Tooltip("count:Q", title="Кол-во"),
-                      alt.Tooltip("pct:Q", title="% внутри периода", format=".0%")
-                  ]
-              )
-              .properties(height=420)
-        )
+         bars2 = (
+             alt.Chart(fr2_out)
+               .mark_bar(size=bar_size)
+               .encode(
+                   x=alt.X("bucket_label:N", title="Период", sort=fr2_bucket_order),
+                   y=alt.Y("sum(count):Q", title="Кол-во ответов"),
+                   color=alt.Color("val_str:N", title=fr2_title, sort=fr2_val_order),
+                   order=alt.Order("val:Q", sort="ascending"),   # <-- и здесь
+                   tooltip=[
+                       alt.Tooltip("bucket_label:N", title="Период"),
+                       alt.Tooltip("val_str:N", title=fr2_title),
+                       alt.Tooltip("count:Q", title="Кол-во"),
+                       alt.Tooltip("pct:Q", title="% внутри периода", format=".0%")
+                   ]
+               )
+               .properties(height=420)
+         )
+
         st.altair_chart(bars2, use_container_width=True)
