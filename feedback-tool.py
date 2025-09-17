@@ -142,7 +142,7 @@ def prep_distribution(df_f: pd.DataFrame, value_col: str, allowed_values: list, 
     val_order = [str(v) for v in allowed_values]
     return out, bucket_order, val_order, label_title
 
-# ===== Аспекты урока: словарь и утилиты =====
+# ===== Аспекты урока: словарь и утилиты (считаем по датам A, текст в E) =====
 ASPECTS_ES_EN = [
     ("La materia que se enseñó", "The subject that was taught"),
     ("La explicación del profesor", "The teacher's explanation"),
@@ -156,6 +156,7 @@ ASPECTS_ES_EN = [
 def _norm(s: str) -> str:
     if not isinstance(s, str):
         s = "" if pd.isna(s) else str(s)
+    import unicodedata, re
     s = unicodedata.normalize("NFKD", s).casefold().strip()
     s = re.sub(r"[^\w\s]", " ", s)
     s = re.sub(r"\s+", " ", s)
@@ -163,7 +164,6 @@ def _norm(s: str) -> str:
 
 _ASPECTS_NORM = [(_norm(es), es, en) for es, en in ASPECTS_ES_EN]
 
-# простая подстановка перевода для «неизвестных» (на базе частых слов)
 _BASIC_ES_EN = {
     "materia":"subject","explicacion":"explanation","explicación":"explanation",
     "profesor":"teacher","actividades":"activities","sala":"classroom",
@@ -172,6 +172,7 @@ _BASIC_ES_EN = {
     "trataron":"treated","bien":"well","atencion":"attention","atención":"attention"
 }
 def _naive_translate_es_en(text: str) -> str:
+    import unicodedata, re
     w = re.findall(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+", text)
     out = []
     for t in w:
@@ -179,107 +180,76 @@ def _naive_translate_es_en(text: str) -> str:
         out.append(_BASIC_ES_EN.get(k, t))
     return " ".join(out) if out else ""
 
-def _detect_aspect_cols(df: pd.DataFrame, period_col: str = "E"):
-    """Ищем столбцы, где встречаются аспекты (кроме самого столбца периода)."""
-    if df.empty:
-        return []
-    candidates = []
-    for col in df.columns:
-        if col == period_col:
-            continue
-        s = df[col].astype(str).fillna("")
-        hits = 0
-        for es_norm, _, _ in _ASPECTS_NORM:
-            hits += s.apply(lambda v: es_norm in _norm(v)).sum()
-        if hits > 0:
-            candidates.append(col)
-    if not candidates:
-        skip = {"A","E","N","M","S","R","G","I"}
-        candidates = [c for c in df.columns if c not in skip]
-    return candidates
-
-def build_aspects_counts(df: pd.DataFrame, period_col: str = "E"):
+def build_aspects_counts_from_E_by_A(df: pd.DataFrame, granularity: str):
     """
-    Находит упоминания аспектов в строках (может быть несколько через ; , / | перенос строки).
+    Берём дату из A, текст аспектов из E. Считаем упоминания по датам (с учётом granularity).
     Возвращает:
-      counts: DataFrame [period, aspect, count]
-      unknown: DataFrame [mention, en, total] — не совпавшие с шаблоном строки
+      counts: DataFrame [bucket(datetime), bucket_label, aspect, count]
+      unknown: DataFrame [mention, en, total]
     """
-    if df.empty or period_col not in df.columns:
-        return pd.DataFrame(columns=["period","aspect","count"]), pd.DataFrame(columns=["mention","en","total"])
+    if df.empty or ("A" not in df.columns) or ("E" not in df.columns):
+        return pd.DataFrame(columns=["bucket","bucket_label","aspect","count"]), pd.DataFrame(columns=["mention","en","total"])
 
-    cols = _detect_aspect_cols(df, period_col)
-    if not cols:
-        return pd.DataFrame(columns=["period","aspect","count"]), pd.DataFrame(columns=["mention","en","total"])
+    d = df[["A","E"]].copy()
+    d["A"] = pd.to_datetime(d["A"], errors="coerce")
+    d = d.dropna(subset=["A"])
+    if d.empty:
+        return pd.DataFrame(columns=["bucket","bucket_label","aspect","count"]), pd.DataFrame(columns=["mention","en","total"])
+
+    # bucket & подпись по дате A
+    d = add_bucket(d.rename(columns={"A":"A", "E":"E"}), "A", granularity)
+    d = ensure_bucket_and_label(d, "A", granularity)
 
     rows, unknown = [], []
+    import re
+    for _, r in d.iterrows():
+        text = r["E"]
+        if pd.isna(text):
+            continue
+        txt = str(text).strip()
+        if not txt:
+            continue
 
-    for _, r in df.iterrows():
-        period = str(r[period_col]).strip()
-        for c in cols:
-            v = r[c]
-            if pd.isna(v):
+        # допускаем несколько пунктов в одной ячейке
+        parts = re.split(r"[;,/\n|]+", txt) if re.search(r"[;,/\n|]", txt) else [txt]
+        for p in parts:
+            p_clean = p.strip()
+            t = _norm(p_clean)
+            if not t:
                 continue
-            text = str(v).strip()
-            if text.upper() in ("TRUE","FALSE"):
-                continue
-            parts = re.split(r"[;,/\n|]+", text) if re.search(r"[;,/\n|]", text) else [text]
-            for p in parts:
-                p_clean = p.strip()
-                t = _norm(p_clean)
-                if not t:
-                    continue
-                matched = False
-                # точное совпадение
+
+            matched = False
+            # точное попадание
+            for es_norm, es, en in _ASPECTS_NORM:
+                if t == es_norm:
+                    rows.append((r["bucket"], r["bucket_label"], f"{es} (EN: {en})", 1))
+                    matched = True
+                    break
+            if not matched:
+                # по вхождению
                 for es_norm, es, en in _ASPECTS_NORM:
-                    if t == es_norm:
-                        rows.append((period, f"{es} (EN: {en})", 1))
+                    if es_norm in t:
+                        rows.append((r["bucket"], r["bucket_label"], f"{es} (EN: {en})", 1))
                         matched = True
                         break
-                if not matched:
-                    # вхождение
-                    for es_norm, es, en in _ASPECTS_NORM:
-                        if es_norm in t:
-                            rows.append((period, f"{es} (EN: {en})", 1))
-                            matched = True
-                            break
-                if not matched:
-                    unknown.append(p_clean)
+            if not matched:
+                unknown.append(p_clean)
 
-    counts = pd.DataFrame(rows, columns=["period","aspect","count"])
+    counts = pd.DataFrame(rows, columns=["bucket","bucket_label","aspect","count"])
     if not counts.empty:
-        counts = counts.groupby(["period","aspect"], as_index=False)["count"].sum()
+        counts = counts.groupby(["bucket","bucket_label","aspect"], as_index=False)["count"].sum()
 
     unknown_df = pd.DataFrame(unknown, columns=["mention"])
     if not unknown_df.empty:
         unknown_df["mention"] = unknown_df["mention"].str.strip()
         unknown_df = (unknown_df.groupby("mention", as_index=False)
-                      .size().rename(columns={"size":"total"})
-                      .sort_values("total", ascending=False))
+                      .size().rename(columns={"size":"total"}).sort_values("total", ascending=False))
         unknown_df["en"] = unknown_df["mention"].apply(_naive_translate_es_en)
         unknown_df = unknown_df[["mention","en","total"]]
     else:
         unknown_df = pd.DataFrame(columns=["mention","en","total"])
 
     return counts, unknown_df
-
-def _period_sort_order(series: pd.Series):
-    """Пытаемся отсортировать периоды как числа → даты → алфавит."""
-    vals = series.dropna().astype(str).unique().tolist()
-    # как числа
-    try:
-        pairs = sorted([(float(v), v) for v in vals], key=lambda x: x[0])
-        return [v for _, v in pairs]
-    except Exception:
-        pass
-    # как даты
-    tmp = pd.DataFrame({"p": vals})
-    tmp["d"] = pd.to_datetime(tmp["p"], errors="coerce")
-    tmp = tmp.sort_values("d", na_position="last")
-    if tmp["d"].notna().any():
-        return tmp["p"].tolist()
-    # иначе — алфавит
-    return sorted(vals)
 
 
 # ==================== ДАННЫЕ ====================
@@ -481,30 +451,34 @@ with col4:
         )
         st.altair_chart(bars2, use_container_width=True)
 
-# ---------- ЕЩЁ НИЖЕ: АСПЕКТЫ УРОКА (по периодам из колонки E) ----------
+# ---------- НИЖЕ: Аспекты урока (E) по датам из A ----------
 st.markdown("---")
-st.subheader("Аспекты урока (по периодам из колонки E)")
+st.subheader("Аспекты урока (по датам A, текст из E)")
 
-# собираем по обоим листам и объединяем
-aspects1, unknown1 = build_aspects_counts(df1, period_col="E")
-aspects2, unknown2 = build_aspects_counts(df2, period_col="E")
+# считаем отдельно по двум листам и объединяем
+asp1, unk1 = build_aspects_counts_from_E_by_A(df1, granularity)
+asp2, unk2 = build_aspects_counts_from_E_by_A(df2, granularity)
 
-aspects_all = pd.concat([aspects1, aspects2], ignore_index=True)
-unknown_all = pd.concat([unknown1, unknown2], ignore_index=True)
+aspects_all = pd.concat([asp1, asp2], ignore_index=True)
+unknown_all = pd.concat([unk1, unk2], ignore_index=True)
 
 if aspects_all.empty:
-    st.info("Не нашёл упоминаний аспектов по колонке E (проверь, где форма хранит выбор аспектов).")
+    st.info("Не нашёл упоминаний аспектов в колонке E.")
 else:
-    period_order = _period_sort_order(aspects_all["period"])
+    # порядок дат по реальному datetime bucket
+    bucket_order = (aspects_all[["bucket","bucket_label"]]
+                    .drop_duplicates()
+                    .sort_values("bucket")["bucket_label"].tolist())
+
     chart_aspects = (
         alt.Chart(aspects_all)
-          .mark_bar(size=max(40, bar_size))  # делаем заметно шире
+          .mark_bar(size=max(40, bar_size))  # ширина зависит от выбранной гранулярности
           .encode(
-              x=alt.X("period:N", title="Период (E)", sort=period_order),
-              y=alt.Y("sum(count):Q", title="Суммарное кол-во упоминаний"),
-              color=alt.Color("aspect:N", title="Аспект (с EN переводом)"),
+              x=alt.X("bucket_label:N", title="Период (по A)", sort=bucket_order),
+              y=alt.Y("sum(count):Q", title="Кол-во упоминаний"),
+              color=alt.Color("aspect:N", title="Аспект (EN в скобках)"),
               tooltip=[
-                  alt.Tooltip("period:N", title="Период"),
+                  alt.Tooltip("bucket_label:N", title="Период"),
                   alt.Tooltip("aspect:N", title="Аспект"),
                   alt.Tooltip("sum(count):Q", title="Кол-во")
               ]
@@ -513,8 +487,7 @@ else:
     )
     st.altair_chart(chart_aspects, use_container_width=True)
 
-# неизвестные упоминания (не из шаблона)
-st.markdown("#### Неизвестные упоминания (не из шаблона)")
+st.markdown("#### Упоминания вне шаблона")
 if unknown_all.empty:
     st.success("Все упоминания соответствуют шаблону.")
 else:
