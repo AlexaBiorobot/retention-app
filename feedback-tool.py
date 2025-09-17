@@ -147,7 +147,7 @@ ASPECTS_ES_EN = [
     ("Tareas para hacer en casa", "Homework to do at home"),
     ("La forma en que se comportó la clase", "How the class behaved"),
     ("Cuando me aclararon las dudas", "When my questions were clarified"),
-    ("Cuando me trataron bien y con atención", "When I was treated well and attentively"),
+    ("Cuando me trataron bien и con atención", "When I was treated well and attentively"),
 ]
 
 def _norm(s: str) -> str:
@@ -160,7 +160,6 @@ def _norm(s: str) -> str:
 
 _ASPECTS_NORM = [(_norm(es), es, en) for es, en in ASPECTS_ES_EN]
 
-# простой пословный словарик (fallback)
 _BASIC_ES_EN = {
     "si": "yes", "sí": "yes", "no": "no", "ok": "ok",
     "materia":"subject","explicacion":"explanation","explicación":"explanation",
@@ -244,79 +243,9 @@ def build_aspects_counts(df: pd.DataFrame, text_col: str, date_col: str, granula
 
     return counts, unknown_df
 
-def build_aspects_counts_by_S(df: pd.DataFrame):
-    """
-    Берём Form Responses 1: S — номер урока, E — текст.
-    Считаем упоминания аспектов по S.
-    Возвращает:
-      counts: [S, aspect, count]
-      tool:   wide-таблица для «супер-тултипа» (S, total, line1..line7)
-    """
-    need_cols = ["S", "E"]
-    if df.empty or not all(c in df.columns for c in need_cols):
-        return pd.DataFrame(columns=["S","aspect","count"]), pd.DataFrame()
-
-    d = df[need_cols].copy()
-    d["S"] = pd.to_numeric(d["S"], errors="coerce")
-    d = d.dropna(subset=["S"])
-    if d.empty:
-        return pd.DataFrame(columns=["S","aspect","count"]), pd.DataFrame()
-
-    rows = []
-    for _, r in d.iterrows():
-        txt = str(r["E"]).strip()
-        if not txt:
-            continue
-        parts = re.split(r"[;,/\n|]+", txt) if re.search(r"[;,/\n|]", txt) else [txt]
-        for p in parts:
-            t = _norm(p.strip())
-            if not t:
-                continue
-            for es_norm, es, en in _ASPECTS_NORM:
-                if t == es_norm or es_norm in t:
-                    rows.append((int(r["S"]), f"{es} (EN: {en})", 1))
-                    break
-
-    counts = pd.DataFrame(rows, columns=["S","aspect","count"])
-    if counts.empty:
-        return counts, pd.DataFrame()
-
-    counts = (counts.groupby(["S","aspect"], as_index=False)["count"]
-                    .sum()
-                    .sort_values("S"))
-
-    # Wide для тултипа
-    expected_labels = [f"{es} (EN: {en})" for es, en in ASPECTS_ES_EN]
-    wide = (counts.pivot_table(index="S", columns="aspect", values="count",
-                               aggfunc="sum", fill_value=0))
-    for lbl in expected_labels:
-        if lbl not in wide.columns:
-            wide[lbl] = 0
-    wide = wide[expected_labels]
-    wide["total"] = wide.sum(axis=1)
-
-    en_names = [en for _, en in ASPECTS_ES_EN]
-    def _lines(row):
-        tot = row["total"]
-        items = []
-        for i, lbl in enumerate(expected_labels):
-            cnt = int(row[lbl])
-            pct = (cnt / tot) if tot else 0.0
-            items.append((en_names[i], cnt, pct))
-        items.sort(key=lambda x: x[1], reverse=True)
-        out = {}
-        for idx in range(len(items)):
-            en, cnt, pct = items[idx]
-            out[f"line{idx+1}"] = f"{en} — {cnt} ({pct:.0%})" if cnt > 0 else ""
-        return pd.Series(out)
-
-    tool = wide.reset_index()
-    tool = pd.concat([tool, tool.apply(_lines, axis=1)], axis=1)
-    return counts, tool
-
 # ==================== ДАННЫЕ ====================
 
-df1 = load_sheet_as_letter_df("Form Responses 1")   # A=date, N=course, S=x, G=y, E=text
+df1 = load_sheet_as_letter_df("Form Responses 1")   # A=date, N=course, S=x, G=y
 df2 = load_sheet_as_letter_df("Form Responses 2")   # A=date, M=course, R=x, I=y
 
 # Приведение типов
@@ -397,6 +326,19 @@ fr2_out, fr2_bucket_order, fr2_val_order, fr2_title = prep_distribution(df2_f, "
 
 st.title("40 week courses")
 
+# --- динамическая шкала для верхних графиков ---
+def dynamic_y_scale_from_series(s: pd.Series) -> alt.Scale:
+    s = s.dropna()
+    if s.empty:
+        return alt.Scale(nice=True)
+    vmin = float(s.min())
+    vmax = float(s.max())
+    if vmax == vmin:
+        pad = max(0.5, abs(vmax) * 0.05 if vmax != 0 else 1.0)
+        return alt.Scale(domain=[vmin - pad, vmax + pad], nice=False, clamp=True)
+    pad = (vmax - vmin) * 0.10
+    return alt.Scale(domain=[vmin - pad, vmax + pad], nice=False, clamp=True)
+
 col1, col2 = st.columns([1, 1])
 
 with col1:
@@ -404,11 +346,12 @@ with col1:
     if agg1.empty:
         st.info("Нет данных для выбранных фильтров.")
     else:
+        y_scale1 = dynamic_y_scale_from_series(agg1["avg_y"])
         chart1 = (
             alt.Chart(agg1).mark_line(point=True)
               .encode(
                   x=alt.X("S:Q", title="S"),
-                  y=alt.Y("avg_y:Q", title="Average G"),
+                  y=alt.Y("avg_y:Q", title="Average G", scale=y_scale1),
                   tooltip=[
                       alt.Tooltip("S:Q", title="S"),
                       alt.Tooltip("avg_y:Q", title="Average G", format=".2f"),
@@ -423,11 +366,12 @@ with col2:
     if agg2.empty:
         st.info("Нет данных для выбранных фильтров.")
     else:
+        y_scale2 = dynamic_y_scale_from_series(agg2["avg_y"])
         chart2 = (
             alt.Chart(agg2).mark_line(point=True)
               .encode(
                   x=alt.X("R:Q", title="R"),
-                  y=alt.Y("avg_y:Q", title="Average I"),
+                  y=alt.Y("avg_y:Q", title="Average I", scale=y_scale2),
                   tooltip=[
                       alt.Tooltip("R:Q", title="R"),
                       alt.Tooltip("avg_y:Q", title="Average I", format=".2f"),
@@ -437,6 +381,7 @@ with col2:
         )
         st.altair_chart(chart2, use_container_width=True)
 
+# ---------- Нижние распределения ----------
 st.markdown("---")
 st.subheader(f"Распределение значений (гранулярность: {granularity.lower()})")
 
@@ -486,11 +431,10 @@ with col4:
         )
         st.altair_chart(bars2, use_container_width=True)
 
-# ---------- НИЖЕ: Аспекты урока из FR1 (E по датам A) ----------
+# ---------- НИЖЕ: Аспекты урока из FR1 ----------
 st.markdown("---")
 st.subheader("Аспекты урока — Form Responses 1")
 
-# Берём аспекты ТОЛЬКО из Form Responses 1: курс = N, дата = A, текст = E
 df_aspects = filter_df(df1, "N", "A", selected_courses, date_range)
 asp_counts, unknown_all = build_aspects_counts(df_aspects, text_col="E", date_col="A", granularity=granularity)
 
@@ -508,7 +452,6 @@ with left:
         expected_labels = [f"{es} (EN: {en})" for es, en in ASPECTS_ES_EN]
         present = [lbl for lbl in expected_labels if lbl in asp_counts["aspect"].unique()]
 
-        # stacked bar по датам
         bars = (
             alt.Chart(asp_counts).mark_bar(size=max(40, bar_size))
               .encode(
@@ -518,7 +461,6 @@ with left:
               )
         )
 
-        # «супер-тултип» по столбцу
         wide = (asp_counts
                 .pivot_table(index=["bucket","bucket_label"], columns="aspect",
                              values="count", aggfunc="sum", fill_value=0))
@@ -570,7 +512,6 @@ with left:
 
 with right:
     st.markdown("**Аспекты по урокам (ось X — S) — кривые**")
-    # данные только из FR1 и внутри текущих фильтров
     df_aspects_s = df_aspects.copy()
 
     rows = []
@@ -587,7 +528,6 @@ with right:
                 t = _norm(p.strip())
                 if not t:
                     continue
-                # матчим по шаблонам аспектов
                 for es_norm, es, en in _ASPECTS_NORM:
                     if t == es_norm or es_norm in t:
                         rows.append((int(r["S"]), f"{es} (EN: {en})", 1))
@@ -602,16 +542,39 @@ with right:
                        .sum()
                        .sort_values(["S", "aspect"]))
 
-        # динамический верх оси Y (чтобы не было лишнего воздуха сверху)
+        s_min = int(aspect_by_s["S"].min())
+        s_max = int(aspect_by_s["S"].max())
+
+        # иммутация нулей по всем S для каждой кривой (устойчивость на фулскрине)
+        aspect_by_s_full = aspect_by_s.copy()
+
+        # динамический верх-низ по Y
         y_max = max(1, int(aspect_by_s["count"].max()))
-        y_scale = alt.Scale(domain=[0, y_max * 1.05], nice=False)
+        y_min = int(aspect_by_s["count"].min())
+        if y_max == y_min:
+            pad = max(1, int(y_max * 0.1))
+            y_domain = [y_min - pad, y_max + pad]
+        else:
+            pad = max(1, int((y_max - y_min) * 0.10))
+            y_domain = [max(0, y_min - pad), y_max + pad]
 
         chart_s_lines = (
-            alt.Chart(aspect_by_s)
-              .mark_line(point=True)
+            alt.Chart(aspect_by_s_full)
+              .transform_impute(
+                  impute='count',
+                  key='S',
+                  groupby=['aspect'],
+                  value=0
+              )
+              .mark_line(point=True, strokeWidth=2.5)
               .encode(
-                  x=alt.X("S:Q", title="S", axis=alt.Axis(tickMinStep=1)),
-                  y=alt.Y("count:Q", title="Кол-во упоминаний", scale=y_scale),
+                  x=alt.X("S:Q",
+                          title="S",
+                          scale=alt.Scale(domain=[s_min, s_max], nice=False),
+                          axis=alt.Axis(tickMinStep=1)),
+                  y=alt.Y("count:Q",
+                          title="Кол-во упоминаний",
+                          scale=alt.Scale(domain=y_domain, nice=False, clamp=True)),
                   color=alt.Color("aspect:N", title="Аспект"),
                   tooltip=[
                       alt.Tooltip("S:Q", title="S"),
@@ -623,14 +586,15 @@ with right:
         )
         st.altair_chart(chart_s_lines, use_container_width=True)
 
+# ---------- Упоминания вне шаблона ----------
 st.markdown("#### Упоминания вне шаблона")
-if 'unknown_all' in locals() and not unknown_all.empty:
+if 'unknown_all' not in locals() or unknown_all.empty:
+    st.success("Все упоминания соответствуют шаблону.")
+else:
     unknown_agg = (unknown_all.groupby(["en","mention"], as_index=False)
                               .agg(total=("total","sum"))
                               .sort_values("total", ascending=False))
     st.dataframe(unknown_agg[["en","mention","total"]], use_container_width=True)
-else:
-    st.success("Все упоминания соответствуют шаблону.")
 
 # Подсказка, если онлайн-переводчик недоступен
 if _gt is None:
