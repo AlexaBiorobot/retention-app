@@ -609,76 +609,37 @@ cnt_by_s_all = build_aspects_counts_by_S(df_aspects)
 if cnt_by_s_all.empty:
     st.info("Нет данных для графика по урокам.")
 else:
-    # Подготавливаем набор данных с долями по S
-    chart_pct = (
+    # агрегируем данные и считаем долю внутри урока S
+    base = (
         alt.Chart(cnt_by_s_all)
           .transform_aggregate(count='sum(count)', groupby=['S', 'aspect_en'])
           .transform_joinaggregate(total='sum(count)', groupby=['S'])
           .transform_calculate(pct='datum.count / datum.total')
     )
 
+    # ТОЛЬКО секционные тултипы (без общего прозрачного слоя)
     bars_s = (
-        chart_pct.mark_bar(size=28)
-          .encode(
-              x=alt.X("S:O", title="S", sort="ascending"),
-              y=alt.Y("count:Q",
-                      stack="normalize",
-                      axis=alt.Axis(format="%", title="% от упоминаний"),
-                      scale=alt.Scale(domain=[0,1], nice=False, clamp=True)),
-              color=alt.Color("aspect_en:N", title="Аспект (EN)"),
-              tooltip=[
-                  alt.Tooltip("S:O", title="Урок"),
-                  alt.Tooltip("aspect_en:N", title="Аспект"),
-                  alt.Tooltip("count:Q", title="Кол-во"),
-                  alt.Tooltip("pct:Q", title="Доля", format=".0%"),
-                  alt.Tooltip("total:Q", title="Всего по уроку")
-              ]
-          )
+        base.mark_bar(size=28)
+            .encode(
+                x=alt.X("S:O", title="S", sort="ascending"),
+                y=alt.Y(
+                    "count:Q",
+                    stack="normalize",
+                    axis=alt.Axis(format="%", title="% от упоминаний"),
+                    scale=alt.Scale(domain=[0, 1], nice=False, clamp=True)
+                ),
+                color=alt.Color("aspect_en:N", title="Аспект (EN)"),
+                tooltip=[
+                    alt.Tooltip("S:O", title="Урок"),
+                    alt.Tooltip("aspect_en:N", title="Аспект"),
+                    alt.Tooltip("count:Q", title="Кол-во"),
+                    alt.Tooltip("pct:Q", title="Доля", format=".0%"),
+                    alt.Tooltip("total:Q", title="Всего по уроку"),
+                ],
+            )
     )
 
-    pivot = cnt_by_s_all.pivot_table(index="S", columns="aspect_en", values="count",
-                                     aggfunc="sum", fill_value=0)
-    col_order = list(pivot.sum(axis=0).sort_values(ascending=False).index)
-    safe_cols = {c: f"c_{i}" for i, c in enumerate(col_order)}
-    wide_s = pivot.rename(columns=safe_cols).reset_index()
-    ccols = list(safe_cols.values())
-    wide_s["total"] = wide_s[ccols].sum(axis=1)
-
-    def mk_lines_s(row):
-        tot = row["total"]
-        items = []
-        for i, name in enumerate(col_order):
-            c = int(row[ccols[i]])
-            p = (c / tot) if tot else 0.0
-            items.append((name, c, p))
-        items.sort(key=lambda x: x[1], reverse=True)
-        for idx in range(len(col_order)):
-            if idx < len(items):
-                name, c, p = items[idx]
-                row[f"line{idx+1}"] = f"{name} — {c} ({p:.0%})"
-            else:
-                row[f"line{idx+1}"] = ""
-        return row
-
-    wide_s = wide_s.apply(mk_lines_s, axis=1)
-
-    tooltip_s = [alt.Tooltip("S:O", title="Урок"),
-                 alt.Tooltip("total:Q", title="Всего упоминаний")] + \
-                [alt.Tooltip(f"line{i}:N", title="") for i in range(1, len(col_order)+1)]
-
-    bubble_s = (
-        alt.Chart(wide_s)
-          .transform_calculate(one='1')
-          .mark_bar(size=28, opacity=0.001)
-          .encode(
-              x=alt.X("S:O", sort="ascending"),
-              y=alt.Y("one:Q", scale=alt.Scale(domain=[0,1], nice=False, clamp=True)),
-              tooltip=tooltip_s
-          )
-    )
-
-    st.altair_chart((bars_s + bubble_s).properties(height=460),
-                    use_container_width=True, theme=None)
+    st.altair_chart(bars_s.properties(height=460), use_container_width=True, theme=None)
 
 # --------- ТАБЛИЦА ВНИЗУ ---------
 st.markdown("---")
