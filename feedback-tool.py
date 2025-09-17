@@ -535,14 +535,22 @@ with col4:
 st.markdown("---")
 st.subheader("Аспекты урока (по датам A, текст из E)")
 
-# Берём аспекты только с Form Responses 2: курс=M, дата=A, текст=E
-df_aspects = filter_df(df2, course_col="M", date_col="A",
-                       selected_courses=selected_courses, date_range=date_range)
+# Берём аспекты ТОЛЬКО из Form Responses 1: курс = N, дата = A, текст = E
+df_aspects = filter_df(
+    df1,                # <-- FR1
+    course_col="N",
+    date_col="A",
+    selected_courses=selected_courses,
+    date_range=date_range,
+)
 
-asp_counts, unknown_all = build_aspects_counts(df_aspects, text_col="E", date_col="A", granularity=granularity)
+# если у тебя уже есть функция build_aspects_counts(...) — используем её
+asp_counts, unknown_all = build_aspects_counts(
+    df_aspects, text_col="E", date_col="A", granularity=granularity
+)
 
 if asp_counts.empty:
-    st.info("Не нашёл упоминаний аспектов (лист 'Form Responses 2', колонка E).")
+    st.info("Не нашёл упоминаний аспектов (лист 'Form Responses 1', колонка E).")
 else:
     bucket_order = (asp_counts[["bucket","bucket_label"]]
                     .drop_duplicates()
@@ -562,7 +570,7 @@ else:
           )
     )
 
-    # «супер-тултип» (по столбцу): собираем EN-список по убыванию
+    # «супер-тултип» (по столбцу)
     wide = (asp_counts
             .pivot_table(index=["bucket","bucket_label"], columns="aspect",
                          values="count", aggfunc="sum", fill_value=0))
