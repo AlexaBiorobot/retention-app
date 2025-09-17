@@ -618,6 +618,8 @@ else:
     )
 
     # ТОЛЬКО секционные тултипы (без общего прозрачного слоя)
+    legend_domain_en = [en for _, en in ASPECTS_ES_EN]
+    
     bars_s = (
         base.mark_bar(size=28)
             .encode(
@@ -626,18 +628,21 @@ else:
                     "count:Q",
                     stack="normalize",
                     axis=alt.Axis(format="%", title="% от упоминаний"),
-                    scale=alt.Scale(domain=[0, 1], nice=False, clamp=True)
+                    scale=alt.Scale(domain=[0, 1], nice=False, clamp=True),
                 ),
                 color=alt.Color(
                     "aspect_en:N",
                     title="Аспект (EN)",
+                    # ЯВНО задаём домен цветов — это чинит «пустую» легенду
+                    scale=alt.Scale(domain=legend_domain_en),
                     legend=alt.Legend(
-                        orient="bottom",          # легенда снизу
+                        orient="bottom",
                         direction="horizontal",
-                        columns=2,                # 2 колонки
-                        labelLimit=1000,          # не обрезать подписи
-                        titleLimit=1000
-                    )
+                        columns=2,          # можно 3, если не влезает
+                        labelLimit=1000,
+                        titleLimit=1000,
+                        symbolType="square",
+                    ),
                 ),
                 tooltip=[
                     alt.Tooltip("S:O", title="Урок"),
@@ -650,6 +655,7 @@ else:
     ).configure_legend(labelLimit=1000, titleLimit=1000)
     
     st.altair_chart(bars_s.properties(height=460), use_container_width=True, theme=None)
+
 
 # --------- ТАБЛИЦА ВНИЗУ ---------
 st.markdown("---")
