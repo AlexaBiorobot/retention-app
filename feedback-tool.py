@@ -167,7 +167,7 @@ _BASIC_ES_EN = {
     "profesor":"teacher","actividades":"activities","sala":"classroom",
     "tareas":"homework","casa":"home","forma":"way","comporto":"behaved",
     "comportó":"behaved","clase":"class","aclararon":"clarified","dudas":"doubts",
-    "trataron":"treated","bien":"well","atencion":"attention","atención":"attention"
+    "trataron":"treated","bien":"well","atencion":"attention","атención":"attention"
 }
 
 def _naive_translate_es_en(text: str) -> str:
@@ -243,6 +243,76 @@ def build_aspects_counts(df: pd.DataFrame, text_col: str, date_col: str, granula
         unknown_df = pd.DataFrame(columns=["en", "mention", "total"])
 
     return counts, unknown_df
+
+def build_aspects_counts_by_S(df: pd.DataFrame):
+    """
+    Берём Form Responses 1: S — номер урока, E — текст.
+    Считаем упоминания аспектов по S.
+    Возвращает:
+      counts: [S, aspect, count]
+      tool:   wide-таблица для «супер-тултипа» (S, total, line1..line7)
+    """
+    need_cols = ["S", "E"]
+    if df.empty or not all(c in df.columns for c in need_cols):
+        return pd.DataFrame(columns=["S","aspect","count"]), pd.DataFrame()
+
+    d = df[need_cols].copy()
+    d["S"] = pd.to_numeric(d["S"], errors="coerce")
+    d = d.dropna(subset=["S"])
+    if d.empty:
+        return pd.DataFrame(columns=["S","aspect","count"]), pd.DataFrame()
+
+    rows = []
+    for _, r in d.iterrows():
+        txt = str(r["E"]).strip()
+        if not txt:
+            continue
+        parts = re.split(r"[;,/\n|]+", txt) if re.search(r"[;,/\n|]", txt) else [txt]
+        for p in parts:
+            t = _norm(p.strip())
+            if not t:
+                continue
+            for es_norm, es, en in _ASPECTS_NORM:
+                if t == es_norm or es_norm in t:
+                    rows.append((int(r["S"]), f"{es} (EN: {en})", 1))
+                    break
+
+    counts = pd.DataFrame(rows, columns=["S","aspect","count"])
+    if counts.empty:
+        return counts, pd.DataFrame()
+
+    counts = (counts.groupby(["S","aspect"], as_index=False)["count"]
+                    .sum()
+                    .sort_values("S"))
+
+    # Wide для тултипа
+    expected_labels = [f"{es} (EN: {en})" for es, en in ASPECTS_ES_EN]
+    wide = (counts.pivot_table(index="S", columns="aspect", values="count",
+                               aggfunc="sum", fill_value=0))
+    for lbl in expected_labels:
+        if lbl not in wide.columns:
+            wide[lbl] = 0
+    wide = wide[expected_labels]
+    wide["total"] = wide.sum(axis=1)
+
+    en_names = [en for _, en in ASPECTS_ES_EN]
+    def _lines(row):
+        tot = row["total"]
+        items = []
+        for i, lbl in enumerate(expected_labels):
+            cnt = int(row[lbl])
+            pct = (cnt / tot) if tot else 0.0
+            items.append((en_names[i], cnt, pct))
+        items.sort(key=lambda x: x[1], reverse=True)
+        out = {}
+        for idx in range(len(items)):
+            en, cnt, pct = items[idx]
+            out[f"line{idx+1}"] = f"{en} — {cnt} ({pct:.0%})" if cnt > 0 else ""
+        return pd.Series(out)
+
+    tool = wide.reset_index()
+    tool = pd.concat([tool, tool.apply(_lines, axis=1)], axis=1)
+    return counts, tool
 
 # ==================== ДАННЫЕ ====================
 
@@ -416,80 +486,121 @@ with col4:
         )
         st.altair_chart(bars2, use_container_width=True)
 
-# ---------- НИЖЕ: Аспекты урока из FR1 (E по датам A) ----------
+# ---------- НИЖЕ: Аспекты урока из FR1 ----------
 st.markdown("---")
-st.subheader("Аспекты урока (по датам A, текст из E) — Form Responses 1")
+st.subheader("Аспекты урока — слева по датам (A), справа по урокам (S) — Form Responses 1")
 
+# Фильтрация по тем же курсам/датам
 df_aspects = filter_df(df1, "N", "A", selected_courses, date_range)
+
+# Слева (по датам A)
 asp_counts, unknown_all = build_aspects_counts(df_aspects, text_col="E", date_col="A", granularity=granularity)
+# Справа (по урокам S)
+asp_by_s_counts, asp_by_s_tool = build_aspects_counts_by_S(df_aspects)
 
-if asp_counts.empty:
-    st.info("Не нашёл упоминаний аспектов (лист 'Form Responses 1', колонка E).")
-else:
-    bucket_order = (asp_counts[["bucket","bucket_label"]]
-                    .drop_duplicates()
-                    .sort_values("bucket")["bucket_label"].tolist())
+colA, colB = st.columns([1.2, 1])
 
-    expected_labels = [f"{es} (EN: {en})" for es, en in ASPECTS_ES_EN]
-    present = [lbl for lbl in expected_labels if lbl in asp_counts["aspect"].unique()]
+with colA:
+    if asp_counts.empty:
+        st.info("Нет упоминаний аспектов (по датам).")
+    else:
+        bucket_order = (asp_counts[["bucket","bucket_label"]]
+                        .drop_duplicates()
+                        .sort_values("bucket")["bucket_label"].tolist())
+        expected_labels = [f"{es} (EN: {en})" for es, en in ASPECTS_ES_EN]
+        present = [lbl for lbl in expected_labels if lbl in asp_counts["aspect"].unique()]
 
-    bars = (
-        alt.Chart(asp_counts).mark_bar(size=max(40, bar_size))
-          .encode(
-              x=alt.X("bucket_label:N", title="Период (по A)", sort=bucket_order),
-              y=alt.Y("sum(count):Q", title="Кол-во упоминаний"),
-              color=alt.Color("aspect:N", title="Аспект", sort=present)
-          )
-    )
+        bars = (
+            alt.Chart(asp_counts).mark_bar(size=max(40, bar_size))
+              .encode(
+                  x=alt.X("bucket_label:N", title="Период (по A)", sort=bucket_order),
+                  y=alt.Y("sum(count):Q", title="Кол-во упоминаний"),
+                  color=alt.Color("aspect:N", title="Аспект", sort=present)
+              )
+        )
 
-    wide = (asp_counts
-            .pivot_table(index=["bucket","bucket_label"], columns="aspect",
-                         values="count", aggfunc="sum", fill_value=0))
-    for lbl in expected_labels:
-        if lbl not in wide.columns:
-            wide[lbl] = 0
-    wide = wide[expected_labels]
+        # «супер-тултип» по столбцу
+        safe_map = {lbl: f"c_{i}" for i, lbl in enumerate(expected_labels)}
+        wide = (asp_counts.pivot_table(index=["bucket","bucket_label"], columns="aspect",
+                                       values="count", aggfunc="sum", fill_value=0))
+        for lbl in expected_labels:
+            if lbl not in wide.columns:
+                wide[lbl] = 0
+        wide = wide[expected_labels]
+        wide = wide.rename(columns=safe_map).reset_index()
+        cols = list(safe_map.values())
+        wide["total"] = wide[cols].sum(axis=1)
+        en_names = [en for _, en in ASPECTS_ES_EN]
 
-    safe_map = {lbl: f"c_{i}" for i, lbl in enumerate(expected_labels)}
-    wide_safe = wide.rename(columns=safe_map).reset_index()
-    cols = list(safe_map.values())
-    wide_safe["total"] = wide_safe[cols].sum(axis=1)
+        def make_lines_cols(row):
+            tot = row["total"]
+            items = []
+            for i, en in enumerate(en_names):
+                cnt = int(row[cols[i]])
+                pct = (cnt / tot) if tot else 0.0
+                items.append((en, cnt, pct))
+            items.sort(key=lambda x: x[1], reverse=True)
+            for idx in range(len(en_names)):
+                if idx < len(items):
+                    en, cnt, pct = items[idx]
+                    row[f"line{idx+1}"] = f"{en} — {cnt} ({pct:.0%})"
+                else:
+                    row[f"line{idx+1}"] = ""
+            return row
 
-    en_names = [en for _, en in ASPECTS_ES_EN]
-    def make_lines_cols(row):
-        tot = row["total"]
-        items = []
-        for i, en in enumerate(en_names):
-            cnt = int(row[cols[i]])
-            pct = (cnt / tot) if tot else 0.0
-            items.append((en, cnt, pct))
-        items.sort(key=lambda x: x[1], reverse=True)
-        for idx in range(len(en_names)):
-            if idx < len(items):
-                en, cnt, pct = items[idx]
-                row[f"line{idx+1}"] = f"{en} — {cnt} ({pct:.0%})"
-            else:
-                row[f"line{idx+1}"] = ""
-        return row
+        wide = wide.apply(make_lines_cols, axis=1)
 
-    wide_safe = wide_safe.apply(make_lines_cols, axis=1)
+        tooltip_fields = [
+            alt.Tooltip("bucket_label:N", title="Период"),
+            alt.Tooltip("total:Q", title="Всего упоминаний"),
+        ] + [alt.Tooltip(f"line{i}:N", title="") for i in range(1, len(en_names)+1)]
 
-    tooltip_fields = [
-        alt.Tooltip("bucket_label:N", title="Период"),
-        alt.Tooltip("total:Q", title="Всего упоминаний"),
-    ] + [alt.Tooltip(f"line{i}:N", title="") for i in range(1, len(en_names)+1)]
+        bubble = (
+            alt.Chart(wide)
+              .mark_bar(size=max(40, bar_size), opacity=0.001)
+              .encode(
+                  x=alt.X("bucket_label:N", sort=bucket_order),
+                  y=alt.Y("total:Q"),
+                  tooltip=tooltip_fields
+              )
+        )
 
-    bubble = (
-        alt.Chart(wide_safe)
-          .mark_bar(size=max(40, bar_size), opacity=0.001)
-          .encode(
-              x=alt.X("bucket_label:N", sort=bucket_order),
-              y=alt.Y("total:Q"),
-              tooltip=tooltip_fields
-          )
-    )
+        st.altair_chart((bars + bubble).properties(height=460), use_container_width=True)
 
-    st.altair_chart((bars + bubble).properties(height=460), use_container_width=True)
+with colB:
+    st.markdown("**Аспекты по урокам (ось X — S)**")
+    if asp_by_s_counts.empty:
+        st.info("Нет упоминаний аспектов (по S).")
+    else:
+        expected_labels = [f"{es} (EN: {en})" for es, en in ASPECTS_ES_EN]
+        present_s = [lbl for lbl in expected_labels if lbl in asp_by_s_counts["aspect"].unique()]
+
+        bars_s = (
+            alt.Chart(asp_by_s_counts).mark_bar(size=36)
+              .encode(
+                  x=alt.X("S:Q", title="Урок (S)"),
+                  y=alt.Y("sum(count):Q", title="Кол-во упоминаний"),
+                  color=alt.Color("aspect:N", title="Аспект", sort=present_s)
+              )
+        )
+
+        en_names = [en for _, en in ASPECTS_ES_EN]
+        tooltip_fields_s = [
+            alt.Tooltip("S:Q", title="Урок (S)"),
+            alt.Tooltip("total:Q", title="Всего упоминаний"),
+        ] + [alt.Tooltip(f"line{i}:N", title="") for i in range(1, len(en_names)+1)]
+
+        bubble_s = (
+            alt.Chart(asp_by_s_tool)
+              .mark_bar(size=36, opacity=0.001)
+              .encode(
+                  x=alt.X("S:Q"),
+                  y=alt.Y("total:Q"),
+                  tooltip=tooltip_fields_s
+              )
+        )
+
+        st.altair_chart((bars_s + bubble_s).properties(height=460), use_container_width=True)
 
 st.markdown("#### Упоминания вне шаблона")
 if unknown_all.empty:
