@@ -5,6 +5,8 @@ from oauth2client.service_account import ServiceAccountCredentials
 import altair as alt
 import json
 import string
+import re
+import unicodedata
 
 st.set_page_config(layout="wide", page_title="40 week courses")
 
@@ -139,6 +141,146 @@ def prep_distribution(df_f: pd.DataFrame, value_col: str, allowed_values: list, 
 
     val_order = [str(v) for v in allowed_values]
     return out, bucket_order, val_order, label_title
+
+# ===== Аспекты урока: словарь и утилиты =====
+ASPECTS_ES_EN = [
+    ("La materia que se enseñó", "The subject that was taught"),
+    ("La explicación del profesor", "The teacher's explanation"),
+    ("Actividades realizadas en la sala", "Activities done in the classroom"),
+    ("Tareas para hacer en casa", "Homework to do at home"),
+    ("La forma en que se comportó la clase", "How the class behaved"),
+    ("Cuando me aclararon las dudas", "When my questions were clarified"),
+    ("Cuando me trataron bien y con atención", "When I was treated well and attentively"),
+]
+
+def _norm(s: str) -> str:
+    if not isinstance(s, str):
+        s = "" if pd.isna(s) else str(s)
+    s = unicodedata.normalize("NFKD", s).casefold().strip()
+    s = re.sub(r"[^\w\s]", " ", s)
+    s = re.sub(r"\s+", " ", s)
+    return s
+
+_ASPECTS_NORM = [(_norm(es), es, en) for es, en in ASPECTS_ES_EN]
+
+# простая подстановка перевода для «неизвестных» (на базе частых слов)
+_BASIC_ES_EN = {
+    "materia":"subject","explicacion":"explanation","explicación":"explanation",
+    "profesor":"teacher","actividades":"activities","sala":"classroom",
+    "tareas":"homework","casa":"home","forma":"way","comporto":"behaved",
+    "comportó":"behaved","clase":"class","aclararon":"clarified","dudas":"doubts",
+    "trataron":"treated","bien":"well","atencion":"attention","atención":"attention"
+}
+def _naive_translate_es_en(text: str) -> str:
+    w = re.findall(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+", text)
+    out = []
+    for t in w:
+        k = unicodedata.normalize("NFKD", t).encode("ascii", "ignore").decode("ascii").lower()
+        out.append(_BASIC_ES_EN.get(k, t))
+    return " ".join(out) if out else ""
+
+def _detect_aspect_cols(df: pd.DataFrame, period_col: str = "E"):
+    """Ищем столбцы, где встречаются аспекты (кроме самого столбца периода)."""
+    if df.empty:
+        return []
+    candidates = []
+    for col in df.columns:
+        if col == period_col:
+            continue
+        s = df[col].astype(str).fillna("")
+        hits = 0
+        for es_norm, _, _ in _ASPECTS_NORM:
+            hits += s.apply(lambda v: es_norm in _norm(v)).sum()
+        if hits > 0:
+            candidates.append(col)
+    if not candidates:
+        skip = {"A","E","N","M","S","R","G","I"}
+        candidates = [c for c in df.columns if c not in skip]
+    return candidates
+
+def build_aspects_counts(df: pd.DataFrame, period_col: str = "E"):
+    """
+    Находит упоминания аспектов в строках (может быть несколько через ; , / | перенос строки).
+    Возвращает:
+      counts: DataFrame [period, aspect, count]
+      unknown: DataFrame [mention, en, total] — не совпавшие с шаблоном строки
+    """
+    if df.empty or period_col not in df.columns:
+        return pd.DataFrame(columns=["period","aspect","count"]), pd.DataFrame(columns=["mention","en","total"])
+
+    cols = _detect_aspect_cols(df, period_col)
+    if not cols:
+        return pd.DataFrame(columns=["period","aspect","count"]), pd.DataFrame(columns=["mention","en","total"])
+
+    rows, unknown = [], []
+
+    for _, r in df.iterrows():
+        period = str(r[period_col]).strip()
+        for c in cols:
+            v = r[c]
+            if pd.isna(v):
+                continue
+            text = str(v).strip()
+            if text.upper() in ("TRUE","FALSE"):
+                continue
+            parts = re.split(r"[;,/\n|]+", text) if re.search(r"[;,/\n|]", text) else [text]
+            for p in parts:
+                p_clean = p.strip()
+                t = _norm(p_clean)
+                if not t:
+                    continue
+                matched = False
+                # точное совпадение
+                for es_norm, es, en in _ASPECTS_NORM:
+                    if t == es_norm:
+                        rows.append((period, f"{es} (EN: {en})", 1))
+                        matched = True
+                        break
+                if not matched:
+                    # вхождение
+                    for es_norm, es, en in _ASPECTS_NORM:
+                        if es_norm in t:
+                            rows.append((period, f"{es} (EN: {en})", 1))
+                            matched = True
+                            break
+                if not matched:
+                    unknown.append(p_clean)
+
+    counts = pd.DataFrame(rows, columns=["period","aspect","count"])
+    if not counts.empty:
+        counts = counts.groupby(["period","aspect"], as_index=False)["count"].sum()
+
+    unknown_df = pd.DataFrame(unknown, columns=["mention"])
+    if not unknown_df.empty:
+        unknown_df["mention"] = unknown_df["mention"].str.strip()
+        unknown_df = (unknown_df.groupby("mention", as_index=False)
+                      .size().rename(columns={"size":"total"})
+                      .sort_values("total", ascending=False))
+        unknown_df["en"] = unknown_df["mention"].apply(_naive_translate_es_en)
+        unknown_df = unknown_df[["mention","en","total"]]
+    else:
+        unknown_df = pd.DataFrame(columns=["mention","en","total"])
+
+    return counts, unknown_df
+
+def _period_sort_order(series: pd.Series):
+    """Пытаемся отсортировать периоды как числа → даты → алфавит."""
+    vals = series.dropna().astype(str).unique().tolist()
+    # как числа
+    try:
+        pairs = sorted([(float(v), v) for v in vals], key=lambda x: x[0])
+        return [v for _, v in pairs]
+    except Exception:
+        pass
+    # как даты
+    tmp = pd.DataFrame({"p": vals})
+    tmp["d"] = pd.to_datetime(tmp["p"], errors="coerce")
+    tmp = tmp.sort_values("d", na_position="last")
+    if tmp["d"].notna().any():
+        return tmp["p"].tolist()
+    # иначе — алфавит
+    return sorted(vals)
+
 
 # ==================== ДАННЫЕ ====================
 
@@ -338,3 +480,46 @@ with col4:
               .properties(height=420)
         )
         st.altair_chart(bars2, use_container_width=True)
+
+# ---------- ЕЩЁ НИЖЕ: АСПЕКТЫ УРОКА (по периодам из колонки E) ----------
+st.markdown("---")
+st.subheader("Аспекты урока (по периодам из колонки E)")
+
+# собираем по обоим листам и объединяем
+aspects1, unknown1 = build_aspects_counts(df1, period_col="E")
+aspects2, unknown2 = build_aspects_counts(df2, period_col="E")
+
+aspects_all = pd.concat([aspects1, aspects2], ignore_index=True)
+unknown_all = pd.concat([unknown1, unknown2], ignore_index=True)
+
+if aspects_all.empty:
+    st.info("Не нашёл упоминаний аспектов по колонке E (проверь, где форма хранит выбор аспектов).")
+else:
+    period_order = _period_sort_order(aspects_all["period"])
+    chart_aspects = (
+        alt.Chart(aspects_all)
+          .mark_bar(size=max(40, bar_size))  # делаем заметно шире
+          .encode(
+              x=alt.X("period:N", title="Период (E)", sort=period_order),
+              y=alt.Y("sum(count):Q", title="Суммарное кол-во упоминаний"),
+              color=alt.Color("aspect:N", title="Аспект (с EN переводом)"),
+              tooltip=[
+                  alt.Tooltip("period:N", title="Период"),
+                  alt.Tooltip("aspect:N", title="Аспект"),
+                  alt.Tooltip("sum(count):Q", title="Кол-во")
+              ]
+          )
+          .properties(height=460)
+    )
+    st.altair_chart(chart_aspects, use_container_width=True)
+
+# неизвестные упоминания (не из шаблона)
+st.markdown("#### Неизвестные упоминания (не из шаблона)")
+if unknown_all.empty:
+    st.success("Все упоминания соответствуют шаблону.")
+else:
+    unknown_agg = (unknown_all.groupby(["mention","en"], as_index=False)
+                              .agg(total=("total","sum"))
+                              .sort_values("total", ascending=False))
+    st.dataframe(unknown_agg, use_container_width=True)
+
