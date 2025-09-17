@@ -96,7 +96,7 @@ def ensure_bucket_and_label(dff: pd.DataFrame, date_col: str, granularity: str) 
         fmt = "%Y-%m-%d"
     elif granularity == "Неделя":
         fmt = "W%W (%Y-%m-%d)"  # дата старта недели
-    elif granularity == "Месяц":
+    elif гранулярность := granularity == "Месяц":
         fmt = "%Y-%m"
     elif granularity == "Год":
         fmt = "%Y"
@@ -156,7 +156,6 @@ ASPECTS_ES_EN = [
 def _norm(s: str) -> str:
     if not isinstance(s, str):
         s = "" if pd.isna(s) else str(s)
-    import unicodedata, re
     s = unicodedata.normalize("NFKD", s).casefold().strip()
     s = re.sub(r"[^\w\s]", " ", s)
     s = re.sub(r"\s+", " ", s)
@@ -169,10 +168,9 @@ _BASIC_ES_EN = {
     "profesor":"teacher","actividades":"activities","sala":"classroom",
     "tareas":"homework","casa":"home","forma":"way","comporto":"behaved",
     "comportó":"behaved","clase":"class","aclararon":"clarified","dudas":"doubts",
-    "trataron":"treated","bien":"well","atencion":"attention","atención":"attention"
+    "trataron":"treated","bien":"well","atencion":"attention","атención":"attention"
 }
 def _naive_translate_es_en(text: str) -> str:
-    import unicodedata, re
     w = re.findall(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+", text)
     out = []
     for t in w:
@@ -197,11 +195,10 @@ def build_aspects_counts_from_E_by_A(df: pd.DataFrame, granularity: str):
         return pd.DataFrame(columns=["bucket","bucket_label","aspect","count"]), pd.DataFrame(columns=["mention","en","total"])
 
     # bucket & подпись по дате A
-    d = add_bucket(d.rename(columns={"A":"A", "E":"E"}), "A", granularity)
+    d = add_bucket(d, "A", granularity)
     d = ensure_bucket_and_label(d, "A", granularity)
 
     rows, unknown = [], []
-    import re
     for _, r in d.iterrows():
         text = r["E"]
         if pd.isna(text):
@@ -474,12 +471,12 @@ else:
                     .drop_duplicates()
                     .sort_values("bucket")["bucket_label"].tolist())
 
-    # легенда остаётся как есть (испанский + EN), а для тултипа возьмём чисто EN
-    expected_es_en = ASPECTS_ES_EN[:]  # [(es, en), ...]
+    # легенда (испанский + EN), а для тултипа — только EN
+    expected_es_en = ASPECTS_ES_EN[:]  # [(es, en)]
     expected_labels = [f"{es} (EN: {en})" for es, en in expected_es_en]
     present = [lbl for lbl in expected_labels if lbl in aspects_all["aspect"].unique()]
 
-    # --- stacked bar (визуал)
+    # --- stacked bar
     bars = (
         alt.Chart(aspects_all)
           .mark_bar(size=max(40, bar_size))
@@ -490,26 +487,27 @@ else:
           )
     )
 
-    # --- подготовим «умный» тултип в pandas: 1 строка на период с уже собранным текстом
+    # --- данные для «супер-тултипа» в pandas
     wide = (aspects_all
             .pivot_table(index=["bucket","bucket_label"], columns="aspect",
                          values="count", aggfunc="sum", fill_value=0))
 
+    # гарантируем полный набор колонок и порядок
     for lbl in expected_labels:
         if lbl not in wide.columns:
             wide[lbl] = 0
     wide = wide[expected_labels]
 
-    # безопасные счётчики
+    # безопасные имена столбцов
     safe_map = {lbl: f"c_{i}" for i, lbl in enumerate(expected_labels)}
     wide_safe = wide.rename(columns=safe_map).reset_index()
     count_cols = list(safe_map.values())
     wide_safe["total"] = wide_safe[count_cols].sum(axis=1)
 
-    # делаем одну текстовую колонку `lines` с сортировкой по убыванию
-    en_names = [en for _, en in expected_es_en]
+    # формируем line1..line7 (EN — count (pct)), сортировка по убыванию
+    en_names = [en for _, en in ASPECTS_ES_EN]
 
-    def _make_lines(row):
+    def make_lines_cols(row):
         tot = row["total"]
         items = []
         for i, en in enumerate(en_names):
@@ -517,23 +515,31 @@ else:
             pct = (cnt / tot) if tot else 0.0
             items.append((en, cnt, pct))
         items.sort(key=lambda x: x[1], reverse=True)
-        # формат: English — count (xx%)
-        return "\n".join(f"{en} — {cnt} ({pct:.0%})" for en, cnt, pct in items)
+        for idx in range(len(en_names)):
+            if idx < len(items):
+                en, cnt, pct = items[idx]
+                row[f"line{idx+1}"] = f"{en} — {cnt} ({pct:.0%})"
+            else:
+                row[f"line{idx+1}"] = ""
+        return row
 
-    wide_safe["lines"] = wide_safe.apply(_make_lines, axis=1)
+    wide_safe = wide_safe.apply(make_lines_cols, axis=1)
 
-    # один большой тултип по всему столбцу: период, всего, далее многострочный список
+    # тултип: период, всего, затем строки line1..line7
+    tooltip_fields = [
+        alt.Tooltip("bucket_label:N", title="Период"),
+        alt.Tooltip("total:Q", title="Всего упоминаний"),
+    ]
+    for i in range(1, len(en_names) + 1):
+        tooltip_fields.append(alt.Tooltip(f"line{i}:N", title=""))
+
     bubble = (
         alt.Chart(wide_safe)
           .mark_bar(size=max(40, bar_size), opacity=0.001)
           .encode(
               x=alt.X("bucket_label:N", sort=bucket_order),
               y=alt.Y("total:Q"),
-              tooltip=[
-                  alt.Tooltip("bucket_label:N", title="Период"),
-                  alt.Tooltip("total:Q", title="Всего упоминаний"),
-                  alt.Tooltip("lines:N", title=""),  # многострочный список EN — N (XX%)
-              ]
+              tooltip=tooltip_fields
           )
     )
 
