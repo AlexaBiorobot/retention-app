@@ -147,7 +147,7 @@ ASPECTS_ES_EN = [
     ("Tareas para hacer en casa", "Homework to do at home"),
     ("La forma en que se comportó la clase", "How the class behaved"),
     ("Cuando me aclararon las dudas", "When my questions were clarified"),
-    ("Cuando me trataron bien y con atención", "When I was treated well and attentively"),
+    ("Cuando me trataron bien и con atención", "When I was treated well and attentively"),
 ]
 
 def _norm(s: str) -> str:
@@ -167,7 +167,7 @@ _BASIC_ES_EN = {
     "profesor":"teacher","actividades":"activities","sala":"classroom",
     "tareas":"homework","casa":"home","forma":"way","comporto":"behaved",
     "comportó":"behaved","clase":"class","aclararon":"clarified","dudas":"doubts",
-    "trataron":"treated","bien":"well","atencion":"attention","атención":"attention"
+    "trataron":"treated","bien":"well","atencion":"attention","atención":"attention"
 }
 
 def _naive_translate_es_en(text: str) -> str:
@@ -316,7 +316,7 @@ def build_aspects_counts_by_S(df: pd.DataFrame):
 
 # ==================== ДАННЫЕ ====================
 
-df1 = load_sheet_as_letter_df("Form Responses 1")   # A=date, N=course, S=x, G=y
+df1 = load_sheet_as_letter_df("Form Responses 1")   # A=date, N=course, S=x, G=y, E=text
 df2 = load_sheet_as_letter_df("Form Responses 2")   # A=date, M=course, R=x, I=y
 
 # Приведение типов
@@ -575,15 +575,23 @@ with colB:
         expected_labels = [f"{es} (EN: {en})" for es, en in ASPECTS_ES_EN]
         present_s = [lbl for lbl in expected_labels if lbl in asp_by_s_counts["aspect"].unique()]
 
-        bars_s = (
-            alt.Chart(asp_by_s_counts).mark_bar(size=36)
+        # ------ ЛИНИИ вместо столбцов ------
+        lines_s = (
+            alt.Chart(asp_by_s_counts)
+              .mark_line(point=True, interpolate="monotone")
               .encode(
                   x=alt.X("S:Q", title="Урок (S)"),
-                  y=alt.Y("sum(count):Q", title="Кол-во упоминаний"),
-                  color=alt.Color("aspect:N", title="Аспект", sort=present_s)
+                  y=alt.Y("count:Q", title="Кол-во упоминаний"),
+                  color=alt.Color("aspect:N", title="Аспект", sort=present_s),
+                  tooltip=[
+                      alt.Tooltip("S:Q", title="Урок (S)"),
+                      alt.Tooltip("aspect:N", title="Аспект"),
+                      alt.Tooltip("count:Q", title="Кол-во")
+                  ]
               )
         )
 
+        # Прозрачный слой для единого «супер-тултипа» по каждому S
         en_names = [en for _, en in ASPECTS_ES_EN]
         tooltip_fields_s = [
             alt.Tooltip("S:Q", title="Урок (S)"),
@@ -600,16 +608,16 @@ with colB:
               )
         )
 
-        st.altair_chart((bars_s + bubble_s).properties(height=460), use_container_width=True)
+        st.altair_chart((lines_s + bubble_s).properties(height=460), use_container_width=True)
 
 st.markdown("#### Упоминания вне шаблона")
-if unknown_all.empty:
-    st.success("Все упоминания соответствуют шаблону.")
-else:
+if 'unknown_all' in locals() and not unknown_all.empty:
     unknown_agg = (unknown_all.groupby(["en","mention"], as_index=False)
                               .agg(total=("total","sum"))
                               .sort_values("total", ascending=False))
     st.dataframe(unknown_agg[["en","mention","total"]], use_container_width=True)
+else:
+    st.success("Все упоминания соответствуют шаблону.")
 
 # Подсказка, если онлайн-переводчик недоступен
 if _gt is None:
