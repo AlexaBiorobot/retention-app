@@ -161,14 +161,13 @@ def _norm(s: str) -> str:
 
 _ASPECTS_NORM = [(_norm(es), es, en) for es, en in ASPECTS_ES_EN]
 
-# простой пословный словарик (fallback)
 _BASIC_ES_EN = {
     "si": "yes", "sí": "yes", "no": "no", "ok": "ok",
     "materia":"subject","explicacion":"explanation","explicación":"explanation",
     "profesor":"teacher","actividades":"activities","sala":"classroom",
     "tareas":"homework","casa":"home","forma":"way","comporto":"behaved",
     "comportó":"behaved","clase":"class","aclararon":"clarified","dudas":"doubts",
-    "trataron":"treated","bien":"well","atencion":"attention","atención":"attention"
+    "trataron":"treated","bien":"well","atencion":"attention","атención":"attention"
 }
 
 def _naive_translate_es_en(text: str) -> str:
@@ -376,27 +375,6 @@ selected_lessons = st.sidebar.multiselect(
     help="Фильтр единый для S (FR1) и R (FR2)"
 )
 
-# Фразы (EN)
-aspect_en_options = [en for _, en in ASPECTS_ES_EN]
-if "aspects_selected" not in st.session_state:
-    st.session_state["aspects_selected"] = aspect_en_options.copy()
-
-fa1, fa2 = st.sidebar.columns(2)
-if fa1.button("All phrases"):
-    st.session_state["aspects_selected"] = aspect_en_options.copy()
-    st.rerun()
-if fa2.button("Clear phrases"):
-    st.session_state["aspects_selected"] = []
-    st.rerun()
-
-selected_aspects = st.sidebar.multiselect(
-    "Шаблонные фразы (EN)",
-    options=aspect_en_options,
-    default=st.session_state["aspects_selected"],
-    key="aspects_selected",
-    help="Выберите, какие аспекты (EN) отображать"
-)
-
 # ==================== ПРИМЕНЕНИЕ ФИЛЬТРОВ ====================
 
 # Верхние графики (средние)
@@ -543,7 +521,7 @@ with col4:
 st.markdown("---")
 st.subheader("Аспекты урока — Form Responses 1")
 
-# FR1 для аспектов с учётом S/R-фильтра
+# FR1 для аспектов с учётом S-фильтра
 df_aspects = df1_base.copy()
 if not df_aspects.empty and selected_lessons:
     df_aspects["S_num"] = pd.to_numeric(df_aspects["S"], errors="coerce")
@@ -557,106 +535,114 @@ if asp_counts.empty:
     st.info("Не нашёл упоминаний аспектов (лист 'Form Responses 1', колонка E).")
 else:
     asp_counts["aspect_en"] = asp_counts["aspect"].apply(aspect_to_en_label)
-    if selected_aspects:
-        asp_counts = asp_counts[asp_counts["aspect_en"].isin(selected_aspects)]
-    if asp_counts.empty:
-        st.info("Не осталось данных после фильтра по фразам.")
-    else:
-        bucket_order = (asp_counts[["bucket","bucket_label"]]
-                        .drop_duplicates()
-                        .sort_values("bucket")["bucket_label"].tolist())
 
-        totals_by_bucket = (asp_counts.groupby("bucket_label", as_index=False)["count"]
-                                      .sum().rename(columns={"count":"total"}))
-        y_max = max(1, int(totals_by_bucket["total"].max()))
-        y_scale_bar = alt.Scale(domain=[0, y_max * 1.1], nice=False, clamp=True)
+    bucket_order = (asp_counts[["bucket","bucket_label"]]
+                    .drop_duplicates()
+                    .sort_values("bucket")["bucket_label"].tolist())
 
-        present = (asp_counts["aspect"].unique().tolist())
+    totals_by_bucket = (asp_counts.groupby("bucket_label", as_index=False)["count"]
+                                  .sum().rename(columns={"count":"total"}))
+    y_max = max(1, int(totals_by_bucket["total"].max()))
+    y_scale_bar = alt.Scale(domain=[0, y_max * 1.1], nice=False, clamp=True)
 
-        bars = (
-            alt.Chart(asp_counts).mark_bar(size=max(40, BAR_SIZE.get(granularity, 36)))
-              .encode(
-                  x=alt.X("bucket_label:N", title="Период (по A)", sort=bucket_order),
-                  y=alt.Y("sum(count):Q", title="Кол-во упоминаний", scale=y_scale_bar),
-                  color=alt.Color("aspect:N", title="Аспект", sort=present)
-              )
-        )
+    present = (asp_counts["aspect"].unique().tolist())
 
-        wide = (asp_counts.pivot_table(index=["bucket","bucket_label"],
-                                       columns="aspect_en", values="count",
-                                       aggfunc="sum", fill_value=0))
-        col_order = list(wide.sum(axis=0).sort_values(ascending=False).index)
-        safe_map = {c: f"c_{i}" for i, c in enumerate(col_order)}
-        wide_safe = wide.rename(columns=safe_map).reset_index()
-        ccols = list(safe_map.values())
-        wide_safe["total"] = wide_safe[ccols].sum(axis=1)
-
-        def _mk_lines(row):
-            tot = row["total"]
-            items = []
-            for i, name in enumerate(col_order):
-                c = int(row[ccols[i]])
-                p = (c / tot) if tot else 0.0
-                items.append((name, c, p))
-            items.sort(key=lambda x: x[1], reverse=True)
-            for idx in range(len(col_order)):
-                if idx < len(items):
-                    name, c, p = items[idx]
-                    row[f"line{idx+1}"] = f"{name} — {c} ({p:.0%})"
-                else:
-                    row[f"line{idx+1}"] = ""
-            return row
-
-        wide_safe = wide_safe.apply(_mk_lines, axis=1)
-
-        tooltip_fields = [
-            alt.Tooltip("bucket_label:N", title="Период"),
-            alt.Tooltip("total:Q", title="Всего упоминаний"),
-        ] + [alt.Tooltip(f"line{i}:N", title="") for i in range(1, len(col_order)+1)]
-
-        bubble = (
-            alt.Chart(wide_safe)
-              .mark_bar(size=max(40, BAR_SIZE.get(granularity, 36)), opacity=0.001)
-              .encode(
-                  x=alt.X("bucket_label:N", sort=bucket_order),
-                  y=alt.Y("total:Q", scale=y_scale_bar),
-                  tooltip=tooltip_fields
-              )
-        )
-
-        st.altair_chart((bars + bubble).properties(height=460),
-                        theme=None, use_container_width=True)
-
-# --------- ГРАФИК «Распределение по урокам (ось X — S)» ---------
-st.markdown("---")
-st.subheader("Распределение по урокам (ось X — S) — график")
-
-cnt_by_s_all = build_aspects_counts_by_S(df_aspects)
-# фильтр по фразам (EN)
-if not cnt_by_s_all.empty and selected_aspects:
-    cnt_by_s = cnt_by_s_all[cnt_by_s_all["aspect_en"].isin(selected_aspects)].copy()
-else:
-    cnt_by_s = cnt_by_s_all.copy()
-
-if cnt_by_s.empty:
-    st.info("Нет данных для графика по урокам.")
-else:
-    totals_s = cnt_by_s.groupby("S", as_index=False)["count"].sum().rename(columns={"count":"total"})
-    y_max_s = int(totals_s["total"].max()) if len(totals_s) else 0
-    y_scale_s = alt.Scale(domain=[0, max(1, y_max_s) * 1.1], nice=False, clamp=True)
-
-    bars_s = (
-        alt.Chart(cnt_by_s)
-          .mark_bar(size=28)
+    bars = (
+        alt.Chart(asp_counts).mark_bar(size=max(40, BAR_SIZE.get(granularity, 36)))
           .encode(
-              x=alt.X("S:O", title="S", sort="ascending"),
-              y=alt.Y("sum(count):Q", title="Кол-во упоминаний", scale=y_scale_s),
-              color=alt.Color("aspect_en:N", title="Аспект (EN)")
+              x=alt.X("bucket_label:N", title="Период (по A)", sort=bucket_order),
+              y=alt.Y("sum(count):Q", title="Кол-во упоминаний", scale=y_scale_bar),
+              color=alt.Color("aspect:N", title="Аспект", sort=present)
           )
     )
 
-    pivot = cnt_by_s.pivot_table(index="S", columns="aspect_en", values="count",
-                                 aggfunc="sum", fill_value=0)
+    wide = (asp_counts.pivot_table(index=["bucket","bucket_label"],
+                                   columns="aspect_en", values="count",
+                                   aggfunc="sum", fill_value=0))
+    col_order = list(wide.sum(axis=0).sort_values(ascending=False).index)
+    safe_map = {c: f"c_{i}" for i, c in enumerate(col_order))
+    wide_safe = wide.rename(columns=safe_map).reset_index()
+    ccols = list(safe_map.values())
+    wide_safe["total"] = wide_safe[ccols].sum(axis=1)
+
+    def _mk_lines(row):
+        tot = row["total"]
+        items = []
+        for i, name in enumerate(col_order):
+            c = int(row[ccols[i]])
+            p = (c / tot) if tot else 0.0
+            items.append((name, c, p))
+        items.sort(key=lambda x: x[1], reverse=True)
+        for idx in range(len(col_order)):
+            if idx < len(items):
+                name, c, p = items[idx]
+                row[f"line{idx+1}"] = f"{name} — {c} ({p:.0%})"
+            else:
+                row[f"line{idx+1}"] = ""
+        return row
+
+    wide_safe = wide_safe.apply(_mk_lines, axis=1)
+
+    tooltip_fields = [
+        alt.Tooltip("bucket_label:N", title="Период"),
+        alt.Tooltip("total:Q", title="Всего упоминаний"),
+    ] + [alt.Tooltip(f"line{i}:N", title="") for i in range(1, len(col_order)+1)]
+
+    bubble = (
+        alt.Chart(wide_safe)
+          .mark_bar(size=max(40, BAR_SIZE.get(granularity, 36)), opacity=0.001)
+          .encode(
+              x=alt.X("bucket_label:N", sort=bucket_order),
+              y=alt.Y("total:Q", scale=y_scale_bar),
+              tooltip=tooltip_fields
+          )
+    )
+
+    st.altair_chart((bars + bubble).properties(height=460),
+                    theme=None, use_container_width=True)
+
+# --------- ГРАФИК «Распределение по урокам (ось X — S)» В % ---------
+st.markdown("---")
+st.subheader("Распределение по урокам (ось X — S) — график (в %)")
+
+cnt_by_s_all = build_aspects_counts_by_S(df_aspects)
+if cnt_by_s_all.empty:
+    st.info("Нет данных для графика по урокам.")
+else:
+    # Подготавливаем набор данных с долями по S
+    chart_pct = (
+        alt.Chart(cnt_by_s_all)
+          # аггрегируем количество по (S, aspect_en)
+          .transform_aggregate(count='sum(count)', groupby=['S', 'aspect_en'])
+          # считаем общий total по S
+          .transform_joinaggregate(total='sum(count)', groupby=['S'])
+          # считаем долю
+          .transform_calculate(pct='datum.count / datum.total')
+    )
+
+    # основной стак: по % (0..1)
+    bars_s = (
+        chart_pct.mark_bar(size=28)
+          .encode(
+              x=alt.X("S:O", title="S", sort="ascending"),
+              y=alt.Y("count:Q",
+                      stack="normalize",
+                      axis=alt.Axis(format="%", title="% от упоминаний"),
+                      scale=alt.Scale(domain=[0,1], nice=False, clamp=True)),
+              color=alt.Color("aspect_en:N", title="Аспект (EN)"),
+              tooltip=[
+                  alt.Tooltip("S:O", title="Урок"),
+                  alt.Tooltip("aspect_en:N", title="Аспект"),
+                  alt.Tooltip("count:Q", title="Кол-во"),
+                  alt.Tooltip("pct:Q", title="Доля", format=".0%"),
+                  alt.Tooltip("total:Q", title="Всего по уроку")
+              ]
+          )
+    )
+
+    # «большой» тултип на весь столбец (показывает список аспектов по убыванию)
+    pivot = cnt_by_s_all.pivot_table(index="S", columns="aspect_en", values="count",
+                                     aggfunc="sum", fill_value=0)
     col_order = list(pivot.sum(axis=0).sort_values(ascending=False).index)
     safe_cols = {c: f"c_{i}" for i, c in enumerate(col_order)}
     wide_s = pivot.rename(columns=safe_cols).reset_index()
@@ -687,10 +673,11 @@ else:
 
     bubble_s = (
         alt.Chart(wide_s)
+          .transform_calculate(one='1')
           .mark_bar(size=28, opacity=0.001)
           .encode(
               x=alt.X("S:O", sort="ascending"),
-              y=alt.Y("total:Q", scale=y_scale_s),
+              y=alt.Y("one:Q", scale=alt.Scale(domain=[0,1], nice=False, clamp=True)),
               tooltip=tooltip_s
           )
     )
@@ -725,8 +712,7 @@ if not df_aspects.empty and {"S","E"}.issubset(df_aspects.columns):
             matched = False
             for es_norm, es, en in _ASPECTS_NORM:
                 if t == es_norm or es_norm in t:
-                    if not selected_aspects or en in selected_aspects:
-                        rows_aspects.append((s_val, en))
+                    rows_aspects.append((s_val, en))
                     matched = True
                     break
             if not matched:
