@@ -486,30 +486,29 @@ with col4:
         )
         st.altair_chart(bars2, use_container_width=True)
 
-# ---------- НИЖЕ: Аспекты урока из FR1 ----------
+# ---------- НИЖЕ: Аспекты урока из FR1 (E по датам A) ----------
 st.markdown("---")
-st.subheader("Аспекты урока — слева по датам (A), справа по урокам (S) — Form Responses 1")
+st.subheader("Аспекты урока — Form Responses 1")
 
-# Фильтрация по тем же курсам/датам
+# Берём аспекты ТОЛЬКО из Form Responses 1: курс = N, дата = A, текст = E
 df_aspects = filter_df(df1, "N", "A", selected_courses, date_range)
-
-# Слева (по датам A)
 asp_counts, unknown_all = build_aspects_counts(df_aspects, text_col="E", date_col="A", granularity=granularity)
-# Справа (по урокам S)
-asp_by_s_counts, asp_by_s_tool = build_aspects_counts_by_S(df_aspects)
 
-colA, colB = st.columns([1.2, 1])
+left, right = st.columns([1, 1])
 
-with colA:
+with left:
+    st.markdown("**Аспекты по датам (ось X — A)**")
     if asp_counts.empty:
-        st.info("Нет упоминаний аспектов (по датам).")
+        st.info("Не нашёл упоминаний аспектов (лист 'Form Responses 1', колонка E).")
     else:
         bucket_order = (asp_counts[["bucket","bucket_label"]]
                         .drop_duplicates()
                         .sort_values("bucket")["bucket_label"].tolist())
+
         expected_labels = [f"{es} (EN: {en})" for es, en in ASPECTS_ES_EN]
         present = [lbl for lbl in expected_labels if lbl in asp_counts["aspect"].unique()]
 
+        # stacked bar по датам
         bars = (
             alt.Chart(asp_counts).mark_bar(size=max(40, bar_size))
               .encode(
@@ -520,18 +519,20 @@ with colA:
         )
 
         # «супер-тултип» по столбцу
-        safe_map = {lbl: f"c_{i}" for i, lbl in enumerate(expected_labels)}
-        wide = (asp_counts.pivot_table(index=["bucket","bucket_label"], columns="aspect",
-                                       values="count", aggfunc="sum", fill_value=0))
+        wide = (asp_counts
+                .pivot_table(index=["bucket","bucket_label"], columns="aspect",
+                             values="count", aggfunc="sum", fill_value=0))
         for lbl in expected_labels:
             if lbl not in wide.columns:
                 wide[lbl] = 0
         wide = wide[expected_labels]
-        wide = wide.rename(columns=safe_map).reset_index()
-        cols = list(safe_map.values())
-        wide["total"] = wide[cols].sum(axis=1)
-        en_names = [en for _, en in ASPECTS_ES_EN]
 
+        safe_map = {lbl: f"c_{i}" for i, lbl in enumerate(expected_labels)}
+        wide_safe = wide.rename(columns=safe_map).reset_index()
+        cols = list(safe_map.values())
+        wide_safe["total"] = wide_safe[cols].sum(axis=1)
+
+        en_names = [en for _, en in ASPECTS_ES_EN]
         def make_lines_cols(row):
             tot = row["total"]
             items = []
@@ -548,7 +549,7 @@ with colA:
                     row[f"line{idx+1}"] = ""
             return row
 
-        wide = wide.apply(make_lines_cols, axis=1)
+        wide_safe = wide_safe.apply(make_lines_cols, axis=1)
 
         tooltip_fields = [
             alt.Tooltip("bucket_label:N", title="Период"),
@@ -556,7 +557,7 @@ with colA:
         ] + [alt.Tooltip(f"line{i}:N", title="") for i in range(1, len(en_names)+1)]
 
         bubble = (
-            alt.Chart(wide)
+            alt.Chart(wide_safe)
               .mark_bar(size=max(40, bar_size), opacity=0.001)
               .encode(
                   x=alt.X("bucket_label:N", sort=bucket_order),
@@ -567,48 +568,60 @@ with colA:
 
         st.altair_chart((bars + bubble).properties(height=460), use_container_width=True)
 
-with colB:
-    st.markdown("**Аспекты по урокам (ось X — S)**")
-    if asp_by_s_counts.empty:
-        st.info("Нет упоминаний аспектов (по S).")
-    else:
-        expected_labels = [f"{es} (EN: {en})" for es, en in ASPECTS_ES_EN]
-        present_s = [lbl for lbl in expected_labels if lbl in asp_by_s_counts["aspect"].unique()]
+with right:
+    st.markdown("**Аспекты по урокам (ось X — S) — кривые**")
+    # данные только из FR1 и внутри текущих фильтров
+    df_aspects_s = df_aspects.copy()
 
-        # ------ ЛИНИИ вместо столбцов ------
-        lines_s = (
-            alt.Chart(asp_by_s_counts)
-              .mark_line(point=True, interpolate="monotone")
+    rows = []
+    if not df_aspects_s.empty and {"S", "E"}.issubset(df_aspects_s.columns):
+        df_tmp = df_aspects_s[["S", "E"]].copy()
+        df_tmp["S"] = pd.to_numeric(df_tmp["S"], errors="coerce")
+        df_tmp = df_tmp.dropna(subset=["S"])
+        for _, r in df_tmp.iterrows():
+            txt = str(r["E"] or "").strip()
+            if not txt:
+                continue
+            parts = re.split(r"[;,/\n|]+", txt) if re.search(r"[;,/\n|]", txt) else [txt]
+            for p in parts:
+                t = _norm(p.strip())
+                if not t:
+                    continue
+                # матчим по шаблонам аспектов
+                for es_norm, es, en in _ASPECTS_NORM:
+                    if t == es_norm or es_norm in t:
+                        rows.append((int(r["S"]), f"{es} (EN: {en})", 1))
+                        break
+
+    aspect_by_s = pd.DataFrame(rows, columns=["S", "aspect", "count"])
+    if aspect_by_s.empty:
+        st.info("Нет данных для выбранных фильтров.")
+    else:
+        aspect_by_s = (aspect_by_s
+                       .groupby(["S", "aspect"], as_index=False)["count"]
+                       .sum()
+                       .sort_values(["S", "aspect"]))
+
+        # динамический верх оси Y (чтобы не было лишнего воздуха сверху)
+        y_max = max(1, int(aspect_by_s["count"].max()))
+        y_scale = alt.Scale(domain=[0, y_max * 1.05], nice=False)
+
+        chart_s_lines = (
+            alt.Chart(aspect_by_s)
+              .mark_line(point=True)
               .encode(
-                  x=alt.X("S:Q", title="Урок (S)"),
-                  y=alt.Y("count:Q", title="Кол-во упоминаний"),
-                  color=alt.Color("aspect:N", title="Аспект", sort=present_s),
+                  x=alt.X("S:Q", title="S", axis=alt.Axis(tickMinStep=1)),
+                  y=alt.Y("count:Q", title="Кол-во упоминаний", scale=y_scale),
+                  color=alt.Color("aspect:N", title="Аспект"),
                   tooltip=[
-                      alt.Tooltip("S:Q", title="Урок (S)"),
+                      alt.Tooltip("S:Q", title="S"),
                       alt.Tooltip("aspect:N", title="Аспект"),
-                      alt.Tooltip("count:Q", title="Кол-во")
+                      alt.Tooltip("count:Q", title="Кол-во"),
                   ]
               )
+              .properties(height=460)
         )
-
-        # Прозрачный слой для единого «супер-тултипа» по каждому S
-        en_names = [en for _, en in ASPECTS_ES_EN]
-        tooltip_fields_s = [
-            alt.Tooltip("S:Q", title="Урок (S)"),
-            alt.Tooltip("total:Q", title="Всего упоминаний"),
-        ] + [alt.Tooltip(f"line{i}:N", title="") for i in range(1, len(en_names)+1)]
-
-        bubble_s = (
-            alt.Chart(asp_by_s_tool)
-              .mark_bar(size=36, opacity=0.001)
-              .encode(
-                  x=alt.X("S:Q"),
-                  y=alt.Y("total:Q"),
-                  tooltip=tooltip_fields_s
-              )
-        )
-
-        st.altair_chart((lines_s + bubble_s).properties(height=460), use_container_width=True)
+        st.altair_chart(chart_s_lines, use_container_width=True)
 
 st.markdown("#### Упоминания вне шаблона")
 if 'unknown_all' in locals() and not unknown_all.empty:
