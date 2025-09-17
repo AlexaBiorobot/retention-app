@@ -168,7 +168,7 @@ _BASIC_ES_EN = {
     "profesor":"teacher","actividades":"activities","sala":"classroom",
     "tareas":"homework","casa":"home","forma":"way","comporto":"behaved",
     "comportó":"behaved","clase":"class","aclararon":"clarified","dudas":"doubts",
-    "trataron":"treated","bien":"well","atencion":"attention","атención":"attention"
+    "trataron":"treated","bien":"well","atencion":"attention","atención":"attention"
 }
 
 def _naive_translate_es_en(text: str) -> str:
@@ -285,7 +285,7 @@ def aspect_to_en_label(s: str) -> str:
 
 # ==================== ДАННЫЕ ====================
 
-df1 = load_sheet_as_letter_df("Form Responses 1")   # A=date, N=course, S=x, G=y
+df1 = load_sheet_as_letter_df("Form Responses 1")   # A=date, N=course, S=x, G=y, E=aspects
 df2 = load_sheet_as_letter_df("Form Responses 2")   # A=date, M=course, R=x, I=y
 
 # Приведение типов
@@ -303,11 +303,11 @@ for df, date_col, x_col, y_col in [
 
 st.sidebar.header("Фильтры")
 
+# Курсы
 courses_union = sorted(list(set(
     ([] if df1.empty else df1["N"].dropna().unique().tolist()) +
     ([] if df2.empty else df2["M"].dropna().unique().tolist())
 )))
-
 if "courses_selected" not in st.session_state:
     st.session_state["courses_selected"] = courses_union.copy()
 
@@ -342,31 +342,38 @@ granularity = st.sidebar.selectbox("Гранулярность для распр
 BAR_SIZE = {"День": 18, "Неделя": 44, "Месяц": 56, "Год": 64}
 bar_size = BAR_SIZE.get(granularity, 36)
 
-# ---- ДОП. ФИЛЬТРЫ: по урокам (S) и по шаблонным фразам (EN) ----
-# Опции S считаем после фильтра по курсам/датам (только FR1)
+# ---- БАЗОВЫЕ ФИЛЬТРЫ ПО КУРСАМ/ДАТЕ ДЛЯ ОБОИХ ЛИСТОВ ----
 df1_base = filter_df(df1, "N", "A", selected_courses, date_range)
+df2_base = filter_df(df2, "M", "A", selected_courses, date_range)
+
+# ---- ЕДИНЫЙ ФИЛЬТР УРОКОВ S/R (union значений S из FR1 и R из FR2) ----
 if not df1_base.empty and "S" in df1_base.columns:
-    s_options = sorted(pd.to_numeric(df1_base["S"], errors="coerce").dropna().astype(int).unique().tolist())
+    s_vals = pd.to_numeric(df1_base["S"], errors="coerce").dropna().astype(int).unique().tolist()
 else:
-    s_options = []
+    s_vals = []
+if not df2_base.empty and "R" in df2_base.columns:
+    r_vals = pd.to_numeric(df2_base["R"], errors="coerce").dropna().astype(int).unique().tolist()
+else:
+    r_vals = []
+lessons_options = sorted(list(set(s_vals + r_vals)))
 
 if "s_selected" not in st.session_state:
-    st.session_state["s_selected"] = s_options.copy()
+    st.session_state["s_selected"] = lessons_options.copy()
 
 sb1, sb2 = st.sidebar.columns(2)
-if sb1.button("All S"):
-    st.session_state["s_selected"] = s_options.copy()
+if sb1.button("All S/R"):
+    st.session_state["s_selected"] = lessons_options.copy()
     st.rerun()
-if sb2.button("Clear S"):
+if sb2.button("Clear S/R"):
     st.session_state["s_selected"] = []
     st.rerun()
 
-selected_s = st.sidebar.multiselect(
-    "Уроки (S)",
-    options=s_options,
+selected_lessons = st.sidebar.multiselect(
+    "Уроки (S/R)",
+    options=lessons_options,
     default=st.session_state["s_selected"],
     key="s_selected",
-    help="Ограничить анализ конкретными уроками"
+    help="Фильтр единый для S (FR1) и R (FR2)"
 )
 
 # Фразы (EN)
@@ -394,21 +401,27 @@ selected_aspects = st.sidebar.multiselect(
 
 # Верхние графики (средние)
 agg1 = apply_filters_and_aggregate(df1, "N", "A", "S", "G", selected_courses, date_range)
-if not agg1.empty and selected_s:
-    # привести S к int перед фильтрацией
+if not agg1.empty and selected_lessons:
     agg1["S"] = pd.to_numeric(agg1["S"], errors="coerce").astype("Int64")
-    agg1 = agg1[agg1["S"].isin(selected_s)]
+    agg1 = agg1[agg1["S"].isin(selected_lessons)]
     agg1["S"] = agg1["S"].astype(int)
 
 agg2 = apply_filters_and_aggregate(df2, "M", "A", "R", "I", selected_courses, date_range)
+if not agg2.empty and selected_lessons:
+    agg2["R"] = pd.to_numeric(agg2["R"], errors="coerce").astype("Int64")
+    agg2 = agg2[agg2["R"].isin(selected_lessons)]
+    agg2["R"] = agg2["R"].astype(int)
 
-# Нижние распределения: «сырые» значения + bucket/bucket_label
-df1_f = df1_base.copy()  # уже отфильтрованы курс/дата
-if not df1_f.empty and selected_s:
+# Нижние распределения (сырые) + S/R-фильтр
+df1_f = df1_base.copy()
+if not df1_f.empty and selected_lessons:
     df1_f["S_num"] = pd.to_numeric(df1_f["S"], errors="coerce")
-    df1_f = df1_f[df1_f["S_num"].isin(selected_s)]
+    df1_f = df1_f[df1_f["S_num"].isin(selected_lessons)]
 
-df2_f = filter_df(df2, "M", "A", selected_courses, date_range)
+df2_f = df2_base.copy()
+if not df2_f.empty and selected_lessons:
+    df2_f["R_num"] = pd.to_numeric(df2_f["R"], errors="coerce")
+    df2_f = df2_f[df2_f["R_num"].isin(selected_lessons)]
 
 if not df1_f.empty:
     df1_f = df1_f.dropna(subset=["A", "G"])
@@ -434,7 +447,6 @@ with col1:
     if agg1.empty:
         st.info("Нет данных для выбранных фильтров.")
     else:
-        # динамический Y
         y_min = float(agg1["avg_y"].min()) if len(agg1) else 0.0
         y_max = float(agg1["avg_y"].max()) if len(agg1) else 5.0
         pad = (y_max - y_min) * 0.1 if y_max > y_min else 0.5
@@ -489,7 +501,7 @@ with col3:
         st.info("Нет данных (FR1).")
     else:
         bars1 = (
-            alt.Chart(fr1_out).mark_bar(size=bar_size)
+            alt.Chart(fr1_out).mark_bar(size=BAR_SIZE.get(granularity, 36))
               .encode(
                   x=alt.X("bucket_label:N", title="Период", sort=fr1_bucket_order),
                   y=alt.Y("sum(count):Q", title="Кол-во ответов"),
@@ -511,7 +523,7 @@ with col4:
         st.info("Нет данных (FR2).")
     else:
         bars2 = (
-            alt.Chart(fr2_out).mark_bar(size=bar_size)
+            alt.Chart(fr2_out).mark_bar(size=BAR_SIZE.get(granularity, 36))
               .encode(
                   x=alt.X("bucket_label:N", title="Период", sort=fr2_bucket_order),
                   y=alt.Y("sum(count):Q", title="Кол-во ответов"),
@@ -531,11 +543,11 @@ with col4:
 st.markdown("---")
 st.subheader("Аспекты урока — Form Responses 1")
 
-# берем FR1 с учётом S-фильтра
+# FR1 для аспектов с учётом S/R-фильтра
 df_aspects = df1_base.copy()
-if not df_aspects.empty and selected_s:
+if not df_aspects.empty and selected_lessons:
     df_aspects["S_num"] = pd.to_numeric(df_aspects["S"], errors="coerce")
-    df_aspects = df_aspects[df_aspects["S_num"].isin(selected_s)]
+    df_aspects = df_aspects[df_aspects["S_num"].isin(selected_lessons)]
 
 asp_counts, _unknown_all = build_aspects_counts(df_aspects, text_col="E", date_col="A", granularity=granularity)
 
@@ -544,7 +556,6 @@ st.markdown("**Аспекты по датам (ось X — A)**")
 if asp_counts.empty:
     st.info("Не нашёл упоминаний аспектов (лист 'Form Responses 1', колонка E).")
 else:
-    # добавим столбец aspect_en и отфильтруем по выбранным фразам
     asp_counts["aspect_en"] = asp_counts["aspect"].apply(aspect_to_en_label)
     if selected_aspects:
         asp_counts = asp_counts[asp_counts["aspect_en"].isin(selected_aspects)]
@@ -560,11 +571,10 @@ else:
         y_max = max(1, int(totals_by_bucket["total"].max()))
         y_scale_bar = alt.Scale(domain=[0, y_max * 1.1], nice=False, clamp=True)
 
-        # Легенда только по выбранным/присутствующим
         present = (asp_counts["aspect"].unique().tolist())
 
         bars = (
-            alt.Chart(asp_counts).mark_bar(size=max(40, bar_size))
+            alt.Chart(asp_counts).mark_bar(size=max(40, BAR_SIZE.get(granularity, 36)))
               .encode(
                   x=alt.X("bucket_label:N", title="Период (по A)", sort=bucket_order),
                   y=alt.Y("sum(count):Q", title="Кол-во упоминаний", scale=y_scale_bar),
@@ -572,11 +582,9 @@ else:
               )
         )
 
-        # единый тултип
         wide = (asp_counts.pivot_table(index=["bucket","bucket_label"],
                                        columns="aspect_en", values="count",
                                        aggfunc="sum", fill_value=0))
-        # порядок колонок по сумме
         col_order = list(wide.sum(axis=0).sort_values(ascending=False).index)
         safe_map = {c: f"c_{i}" for i, c in enumerate(col_order)}
         wide_safe = wide.rename(columns=safe_map).reset_index()
@@ -608,7 +616,7 @@ else:
 
         bubble = (
             alt.Chart(wide_safe)
-              .mark_bar(size=max(40, bar_size), opacity=0.001)
+              .mark_bar(size=max(40, BAR_SIZE.get(granularity, 36)), opacity=0.001)
               .encode(
                   x=alt.X("bucket_label:N", sort=bucket_order),
                   y=alt.Y("total:Q", scale=y_scale_bar),
@@ -717,7 +725,6 @@ if not df_aspects.empty and {"S","E"}.issubset(df_aspects.columns):
             matched = False
             for es_norm, es, en in _ASPECTS_NORM:
                 if t == es_norm or es_norm in t:
-                    # применим фильтр фраз
                     if not selected_aspects or en in selected_aspects:
                         rows_aspects.append((s_val, en))
                     matched = True
