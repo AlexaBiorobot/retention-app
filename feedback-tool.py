@@ -168,7 +168,7 @@ _BASIC_ES_EN = {
     "profesor":"teacher","actividades":"activities","sala":"classroom",
     "tareas":"homework","casa":"home","forma":"way","comporto":"behaved",
     "comportó":"behaved","clase":"class","aclararon":"clarified","dudas":"doubts",
-    "trataron":"treated","bien":"well","atencion":"attention","атención":"attention"
+    "trataron":"treated","bien":"well","atencion":"attention","atención":"attention"
 }
 
 def _naive_translate_es_en(text: str) -> str:
@@ -470,170 +470,85 @@ st.subheader("Аспекты урока — Form Responses 1")
 df_aspects = filter_df(df1, "N", "A", selected_courses, date_range)
 asp_counts, _unknown_all = build_aspects_counts(df_aspects, text_col="E", date_col="A", granularity=granularity)
 
-left, right = st.columns([1, 1])
+# ---- График: «Аспекты по датам (ось X — A)» с единым тултипом ----
+st.markdown("**Аспекты по датам (ось X — A)**")
+if asp_counts.empty:
+    st.info("Не нашёл упоминаний аспектов (лист 'Form Responses 1', колонка E).")
+else:
+    bucket_order = (asp_counts[["bucket","bucket_label"]]
+                    .drop_duplicates()
+                    .sort_values("bucket")["bucket_label"].tolist())
 
-# ---- Левая половина: «Аспекты по датам (ось X — A)» с единым тултипом ----
-with left:
-    st.markdown("**Аспекты по датам (ось X — A)**")
-    if asp_counts.empty:
-        st.info("Не нашёл упоминаний аспектов (лист 'Form Responses 1', колонка E).")
-    else:
-        bucket_order = (asp_counts[["bucket","bucket_label"]]
-                        .drop_duplicates()
-                        .sort_values("bucket")["bucket_label"].tolist())
+    totals_by_bucket = (asp_counts.groupby("bucket_label", as_index=False)["count"]
+                                  .sum().rename(columns={"count":"total"}))
+    y_max = max(1, int(totals_by_bucket["total"].max()))
+    y_scale_bar = alt.Scale(domain=[0, y_max * 1.1], nice=False, clamp=True)
 
-        totals_by_bucket = (asp_counts.groupby("bucket_label", as_index=False)["count"]
-                                      .sum().rename(columns={"count":"total"}))
-        y_max = max(1, int(totals_by_bucket["total"].max()))
-        y_scale_bar = alt.Scale(domain=[0, y_max * 1.1], nice=False, clamp=True)
+    expected_labels = [f"{es} (EN: {en})" for es, en in ASPECTS_ES_EN]
+    present = [lbl for lbl in expected_labels if lbl in asp_counts["aspect"].unique()]
 
-        expected_labels = [f"{es} (EN: {en})" for es, en in ASPECTS_ES_EN]
-        present = [lbl for lbl in expected_labels if lbl in asp_counts["aspect"].unique()]
+    bars = (
+        alt.Chart(asp_counts).mark_bar(size=max(40, bar_size))
+          .encode(
+              x=alt.X("bucket_label:N", title="Период (по A)", sort=bucket_order),
+              y=alt.Y("sum(count):Q", title="Кол-во упоминаний", scale=y_scale_bar),
+              color=alt.Color("aspect:N", title="Аспект", sort=present)
+          )
+    )
 
-        bars = (
-            alt.Chart(asp_counts).mark_bar(size=max(40, bar_size))
-              .encode(
-                  x=alt.X("bucket_label:N", title="Период (по A)", sort=bucket_order),
-                  y=alt.Y("sum(count):Q", title="Кол-во упоминаний", scale=y_scale_bar),
-                  color=alt.Color("aspect:N", title="Аспект", sort=present)
-              )
-        )
+    # единый тултип
+    wide = (asp_counts.pivot_table(index=["bucket","bucket_label"],
+                                   columns="aspect", values="count",
+                                   aggfunc="sum", fill_value=0))
+    for lbl in expected_labels:
+        if lbl not in wide.columns:
+            wide[lbl] = 0
+    wide = wide[expected_labels]
 
-        # единый тултип
-        wide = (asp_counts.pivot_table(index=["bucket","bucket_label"],
-                                       columns="aspect", values="count",
-                                       aggfunc="sum", fill_value=0))
-        for lbl in expected_labels:
-            if lbl not in wide.columns:
-                wide[lbl] = 0
-        wide = wide[expected_labels]
+    safe_map = {lbl: f"c_{i}" for i, lbl in enumerate(expected_labels)}
+    wide_safe = wide.rename(columns=safe_map).reset_index()
+    cols = list(safe_map.values())
+    wide_safe["total"] = wide_safe[cols].sum(axis=1)
 
-        safe_map = {lbl: f"c_{i}" for i, lbl in enumerate(expected_labels)}
-        wide_safe = wide.rename(columns=safe_map).reset_index()
-        cols = list(safe_map.values())
-        wide_safe["total"] = wide_safe[cols].sum(axis=1)
+    en_names = [en for _, en in ASPECTS_ES_EN]
 
-        en_names = [en for _, en in ASPECTS_ES_EN]
-
-        def _mk_lines(row):
-            tot = row["total"]
-            items = []
-            for i, en in enumerate(en_names):
-                c = int(row[cols[i]])
-                p = (c / tot) if tot else 0.0
-                items.append((en, c, p))
-            items.sort(key=lambda x: x[1], reverse=True)
-            for idx in range(len(en_names)):
-                if idx < len(items):
-                    en, c, p = items[idx]
-                    row[f"line{idx+1}"] = f"{en} — {c} ({p:.0%})"
-                else:
-                    row[f"line{idx+1}"] = ""
-            return row
-
-        wide_safe = wide_safe.apply(_mk_lines, axis=1)
-
-        tooltip_fields = [
-            alt.Tooltip("bucket_label:N", title="Период"),
-            alt.Tooltip("total:Q", title="Всего упоминаний"),
-        ] + [alt.Tooltip(f"line{i}:N", title="") for i in range(1, len(en_names)+1)]
-
-        bubble = (
-            alt.Chart(wide_safe)
-              .mark_bar(size=max(40, bar_size), opacity=0.001)
-              .encode(
-                  x=alt.X("bucket_label:N", sort=bucket_order),
-                  y=alt.Y("total:Q", scale=y_scale_bar),
-                  tooltip=tooltip_fields
-              )
-        )
-
-        st.altair_chart((bars + bubble).properties(height=460),
-                        theme=None, use_container_width=True)
-
-# ---- Правая половина: таблица «Распределение по урокам (ось X — S)» ----
-with right:
-    st.markdown("**Распределение по урокам (ось X — S) — таблица**")
-
-    rows_aspects = []
-    unknown_per_s = {}
-
-    if not df_aspects.empty and {"S","E"}.issubset(df_aspects.columns):
-        df_tmp = df_aspects[["S","E"]].copy()
-        df_tmp["S"] = pd.to_numeric(df_tmp["S"], errors="coerce")
-        df_tmp = df_tmp.dropna(subset=["S"])
-        df_tmp["S"] = df_tmp["S"].astype(int)
-
-        for _, rr in df_tmp.iterrows():
-            s_val = int(rr["S"])
-            txt = str(rr["E"] or "").strip()
-            if not txt:
-                continue
-            parts = re.split(r"[;,/\n|]+", txt) if re.search(r"[;,/\n|]", txt) else [txt]
-            for p in parts:
-                p_clean = p.strip()
-                t = _norm(p_clean)
-                if not t:
-                    continue
-                matched = False
-                for es_norm, es, en in _ASPECTS_NORM:
-                    if t == es_norm or es_norm in t:
-                        rows_aspects.append((s_val, en))
-                        matched = True
-                        break
-                if not matched:
-                    unknown_per_s.setdefault(s_val, Counter())[p_clean] += 1
-
-    if not rows_aspects and not unknown_per_s:
-        st.info("Нет данных для выбранных фильтров.")
-    else:
-        df_as = (pd.DataFrame(rows_aspects, columns=["S","aspect_en"])
-                 if rows_aspects else pd.DataFrame(columns=["S","aspect_en"]))
-        lesson_rows = []
-        lessons_sorted = sorted(set(list(df_as["S"].unique()) + list(unknown_per_s.keys())))
-
-        for s in lessons_sorted:
-            if not df_as.empty and s in df_as["S"].values:
-                cnt = (df_as[df_as["S"] == s]["aspect_en"]
-                       .value_counts()
-                       .sort_values(ascending=False))
-                total_tpl = int(cnt.sum())
-                parts_text = []
-                for en_name, c in cnt.items():
-                    pct = (c / total_tpl) if total_tpl else 0.0
-                    parts_text.append(f"• {en_name} — {c} ({pct:.0%})")
-                aspects_text = "\n".join(parts_text)
+    def _mk_lines(row):
+        tot = row["total"]
+        items = []
+        for i, en in enumerate(en_names):
+            c = int(row[cols[i]])
+            p = (c / tot) if tot else 0.0
+            items.append((en, c, p))
+        items.sort(key=lambda x: x[1], reverse=True)
+        for idx in range(len(en_names)):
+            if idx < len(items):
+                en, c, p = items[idx]
+                row[f"line{idx+1}"] = f"{en} — {c} ({p:.0%})"
             else:
-                aspects_text = ""
-                total_tpl = 0
+                row[f"line{idx+1}"] = ""
+        return row
 
-            unk_counter = unknown_per_s.get(s, Counter())
-            if unk_counter:
-                top_items = unk_counter.most_common(10)
-                rest = sum(unk_counter.values()) - sum(c for _, c in top_items)
-                unk_parts = [f"• {translate_es_to_en(m)} ({c})" for m, c in top_items]
-                if rest > 0:
-                    unk_parts.append(f"• … (+{rest})")
-                unknown_text = "\n".join(unk_parts)
-            else:
-                unknown_text = ""
+    wide_safe = wide_safe.apply(_mk_lines, axis=1)
 
-            lesson_rows.append({
-                "S": int(s),
-                "Aspects (EN)": aspects_text,
-                "Unknown (EN)": unknown_text,
-                "Total (templ.)": total_tpl
-            })
+    tooltip_fields = [
+        alt.Tooltip("bucket_label:N", title="Период"),
+        alt.Tooltip("total:Q", title="Всего упоминаний"),
+    ] + [alt.Tooltip(f"line{i}:N", title="") for i in range(1, len(en_names)+1)]
 
-        table = pd.DataFrame(lesson_rows).sort_values("S").reset_index(drop=True)
-        height = min(800, 100 + 28 * len(table))
-        st.dataframe(
-            table[["S","Aspects (EN)","Unknown (EN)","Total (templ.)"]],
-            use_container_width=True,
-            height=height
-        )
+    bubble = (
+        alt.Chart(wide_safe)
+          .mark_bar(size=max(40, bar_size), opacity=0.001)
+          .encode(
+              x=alt.X("bucket_label:N", sort=bucket_order),
+              y=alt.Y("total:Q", scale=y_scale_bar),
+              tooltip=tooltip_fields
+          )
+    )
 
-# --------- НИЖЕ (вместо «Упоминания вне шаблона»): ГРАФИК «Распределение по урокам (ось X — S)» ---------
+    st.altair_chart((bars + bubble).properties(height=460),
+                    theme=None, use_container_width=True)
+
+# --------- НИЖЕ: ГРАФИК «Распределение по урокам (ось X — S)» ---------
 st.markdown("---")
 st.subheader("Распределение по урокам (ось X — S) — график")
 
@@ -660,7 +575,6 @@ else:
     # единый тултип по столбцу S
     pivot = cnt_by_s.pivot_table(index="S", columns="aspect_en", values="count",
                                  aggfunc="sum", fill_value=0)
-    # упорядочим колонки по встречаемости
     col_order = list(pivot.sum(axis=0).sort_values(ascending=False).index)
     pivot = pivot[col_order]
 
@@ -703,6 +617,88 @@ else:
 
     st.altair_chart((bars_s + bubble_s).properties(height=460),
                     use_container_width=True, theme=None)
+
+# --------- САМА ТАБЛИЦА ТЕПЕРЬ ВНИЗУ ---------
+st.markdown("---")
+st.subheader("Распределение по урокам (ось X — S) — таблица")
+
+rows_aspects = []
+unknown_per_s = {}
+
+if not df_aspects.empty and {"S","E"}.issubset(df_aspects.columns):
+    df_tmp = df_aspects[["S","E"]].copy()
+    df_tmp["S"] = pd.to_numeric(df_tmp["S"], errors="coerce")
+    df_tmp = df_tmp.dropna(subset=["S"])
+    df_tmp["S"] = df_tmp["S"].astype(int)
+
+    for _, rr in df_tmp.iterrows():
+        s_val = int(rr["S"])
+        txt = str(rr["E"] or "").strip()
+        if not txt:
+            continue
+        parts = re.split(r"[;,/\n|]+", txt) if re.search(r"[;,/\n|]", txt) else [txt]
+        for p in parts:
+            p_clean = p.strip()
+            t = _norm(p_clean)
+            if not t:
+                continue
+            matched = False
+            for es_norm, es, en in _ASPECTS_NORM:
+                if t == es_norm or es_norm in t:
+                    rows_aspects.append((s_val, en))
+                    matched = True
+                    break
+            if not matched:
+                unknown_per_s.setdefault(s_val, Counter())[p_clean] += 1
+
+if not rows_aspects and not unknown_per_s:
+    st.info("Нет данных для выбранных фильтров.")
+else:
+    df_as = (pd.DataFrame(rows_aspects, columns=["S","aspect_en"])
+             if rows_aspects else pd.DataFrame(columns=["S","aspect_en"]))
+    lesson_rows = []
+    lessons_sorted = sorted(set(list(df_as["S"].unique()) + list(unknown_per_s.keys())))
+
+    for s in lessons_sorted:
+        if not df_as.empty and s in df_as["S"].values:
+            cnt = (df_as[df_as["S"] == s]["aspect_en"]
+                   .value_counts()
+                   .sort_values(ascending=False))
+            total_tpl = int(cnt.sum())
+            parts_text = []
+            for en_name, c in cnt.items():
+                pct = (c / total_tpl) if total_tpl else 0.0
+                parts_text.append(f"• {en_name} — {c} ({pct:.0%})")
+            aspects_text = "\n".join(parts_text)
+        else:
+            aspects_text = ""
+            total_tpl = 0
+
+        unk_counter = unknown_per_s.get(s, Counter())
+        if unk_counter:
+            top_items = unk_counter.most_common(10)
+            rest = sum(unk_counter.values()) - sum(c for _, c in top_items)
+            unk_parts = [f"• {translate_es_to_en(m)} ({c})" for m, c in top_items]
+            if rest > 0:
+                unk_parts.append(f"• … (+{rest})")
+            unknown_text = "\n".join(unk_parts)
+        else:
+            unknown_text = ""
+
+        lesson_rows.append({
+            "S": int(s),
+            "Aspects (EN)": aspects_text,
+            "Unknown (EN)": unknown_text,
+            "Total (templ.)": total_tpl
+        })
+
+    table = pd.DataFrame(lesson_rows).sort_values("S").reset_index(drop=True)
+    height = min(800, 100 + 28 * len(table))
+    st.dataframe(
+        table[["S","Aspects (EN)","Unknown (EN)","Total (templ.)"]],
+        use_container_width=True,
+        height=height
+    )
 
 # Подсказка, если онлайн-переводчик недоступен
 if _gt is None:
