@@ -455,13 +455,12 @@ with col4:
 st.markdown("---")
 st.subheader("Аспекты урока (по датам A, текст из E)")
 
-# применяем ОДНИ И ТЕ ЖЕ фильтры
+# те же фильтры, что и выше
 df1_aspects = filter_df(df1, course_col="N", date_col="A",
                         selected_courses=selected_courses, date_range=date_range)
 df2_aspects = filter_df(df2, course_col="M", date_col="A",
                         selected_courses=selected_courses, date_range=date_range)
 
-# считаем отдельно и объединяем
 asp1, unk1 = build_aspects_counts_from_E_by_A(df1_aspects, granularity)
 asp2, unk2 = build_aspects_counts_from_E_by_A(df2_aspects, granularity)
 
@@ -471,65 +470,70 @@ unknown_all = pd.concat([unk1, unk2], ignore_index=True)
 if aspects_all.empty:
     st.info("Не нашёл упоминаний аспектов в колонке E.")
 else:
-    # порядок по реальной дате
     bucket_order = (aspects_all[["bucket","bucket_label"]]
                     .drop_duplicates()
                     .sort_values("bucket")["bucket_label"].tolist())
 
-    # какие аспекты реально встречаются (в заданном нами порядке)
-    expected_labels = [f"{es} (EN: {en})" for es, en in ASPECTS_ES_EN]
+    # легенда остаётся как есть (испанский + EN), а для тултипа возьмём чисто EN
+    expected_es_en = ASPECTS_ES_EN[:]  # [(es, en), ...]
+    expected_labels = [f"{es} (EN: {en})" for es, en in expected_es_en]
     present = [lbl for lbl in expected_labels if lbl in aspects_all["aspect"].unique()]
 
-    # ---------- stacked bar (визуал)
+    # --- stacked bar (визуал)
     bars = (
         alt.Chart(aspects_all)
           .mark_bar(size=max(40, bar_size))
           .encode(
               x=alt.X("bucket_label:N", title="Период (по A)", sort=bucket_order),
               y=alt.Y("sum(count):Q", title="Кол-во упоминаний"),
-              color=alt.Color("aspect:N", title="Аспект (EN в скобках)", sort=present)
+              color=alt.Color("aspect:N", title="Аспект", sort=present)
           )
     )
 
-    # ---------- данные для «умного» тултипа (одна строка на период)
+    # --- подготовим «умный» тултип в pandas: 1 строка на период с уже собранным текстом
     wide = (aspects_all
-            .pivot_table(index=["bucket","bucket_label"],
-                         columns="aspect", values="count",
-                         aggfunc="sum", fill_value=0))
+            .pivot_table(index=["bucket","bucket_label"], columns="aspect",
+                         values="count", aggfunc="sum", fill_value=0))
 
-    # гарантируем полный набор колонок и их порядок
     for lbl in expected_labels:
         if lbl not in wide.columns:
             wide[lbl] = 0
     wide = wide[expected_labels]
 
-    # безопасные имена колонок (без пробелов/двоеточий/скобок)
+    # безопасные счётчики
     safe_map = {lbl: f"c_{i}" for i, lbl in enumerate(expected_labels)}
     wide_safe = wide.rename(columns=safe_map).reset_index()
-
-    # total и проценты
     count_cols = list(safe_map.values())
     wide_safe["total"] = wide_safe[count_cols].sum(axis=1)
-    for i, lbl in enumerate(expected_labels):
-        wide_safe[f"p_{i}"] = (wide_safe[safe_map[lbl]] / wide_safe["total"]).fillna(0.0)
 
-    # поля тултипа: период, всего, затем пары «аспект — кол-во/процент» (красивые заголовки)
-    tooltip_fields = [
-        alt.Tooltip("bucket_label:N", title="Период"),
-        alt.Tooltip("total:Q", title="Всего упоминаний"),
-    ]
-    for i, lbl in enumerate(expected_labels):
-        tooltip_fields.append(alt.Tooltip(f"{safe_map[lbl]}:Q", title=f"{lbl} — кол-во"))
-        tooltip_fields.append(alt.Tooltip(f"p_{i}:Q", title=f"{lbl} — %", format=".0%"))
+    # делаем одну текстовую колонку `lines` с сортировкой по убыванию
+    en_names = [en for _, en in expected_es_en]
 
-    # прозрачный слой по всему столбцу — один общий тултип
+    def _make_lines(row):
+        tot = row["total"]
+        items = []
+        for i, en in enumerate(en_names):
+            cnt = int(row[count_cols[i]])
+            pct = (cnt / tot) if tot else 0.0
+            items.append((en, cnt, pct))
+        items.sort(key=lambda x: x[1], reverse=True)
+        # формат: English — count (xx%)
+        return "\n".join(f"{en} — {cnt} ({pct:.0%})" for en, cnt, pct in items)
+
+    wide_safe["lines"] = wide_safe.apply(_make_lines, axis=1)
+
+    # один большой тултип по всему столбцу: период, всего, далее многострочный список
     bubble = (
         alt.Chart(wide_safe)
           .mark_bar(size=max(40, bar_size), opacity=0.001)
           .encode(
               x=alt.X("bucket_label:N", sort=bucket_order),
               y=alt.Y("total:Q"),
-              tooltip=tooltip_fields
+              tooltip=[
+                  alt.Tooltip("bucket_label:N", title="Период"),
+                  alt.Tooltip("total:Q", title="Всего упоминаний"),
+                  alt.Tooltip("lines:N", title=""),  # многострочный список EN — N (XX%)
+              ]
           )
     )
 
@@ -544,4 +548,3 @@ else:
                               .agg(total=("total","sum"))
                               .sort_values("total", ascending=False))
     st.dataframe(unknown_agg, use_container_width=True)
-
