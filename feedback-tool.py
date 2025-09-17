@@ -465,27 +465,76 @@ unknown_all = pd.concat([unk1, unk2], ignore_index=True)
 if aspects_all.empty:
     st.info("Не нашёл упоминаний аспектов в колонке E.")
 else:
-    # порядок дат по реальному datetime bucket
+    # порядок по реальной дате
     bucket_order = (aspects_all[["bucket","bucket_label"]]
                     .drop_duplicates()
                     .sort_values("bucket")["bucket_label"].tolist())
 
-    chart_aspects = (
+    # 1) Слой со stacked bar (визуал)
+    bars = (
         alt.Chart(aspects_all)
-          .mark_bar(size=max(40, bar_size))  # ширина зависит от выбранной гранулярности
+          .mark_bar(size=max(40, bar_size))
           .encode(
               x=alt.X("bucket_label:N", title="Период (по A)", sort=bucket_order),
               y=alt.Y("sum(count):Q", title="Кол-во упоминаний"),
-              color=alt.Color("aspect:N", title="Аспект (EN в скобках)"),
-              tooltip=[
-                  alt.Tooltip("bucket_label:N", title="Период"),
-                  alt.Tooltip("aspect:N", title="Аспект"),
-                  alt.Tooltip("sum(count):Q", title="Кол-во")
-              ]
+              color=alt.Color("aspect:N", title="Аспект (EN в скобках)")
           )
-          .properties(height=460)
     )
-    st.altair_chart(chart_aspects, use_container_width=True)
+
+    # 2) Невидимый слой для ОДНОГО «суммарного» тултипа по всему столбцу
+    #    Пивотируем аспекты в колонки, считаем total и проценты
+    aspect_labels = [f"{es} (EN: {en})" for es, en in ASPECTS_ES_EN]
+
+    tool = (
+        alt.Chart(aspects_all)
+          .transform_aggregate(
+              count='count()',
+              groupby=['bucket', 'bucket_label', 'aspect']
+          )
+          .transform_pivot(
+              pivot='aspect',
+              value='count',
+              groupby=['bucket', 'bucket_label']
+          )
+    )
+
+    # заполняем пропуски нулями по всем аспектам
+    calc_counts = {}
+    for i, lbl in enumerate(aspect_labels):
+        calc_counts[f"c{i}"] = f"isValid(datum['{lbl}']) ? datum['{lbl}'] : 0"
+    tool = tool.transform_calculate(**calc_counts)
+
+    # total = сумма всех c{i}
+    if len(aspect_labels) > 0:
+        total_expr = " + ".join([f"datum.c{i}" for i in range(len(aspect_labels))])
+    else:
+        total_expr = "0"
+    tool = tool.transform_calculate(total=total_expr)
+
+    # проценты для каждого аспекта
+    calc_pcts = {f"p{i}": f"datum.total > 0 ? datum.c{i} / datum.total : 0"
+                 for i in range(len(aspect_labels))}
+    tool = tool.transform_calculate(**calc_pcts)
+
+    # строим удобный тултип: период, всего, затем пары «аспект — кол-во / %»
+    tooltip_fields = [
+        alt.Tooltip("bucket_label:N", title="Период"),
+        alt.Tooltip("total:Q", title="Всего упоминаний"),
+    ]
+    for i, lbl in enumerate(aspect_labels):
+        tooltip_fields.append(alt.Tooltip(f"c{i}:Q", title=f"{lbl} — кол-во"))
+        tooltip_fields.append(alt.Tooltip(f"p{i}:Q", title=f"{lbl} — %", format=".0%"))
+
+    bar_tooltip = (
+        tool.mark_bar(size=max(40, bar_size), opacity=0.001)  # «прозрачный» слой
+            .encode(
+                x=alt.X("bucket_label:N", sort=bucket_order),
+                y=alt.Y("total:Q"),
+                tooltip=tooltip_fields
+            )
+    )
+
+    st.altair_chart((bars + bar_tooltip).properties(height=460), use_container_width=True)
 
 st.markdown("#### Упоминания вне шаблона")
 if unknown_all.empty:
