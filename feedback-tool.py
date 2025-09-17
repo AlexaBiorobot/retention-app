@@ -147,7 +147,7 @@ ASPECTS_ES_EN = [
     ("Tareas para hacer en casa", "Homework to do at home"),
     ("La forma en que se comportó la clase", "How the class behaved"),
     ("Cuando me aclararon las dudas", "When my questions were clarified"),
-    ("Cuando me trataron bien и con atención", "When I was treated well and attentively"),
+    ("Cuando me trataron bien y con atención", "When I was treated well and attentively"),
 ]
 
 def _norm(s: str) -> str:
