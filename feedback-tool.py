@@ -167,7 +167,7 @@ _BASIC_ES_EN = {
     "profesor":"teacher","actividades":"activities","sala":"classroom",
     "tareas":"homework","casa":"home","forma":"way","comporto":"behaved",
     "comportó":"behaved","clase":"class","aclararon":"clarified","dudas":"doubts",
-    "trataron":"treated","bien":"well","atencion":"attention","атención":"attention"
+    "trataron":"treated","bien":"well","atencion":"attention","atención":"attention"
 }
 
 def _naive_translate_es_en(text: str) -> str:
@@ -560,7 +560,7 @@ else:
                                    columns="aspect_en", values="count",
                                    aggfunc="sum", fill_value=0))
     col_order = list(wide.sum(axis=0).sort_values(ascending=False).index)
-    safe_map = {c: f"c_{i}" for i, c in enumerate(col_order))
+    safe_map = {c: f"c_{i}" for i, c in enumerate(col_order)}  # <-- FIXED
     wide_safe = wide.rename(columns=safe_map).reset_index()
     ccols = list(safe_map.values())
     wide_safe["total"] = wide_safe[ccols].sum(axis=1)
@@ -612,15 +612,11 @@ else:
     # Подготавливаем набор данных с долями по S
     chart_pct = (
         alt.Chart(cnt_by_s_all)
-          # аггрегируем количество по (S, aspect_en)
           .transform_aggregate(count='sum(count)', groupby=['S', 'aspect_en'])
-          # считаем общий total по S
           .transform_joinaggregate(total='sum(count)', groupby=['S'])
-          # считаем долю
           .transform_calculate(pct='datum.count / datum.total')
     )
 
-    # основной стак: по % (0..1)
     bars_s = (
         chart_pct.mark_bar(size=28)
           .encode(
@@ -640,7 +636,6 @@ else:
           )
     )
 
-    # «большой» тултип на весь столбец (показывает список аспектов по убыванию)
     pivot = cnt_by_s_all.pivot_table(index="S", columns="aspect_en", values="count",
                                      aggfunc="sum", fill_value=0)
     col_order = list(pivot.sum(axis=0).sort_values(ascending=False).index)
