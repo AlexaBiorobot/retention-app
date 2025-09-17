@@ -142,6 +142,70 @@ def prep_distribution(df_f: pd.DataFrame, value_col: str, allowed_values: list, 
     val_order = [str(v) for v in allowed_values]
     return out, bucket_order, val_order, label_title
 
+def build_aspects_counts(df: pd.DataFrame, text_col: str, date_col: str, granularity: str):
+    """
+    Берём дату из date_col, текст аспектов из text_col.
+    Возвращает:
+      counts: [bucket, bucket_label, aspect, count]
+      unknown: [mention, en, total]
+    """
+    need_cols = [date_col, text_col]
+    if df.empty or not all(c in df.columns for c in need_cols):
+        return pd.DataFrame(columns=["bucket","bucket_label","aspect","count"]), pd.DataFrame(columns=["mention","en","total"])
+
+    d = df[need_cols].copy()
+    d[date_col] = pd.to_datetime(d[date_col], errors="coerce")
+    d = d.dropna(subset=[date_col])
+    if d.empty:
+        return pd.DataFrame(columns=["bucket","bucket_label","aspect","count"]), pd.DataFrame(columns=["mention","en","total"])
+
+    # бакеты
+    d = d.rename(columns={date_col: "A", text_col: "TXT"})
+    d = add_bucket(d, "A", granularity)
+    d = ensure_bucket_and_label(d, "A", granularity)
+
+    rows, unknown = [], []
+    for _, r in d.iterrows():
+        text = r["TXT"]
+        if pd.isna(text):
+            continue
+        txt = str(text).strip()
+        if not txt:
+            continue
+
+        parts = re.split(r"[;,/\n|]+", txt) if re.search(r"[;,/\n|]", txt) else [txt]
+        for p in parts:
+            p_clean = p.strip()
+            t = _norm(p_clean)
+            if not t:
+                continue
+
+            matched = False
+            for es_norm, es, en in _ASPECTS_NORM:
+                if t == es_norm or es_norm in t:
+                    rows.append((r["bucket"], r["bucket_label"], f"{es} (EN: {en})", 1))
+                    matched = True
+                    break
+            if not matched:
+                unknown.append(p_clean)
+
+    counts = pd.DataFrame(rows, columns=["bucket","bucket_label","aspect","count"])
+    if not counts.empty:
+        counts = counts.groupby(["bucket","bucket_label","aspect"], as_index=False)["count"].sum()
+
+    unknown_df = pd.DataFrame(unknown, columns=["mention"])
+    if not unknown_df.empty:
+        unknown_df["mention"] = unknown_df["mention"].str.strip()
+        unknown_df = (unknown_df.groupby("mention", as_index=False)
+                      .size().rename(columns={"size":"total"})
+                      .sort_values("total", ascending=False))
+        unknown_df["en"] = unknown_df["mention"].apply(_naive_translate_es_en)
+        unknown_df = unknown_df[["en","mention","total"]]
+    else:
+        unknown_df = pd.DataFrame(columns=["en","mention","total"])
+
+    return counts, unknown_df
+
 # ===== Аспекты урока: словарь и утилиты (считаем по датам A, текст в E) =====
 ASPECTS_ES_EN = [
     ("La materia que se enseñó", "The subject that was taught"),
@@ -471,33 +535,25 @@ with col4:
 st.markdown("---")
 st.subheader("Аспекты урока (по датам A, текст из E)")
 
-# те же фильтры, что и выше
-df1_aspects = filter_df(df1, course_col="N", date_col="A",
-                        selected_courses=selected_courses, date_range=date_range)
-df2_aspects = filter_df(df2, course_col="M", date_col="A",
-                        selected_courses=selected_courses, date_range=date_range)
+# Берём аспекты только с Form Responses 2: курс=M, дата=A, текст=E
+df_aspects = filter_df(df2, course_col="M", date_col="A",
+                       selected_courses=selected_courses, date_range=date_range)
 
-asp1, unk1 = build_aspects_counts_from_E_by_A(df1_aspects, granularity)
-asp2, unk2 = build_aspects_counts_from_E_by_A(df2_aspects, granularity)
+asp_counts, unknown_all = build_aspects_counts(df_aspects, text_col="E", date_col="A", granularity=granularity)
 
-aspects_all = pd.concat([asp1, asp2], ignore_index=True)
-unknown_all = pd.concat([unk1, unk2], ignore_index=True)
-
-if aspects_all.empty:
-    st.info("Не нашёл упоминаний аспектов в колонке E.")
+if asp_counts.empty:
+    st.info("Не нашёл упоминаний аспектов (лист 'Form Responses 2', колонка E).")
 else:
-    bucket_order = (aspects_all[["bucket","bucket_label"]]
+    bucket_order = (asp_counts[["bucket","bucket_label"]]
                     .drop_duplicates()
                     .sort_values("bucket")["bucket_label"].tolist())
 
-    # легенда (испанский + EN), а для тултипа — только EN
-    expected_es_en = ASPECTS_ES_EN[:]  # [(es, en)]
-    expected_labels = [f"{es} (EN: {en})" for es, en in expected_es_en]
-    present = [lbl for lbl in expected_labels if lbl in aspects_all["aspect"].unique()]
+    expected_labels = [f"{es} (EN: {en})" for es, en in ASPECTS_ES_EN]
+    present = [lbl for lbl in expected_labels if lbl in asp_counts["aspect"].unique()]
 
-    # --- stacked bar
+    # stacked bar
     bars = (
-        alt.Chart(aspects_all)
+        alt.Chart(asp_counts)
           .mark_bar(size=max(40, bar_size))
           .encode(
               x=alt.X("bucket_label:N", title="Период (по A)", sort=bucket_order),
@@ -506,31 +562,26 @@ else:
           )
     )
 
-    # --- данные для «супер-тултипа» в pandas
-    wide = (aspects_all
+    # «супер-тултип» (по столбцу): собираем EN-список по убыванию
+    wide = (asp_counts
             .pivot_table(index=["bucket","bucket_label"], columns="aspect",
                          values="count", aggfunc="sum", fill_value=0))
-
-    # гарантируем полный набор колонок и порядок
     for lbl in expected_labels:
         if lbl not in wide.columns:
             wide[lbl] = 0
     wide = wide[expected_labels]
 
-    # безопасные имена столбцов
     safe_map = {lbl: f"c_{i}" for i, lbl in enumerate(expected_labels)}
     wide_safe = wide.rename(columns=safe_map).reset_index()
-    count_cols = list(safe_map.values())
-    wide_safe["total"] = wide_safe[count_cols].sum(axis=1)
+    cols = list(safe_map.values())
+    wide_safe["total"] = wide_safe[cols].sum(axis=1)
 
-    # формируем line1..line7 (EN — count (pct)), сортировка по убыванию
     en_names = [en for _, en in ASPECTS_ES_EN]
-
     def make_lines_cols(row):
         tot = row["total"]
         items = []
         for i, en in enumerate(en_names):
-            cnt = int(row[count_cols[i]])
+            cnt = int(row[cols[i]])
             pct = (cnt / tot) if tot else 0.0
             items.append((en, cnt, pct))
         items.sort(key=lambda x: x[1], reverse=True)
@@ -544,13 +595,10 @@ else:
 
     wide_safe = wide_safe.apply(make_lines_cols, axis=1)
 
-    # тултип: период, всего, затем строки line1..line7
     tooltip_fields = [
         alt.Tooltip("bucket_label:N", title="Период"),
         alt.Tooltip("total:Q", title="Всего упоминаний"),
-    ]
-    for i in range(1, len(en_names) + 1):
-        tooltip_fields.append(alt.Tooltip(f"line{i}:N", title=""))
+    ] + [alt.Tooltip(f"line{i}:N", title="") for i in range(1, len(en_names)+1)]
 
     bubble = (
         alt.Chart(wide_safe)
@@ -572,5 +620,4 @@ else:
     unknown_agg = (unknown_all.groupby(["en","mention"], as_index=False)
                               .agg(total=("total","sum"))
                               .sort_values("total", ascending=False))
-    # показываем перевод первым столбцом
     st.dataframe(unknown_agg[["en","mention","total"]], use_container_width=True)
