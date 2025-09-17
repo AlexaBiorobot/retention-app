@@ -168,7 +168,7 @@ _BASIC_ES_EN = {
     "profesor":"teacher","actividades":"activities","sala":"classroom",
     "tareas":"homework","casa":"home","forma":"way","comporto":"behaved",
     "comportó":"behaved","clase":"class","aclararon":"clarified","dudas":"doubts",
-    "trataron":"treated","bien":"well","atencion":"attention","atención":"attention"
+    "trataron":"treated","bien":"well","atencion":"attention","атención":"attention"
 }
 
 def _naive_translate_es_en(text: str) -> str:
@@ -278,6 +278,11 @@ def build_aspects_counts_by_S(df: pd.DataFrame) -> pd.DataFrame:
     out = out.groupby(["S","aspect_en"], as_index=False)["count"].sum()
     return out
 
+def aspect_to_en_label(s: str) -> str:
+    """Из 'ES (EN: EN)' достаём 'EN'."""
+    m = re.search(r"\(EN:\s*(.*?)\)\s*$", str(s))
+    return m.group(1).strip() if m else str(s)
+
 # ==================== ДАННЫЕ ====================
 
 df1 = load_sheet_as_letter_df("Form Responses 1")   # A=date, N=course, S=x, G=y
@@ -323,25 +328,86 @@ selected_courses = st.sidebar.multiselect(
 )
 st.sidebar.caption(f"Выбрано: {len(selected_courses)} из {len(courses_union)}")
 
+# Дата
 min1, max1 = (df1["A"].min(), df1["A"].max()) if not df1.empty else (pd.NaT, pd.NaT)
 min2, max2 = (df2["A"].min(), df2["A"].max()) if not df2.empty else (pd.NaT, pd.NaT)
 glob_min, glob_max = safe_minmax(min1, max1, min2, max2)
-
 if pd.isna(glob_min) or pd.isna(glob_max):
     date_range = st.sidebar.date_input("Дата фидбека (A)", [])
 else:
     date_range = st.sidebar.date_input("Дата фидбека (A)", [glob_min.date(), glob_max.date()])
 
+# Гранулярность
 granularity = st.sidebar.selectbox("Гранулярность для распределения", ["День", "Неделя", "Месяц", "Год"])
 BAR_SIZE = {"День": 18, "Неделя": 44, "Месяц": 56, "Год": 64}
 bar_size = BAR_SIZE.get(granularity, 36)
 
+# ---- ДОП. ФИЛЬТРЫ: по урокам (S) и по шаблонным фразам (EN) ----
+# Опции S считаем после фильтра по курсам/датам (только FR1)
+df1_base = filter_df(df1, "N", "A", selected_courses, date_range)
+if not df1_base.empty and "S" in df1_base.columns:
+    s_options = sorted(pd.to_numeric(df1_base["S"], errors="coerce").dropna().astype(int).unique().tolist())
+else:
+    s_options = []
+
+if "s_selected" not in st.session_state:
+    st.session_state["s_selected"] = s_options.copy()
+
+sb1, sb2 = st.sidebar.columns(2)
+if sb1.button("All S"):
+    st.session_state["s_selected"] = s_options.copy()
+    st.rerun()
+if sb2.button("Clear S"):
+    st.session_state["s_selected"] = []
+    st.rerun()
+
+selected_s = st.sidebar.multiselect(
+    "Уроки (S)",
+    options=s_options,
+    default=st.session_state["s_selected"],
+    key="s_selected",
+    help="Ограничить анализ конкретными уроками"
+)
+
+# Фразы (EN)
+aspect_en_options = [en for _, en in ASPECTS_ES_EN]
+if "aspects_selected" not in st.session_state:
+    st.session_state["aspects_selected"] = aspect_en_options.copy()
+
+fa1, fa2 = st.sidebar.columns(2)
+if fa1.button("All phrases"):
+    st.session_state["aspects_selected"] = aspect_en_options.copy()
+    st.rerun()
+if fa2.button("Clear phrases"):
+    st.session_state["aspects_selected"] = []
+    st.rerun()
+
+selected_aspects = st.sidebar.multiselect(
+    "Шаблонные фразы (EN)",
+    options=aspect_en_options,
+    default=st.session_state["aspects_selected"],
+    key="aspects_selected",
+    help="Выберите, какие аспекты (EN) отображать"
+)
+
 # ==================== ПРИМЕНЕНИЕ ФИЛЬТРОВ ====================
 
+# Верхние графики (средние)
 agg1 = apply_filters_and_aggregate(df1, "N", "A", "S", "G", selected_courses, date_range)
+if not agg1.empty and selected_s:
+    # привести S к int перед фильтрацией
+    agg1["S"] = pd.to_numeric(agg1["S"], errors="coerce").astype("Int64")
+    agg1 = agg1[agg1["S"].isin(selected_s)]
+    agg1["S"] = agg1["S"].astype(int)
+
 agg2 = apply_filters_and_aggregate(df2, "M", "A", "R", "I", selected_courses, date_range)
 
-df1_f = filter_df(df1, "N", "A", selected_courses, date_range)
+# Нижние распределения: «сырые» значения + bucket/bucket_label
+df1_f = df1_base.copy()  # уже отфильтрованы курс/дата
+if not df1_f.empty and selected_s:
+    df1_f["S_num"] = pd.to_numeric(df1_f["S"], errors="coerce")
+    df1_f = df1_f[df1_f["S_num"].isin(selected_s)]
+
 df2_f = filter_df(df2, "M", "A", selected_courses, date_range)
 
 if not df1_f.empty:
@@ -393,7 +459,6 @@ with col2:
     if agg2.empty:
         st.info("Нет данных для выбранных фильтров.")
     else:
-        # динамический Y
         y_min2 = float(agg2["avg_y"].min()) if len(agg2) else 0.0
         y_max2 = float(agg2["avg_y"].max()) if len(agg2) else 10.0
         pad2 = (y_max2 - y_min2) * 0.1 if y_max2 > y_min2 else 0.5
@@ -462,12 +527,16 @@ with col4:
         )
         st.altair_chart(bars2, use_container_width=True, theme=None)
 
-# ---------- НИЖЕ: Аспекты урока из FR1 (E по датам A) ----------
+# ---------- НИЖЕ: Аспекты урока — Form Responses 1 ----------
 st.markdown("---")
 st.subheader("Аспекты урока — Form Responses 1")
 
-# Берём аспекты ТОЛЬКО из Form Responses 1
-df_aspects = filter_df(df1, "N", "A", selected_courses, date_range)
+# берем FR1 с учётом S-фильтра
+df_aspects = df1_base.copy()
+if not df_aspects.empty and selected_s:
+    df_aspects["S_num"] = pd.to_numeric(df_aspects["S"], errors="coerce")
+    df_aspects = df_aspects[df_aspects["S_num"].isin(selected_s)]
+
 asp_counts, _unknown_all = build_aspects_counts(df_aspects, text_col="E", date_col="A", granularity=granularity)
 
 # ---- График: «Аспекты по датам (ось X — A)» с единым тултипом ----
@@ -475,93 +544,99 @@ st.markdown("**Аспекты по датам (ось X — A)**")
 if asp_counts.empty:
     st.info("Не нашёл упоминаний аспектов (лист 'Form Responses 1', колонка E).")
 else:
-    bucket_order = (asp_counts[["bucket","bucket_label"]]
-                    .drop_duplicates()
-                    .sort_values("bucket")["bucket_label"].tolist())
+    # добавим столбец aspect_en и отфильтруем по выбранным фразам
+    asp_counts["aspect_en"] = asp_counts["aspect"].apply(aspect_to_en_label)
+    if selected_aspects:
+        asp_counts = asp_counts[asp_counts["aspect_en"].isin(selected_aspects)]
+    if asp_counts.empty:
+        st.info("Не осталось данных после фильтра по фразам.")
+    else:
+        bucket_order = (asp_counts[["bucket","bucket_label"]]
+                        .drop_duplicates()
+                        .sort_values("bucket")["bucket_label"].tolist())
 
-    totals_by_bucket = (asp_counts.groupby("bucket_label", as_index=False)["count"]
-                                  .sum().rename(columns={"count":"total"}))
-    y_max = max(1, int(totals_by_bucket["total"].max()))
-    y_scale_bar = alt.Scale(domain=[0, y_max * 1.1], nice=False, clamp=True)
+        totals_by_bucket = (asp_counts.groupby("bucket_label", as_index=False)["count"]
+                                      .sum().rename(columns={"count":"total"}))
+        y_max = max(1, int(totals_by_bucket["total"].max()))
+        y_scale_bar = alt.Scale(domain=[0, y_max * 1.1], nice=False, clamp=True)
 
-    expected_labels = [f"{es} (EN: {en})" for es, en in ASPECTS_ES_EN]
-    present = [lbl for lbl in expected_labels if lbl in asp_counts["aspect"].unique()]
+        # Легенда только по выбранным/присутствующим
+        present = (asp_counts["aspect"].unique().tolist())
 
-    bars = (
-        alt.Chart(asp_counts).mark_bar(size=max(40, bar_size))
-          .encode(
-              x=alt.X("bucket_label:N", title="Период (по A)", sort=bucket_order),
-              y=alt.Y("sum(count):Q", title="Кол-во упоминаний", scale=y_scale_bar),
-              color=alt.Color("aspect:N", title="Аспект", sort=present)
-          )
-    )
+        bars = (
+            alt.Chart(asp_counts).mark_bar(size=max(40, bar_size))
+              .encode(
+                  x=alt.X("bucket_label:N", title="Период (по A)", sort=bucket_order),
+                  y=alt.Y("sum(count):Q", title="Кол-во упоминаний", scale=y_scale_bar),
+                  color=alt.Color("aspect:N", title="Аспект", sort=present)
+              )
+        )
 
-    # единый тултип
-    wide = (asp_counts.pivot_table(index=["bucket","bucket_label"],
-                                   columns="aspect", values="count",
-                                   aggfunc="sum", fill_value=0))
-    for lbl in expected_labels:
-        if lbl not in wide.columns:
-            wide[lbl] = 0
-    wide = wide[expected_labels]
+        # единый тултип
+        wide = (asp_counts.pivot_table(index=["bucket","bucket_label"],
+                                       columns="aspect_en", values="count",
+                                       aggfunc="sum", fill_value=0))
+        # порядок колонок по сумме
+        col_order = list(wide.sum(axis=0).sort_values(ascending=False).index)
+        safe_map = {c: f"c_{i}" for i, c in enumerate(col_order)}
+        wide_safe = wide.rename(columns=safe_map).reset_index()
+        ccols = list(safe_map.values())
+        wide_safe["total"] = wide_safe[ccols].sum(axis=1)
 
-    safe_map = {lbl: f"c_{i}" for i, lbl in enumerate(expected_labels)}
-    wide_safe = wide.rename(columns=safe_map).reset_index()
-    cols = list(safe_map.values())
-    wide_safe["total"] = wide_safe[cols].sum(axis=1)
+        def _mk_lines(row):
+            tot = row["total"]
+            items = []
+            for i, name in enumerate(col_order):
+                c = int(row[ccols[i]])
+                p = (c / tot) if tot else 0.0
+                items.append((name, c, p))
+            items.sort(key=lambda x: x[1], reverse=True)
+            for idx in range(len(col_order)):
+                if idx < len(items):
+                    name, c, p = items[idx]
+                    row[f"line{idx+1}"] = f"{name} — {c} ({p:.0%})"
+                else:
+                    row[f"line{idx+1}"] = ""
+            return row
 
-    en_names = [en for _, en in ASPECTS_ES_EN]
+        wide_safe = wide_safe.apply(_mk_lines, axis=1)
 
-    def _mk_lines(row):
-        tot = row["total"]
-        items = []
-        for i, en in enumerate(en_names):
-            c = int(row[cols[i]])
-            p = (c / tot) if tot else 0.0
-            items.append((en, c, p))
-        items.sort(key=lambda x: x[1], reverse=True)
-        for idx in range(len(en_names)):
-            if idx < len(items):
-                en, c, p = items[idx]
-                row[f"line{idx+1}"] = f"{en} — {c} ({p:.0%})"
-            else:
-                row[f"line{idx+1}"] = ""
-        return row
+        tooltip_fields = [
+            alt.Tooltip("bucket_label:N", title="Период"),
+            alt.Tooltip("total:Q", title="Всего упоминаний"),
+        ] + [alt.Tooltip(f"line{i}:N", title="") for i in range(1, len(col_order)+1)]
 
-    wide_safe = wide_safe.apply(_mk_lines, axis=1)
+        bubble = (
+            alt.Chart(wide_safe)
+              .mark_bar(size=max(40, bar_size), opacity=0.001)
+              .encode(
+                  x=alt.X("bucket_label:N", sort=bucket_order),
+                  y=alt.Y("total:Q", scale=y_scale_bar),
+                  tooltip=tooltip_fields
+              )
+        )
 
-    tooltip_fields = [
-        alt.Tooltip("bucket_label:N", title="Период"),
-        alt.Tooltip("total:Q", title="Всего упоминаний"),
-    ] + [alt.Tooltip(f"line{i}:N", title="") for i in range(1, len(en_names)+1)]
+        st.altair_chart((bars + bubble).properties(height=460),
+                        theme=None, use_container_width=True)
 
-    bubble = (
-        alt.Chart(wide_safe)
-          .mark_bar(size=max(40, bar_size), opacity=0.001)
-          .encode(
-              x=alt.X("bucket_label:N", sort=bucket_order),
-              y=alt.Y("total:Q", scale=y_scale_bar),
-              tooltip=tooltip_fields
-          )
-    )
-
-    st.altair_chart((bars + bubble).properties(height=460),
-                    theme=None, use_container_width=True)
-
-# --------- НИЖЕ: ГРАФИК «Распределение по урокам (ось X — S)» ---------
+# --------- ГРАФИК «Распределение по урокам (ось X — S)» ---------
 st.markdown("---")
 st.subheader("Распределение по урокам (ось X — S) — график")
 
-cnt_by_s = build_aspects_counts_by_S(df_aspects)
+cnt_by_s_all = build_aspects_counts_by_S(df_aspects)
+# фильтр по фразам (EN)
+if not cnt_by_s_all.empty and selected_aspects:
+    cnt_by_s = cnt_by_s_all[cnt_by_s_all["aspect_en"].isin(selected_aspects)].copy()
+else:
+    cnt_by_s = cnt_by_s_all.copy()
+
 if cnt_by_s.empty:
     st.info("Нет данных для графика по урокам.")
 else:
-    # динамический верх оси Y
     totals_s = cnt_by_s.groupby("S", as_index=False)["count"].sum().rename(columns={"count":"total"})
     y_max_s = int(totals_s["total"].max()) if len(totals_s) else 0
     y_scale_s = alt.Scale(domain=[0, max(1, y_max_s) * 1.1], nice=False, clamp=True)
 
-    # основной stacked bar
     bars_s = (
         alt.Chart(cnt_by_s)
           .mark_bar(size=28)
@@ -572,13 +647,10 @@ else:
           )
     )
 
-    # единый тултип по столбцу S
     pivot = cnt_by_s.pivot_table(index="S", columns="aspect_en", values="count",
                                  aggfunc="sum", fill_value=0)
     col_order = list(pivot.sum(axis=0).sort_values(ascending=False).index)
-    pivot = pivot[col_order]
-
-    safe_cols = {c: f"c_{i}" for i, c in enumerate(pivot.columns)}
+    safe_cols = {c: f"c_{i}" for i, c in enumerate(col_order)}
     wide_s = pivot.rename(columns=safe_cols).reset_index()
     ccols = list(safe_cols.values())
     wide_s["total"] = wide_s[ccols].sum(axis=1)
@@ -618,7 +690,7 @@ else:
     st.altair_chart((bars_s + bubble_s).properties(height=460),
                     use_container_width=True, theme=None)
 
-# --------- САМА ТАБЛИЦА ТЕПЕРЬ ВНИЗУ ---------
+# --------- ТАБЛИЦА ВНИЗУ ---------
 st.markdown("---")
 st.subheader("Распределение по урокам (ось X — S) — таблица")
 
@@ -645,7 +717,9 @@ if not df_aspects.empty and {"S","E"}.issubset(df_aspects.columns):
             matched = False
             for es_norm, es, en in _ASPECTS_NORM:
                 if t == es_norm or es_norm in t:
-                    rows_aspects.append((s_val, en))
+                    # применим фильтр фраз
+                    if not selected_aspects or en in selected_aspects:
+                        rows_aspects.append((s_val, en))
                     matched = True
                     break
             if not matched:
