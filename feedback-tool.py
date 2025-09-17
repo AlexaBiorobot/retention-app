@@ -621,24 +621,23 @@ else:
     legend_domain_en = [en for _, en in ASPECTS_ES_EN]
     
     bars_s = (
-        base.mark_bar(size=28)
+        base.mark_bar(size=28, stroke=None, strokeWidth=0)  # ⬅️ контур выключен
             .encode(
                 x=alt.X("S:O", title="S", sort="ascending"),
                 y=alt.Y(
                     "count:Q",
                     stack="normalize",
                     axis=alt.Axis(format="%", title="% от упоминаний"),
-                    scale=alt.Scale(domain=[0, 1], nice=False, clamp=True),
+                    scale=alt.Scale(domain=[0, 1], nice=False, clamp=True)
                 ),
                 color=alt.Color(
                     "aspect_en:N",
                     title="Аспект (EN)",
-                    # ЯВНО задаём домен цветов — это чинит «пустую» легенду
                     scale=alt.Scale(domain=legend_domain_en),
                     legend=alt.Legend(
                         orient="bottom",
                         direction="horizontal",
-                        columns=2,          # можно 3, если не влезает
+                        columns=2,
                         labelLimit=1000,
                         titleLimit=1000,
                         symbolType="square",
