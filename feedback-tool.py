@@ -628,7 +628,17 @@ else:
                     axis=alt.Axis(format="%", title="% от упоминаний"),
                     scale=alt.Scale(domain=[0, 1], nice=False, clamp=True)
                 ),
-                color=alt.Color("aspect_en:N", title="Аспект (EN)"),
+                color=alt.Color(
+                    "aspect_en:N",
+                    title="Аспект (EN)",
+                    legend=alt.Legend(
+                        orient="bottom",          # легенда снизу
+                        direction="horizontal",
+                        columns=2,                # 2 колонки
+                        labelLimit=1000,          # не обрезать подписи
+                        titleLimit=1000
+                    )
+                ),
                 tooltip=[
                     alt.Tooltip("S:O", title="Урок"),
                     alt.Tooltip("aspect_en:N", title="Аспект"),
@@ -637,8 +647,8 @@ else:
                     alt.Tooltip("total:Q", title="Всего по уроку"),
                 ],
             )
-    )
-
+    ).configure_legend(labelLimit=1000, titleLimit=1000)
+    
     st.altair_chart(bars_s.properties(height=460), use_container_width=True, theme=None)
 
 # --------- ТАБЛИЦА ВНИЗУ ---------
