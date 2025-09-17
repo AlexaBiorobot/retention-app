@@ -96,7 +96,7 @@ def ensure_bucket_and_label(dff: pd.DataFrame, date_col: str, granularity: str) 
         fmt = "%Y-%m-%d"
     elif granularity == "Неделя":
         fmt = "W%W (%Y-%m-%d)"  # дата старта недели
-    elif гранулярность := granularity == "Месяц":
+    elif granularity == "Месяц":
         fmt = "%Y-%m"
     elif granularity == "Год":
         fmt = "%Y"
@@ -163,14 +163,23 @@ def _norm(s: str) -> str:
 
 _ASPECTS_NORM = [(_norm(es), es, en) for es, en in ASPECTS_ES_EN]
 
+# базовый словарик для грубого перевода неизвестных фраз
 _BASIC_ES_EN = {
+    "si": "yes", "sí": "yes", "no": "no", "ok": "ok",
     "materia":"subject","explicacion":"explanation","explicación":"explanation",
     "profesor":"teacher","actividades":"activities","sala":"classroom",
     "tareas":"homework","casa":"home","forma":"way","comporto":"behaved",
     "comportó":"behaved","clase":"class","aclararon":"clarified","dudas":"doubts",
-    "trataron":"treated","bien":"well","atencion":"attention","атención":"attention"
+    "trataron":"treated","bien":"well","atencion":"attention","atención":"attention"
 }
+# стоп-слова/мусор для колонки E (в нормализованном виде) — игнорируем
+STOPWORDS_NORM = set([
+    "si","sí","no","ok","n","na","n/a","none","null","-", "y",
+    "la","el","los","las","un","una","uno","al","por","para","con","en","de","del"
+])
+
 def _naive_translate_es_en(text: str) -> str:
+    # токены только из букв, без цифр/знаков, затем подставляем переводы
     w = re.findall(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+", text)
     out = []
     for t in w:
@@ -215,8 +224,12 @@ def build_aspects_counts_from_E_by_A(df: pd.DataFrame, granularity: str):
             if not t:
                 continue
 
+            # фильтруем мусор/стоп-слова/цифры/односимвольные
+            if t in STOPWORDS_NORM or len(t) < 2 or re.fullmatch(r"\d+", t):
+                continue
+
             matched = False
-            # точное попадание
+            # точное совпадение
             for es_norm, es, en in _ASPECTS_NORM:
                 if t == es_norm:
                     rows.append((r["bucket"], r["bucket_label"], f"{es} (EN: {en})", 1))
@@ -239,12 +252,18 @@ def build_aspects_counts_from_E_by_A(df: pd.DataFrame, granularity: str):
     unknown_df = pd.DataFrame(unknown, columns=["mention"])
     if not unknown_df.empty:
         unknown_df["mention"] = unknown_df["mention"].str.strip()
-        unknown_df = (unknown_df.groupby("mention", as_index=False)
-                      .size().rename(columns={"size":"total"}).sort_values("total", ascending=False))
-        unknown_df["en"] = unknown_df["mention"].apply(_naive_translate_es_en)
-        unknown_df = unknown_df[["mention","en","total"]]
+        # убираем снова стоп-слова и очень короткие элементы
+        unknown_df = unknown_df[unknown_df["mention"].apply(lambda x: (_norm(x) not in STOPWORDS_NORM) and (len(_norm(x)) >= 2))]
+        if not unknown_df.empty:
+            unknown_df = (unknown_df.groupby("mention", as_index=False)
+                          .size().rename(columns={"size":"total"})
+                          .sort_values("total", ascending=False))
+            unknown_df["en"] = unknown_df["mention"].apply(_naive_translate_es_en)
+            unknown_df = unknown_df[["en","mention","total"]]
+        else:
+            unknown_df = pd.DataFrame(columns=["en","mention","total"])
     else:
-        unknown_df = pd.DataFrame(columns=["mention","en","total"])
+        unknown_df = pd.DataFrame(columns=["en","mention","total"])
 
     return counts, unknown_df
 
@@ -550,7 +569,8 @@ st.markdown("#### Упоминания вне шаблона")
 if unknown_all.empty:
     st.success("Все упоминания соответствуют шаблону.")
 else:
-    unknown_agg = (unknown_all.groupby(["mention","en"], as_index=False)
+    unknown_agg = (unknown_all.groupby(["en","mention"], as_index=False)
                               .agg(total=("total","sum"))
                               .sort_values("total", ascending=False))
-    st.dataframe(unknown_agg, use_container_width=True)
+    # показываем перевод первым столбцом
+    st.dataframe(unknown_agg[["en","mention","total"]], use_container_width=True)
