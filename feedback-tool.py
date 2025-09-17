@@ -468,6 +468,7 @@ with left:
                         .drop_duplicates()
                         .sort_values("bucket")["bucket_label"].tolist())
 
+        # динамический верх оси Y по сумме упоминаний в период
         totals_by_bucket = (asp_counts.groupby("bucket_label", as_index=False)["count"]
                                       .sum().rename(columns={"count":"total"}))
         y_max = max(1, int(totals_by_bucket["total"].max()))
@@ -476,21 +477,73 @@ with left:
         expected_labels = [f"{es} (EN: {en})" for es, en in ASPECTS_ES_EN]
         present = [lbl for lbl in expected_labels if lbl in asp_counts["aspect"].unique()]
 
+        # основной stacked bar
         bars = (
             alt.Chart(alt.Data(values=_records(asp_counts)))
               .mark_bar(size=max(40, bar_size))
               .encode(
                   x=alt.X("bucket_label:N", title="Период (по A)", sort=bucket_order),
-                  y=alt.Y("count:Q", title="Кол-во упоминаний", aggregate="sum", scale=y_scale_bar),
+                  y=alt.Y("count:Q", title="Кол-во упоминаний",
+                          aggregate="sum", scale=y_scale_bar),
                   color=alt.Color("aspect:N", title="Аспект", sort=present)
               )
         )
-        st.altair_chart(bars.properties(height=460), theme=None, use_container_width=True)
+
+        # -------- ЕДИНЫЙ ТУЛТИП НА ВЕСЬ СТОЛБЕЦ --------
+        # pivot -> total -> строки line1..line7 (EN + count + %), сорт по убыванию
+        wide = (asp_counts.pivot_table(index=["bucket","bucket_label"],
+                                       columns="aspect", values="count",
+                                       aggfunc="sum", fill_value=0))
+        for lbl in expected_labels:
+            if lbl not in wide.columns:
+                wide[lbl] = 0
+        wide = wide[expected_labels]
+
+        safe_map = {lbl: f"c_{i}" for i, lbl in enumerate(expected_labels)}
+        wide_safe = wide.rename(columns=safe_map).reset_index()
+        cols = list(safe_map.values())
+        wide_safe["total"] = wide_safe[cols].sum(axis=1)
+
+        en_names = [en for _, en in ASPECTS_ES_EN]
+        def _mk_lines(row):
+            tot = row["total"]
+            items = []
+            for i, en in enumerate(en_names):
+                c = int(row[cols[i]])
+                p = (c / tot) if tot else 0.0
+                items.append((en, c, p))
+            items.sort(key=lambda x: x[1], reverse=True)
+            for idx in range(len(en_names)):
+                if idx < len(items):
+                    en, c, p = items[idx]
+                    row[f"line{idx+1}"] = f"{en} — {c} ({p:.0%})"
+                else:
+                    row[f"line{idx+1}"] = ""
+            return row
+
+        wide_safe = wide_safe.apply(_mk_lines, axis=1)
+
+        tooltip_fields = [
+            alt.Tooltip("bucket_label:N", title="Период"),
+            alt.Tooltip("total:Q", title="Всего упоминаний"),
+        ] + [alt.Tooltip(f"line{i}:N", title="") for i in range(1, len(en_names)+1)]
+
+        bubble = (
+            alt.Chart(alt.Data(values=_records(wide_safe)))
+              .mark_bar(size=max(40, bar_size), opacity=0.001)
+              .encode(
+                  x=alt.X("bucket_label:N", sort=bucket_order),
+                  y=alt.Y("total:Q", scale=y_scale_bar),
+                  tooltip=tooltip_fields
+              )
+        )
+
+        st.altair_chart((bars + bubble).properties(height=460),
+                        theme=None, use_container_width=True)
 
 with right:
     st.markdown("**Распределение по урокам (ось X — S)**")
 
-    # собираем для каждого урока S: шаблонные аспекты и «вне шаблона»
     rows_aspects = []
     unknown_per_s = {}
 
@@ -514,7 +567,7 @@ with right:
                 matched = False
                 for es_norm, es, en in _ASPECTS_NORM:
                     if t == es_norm or es_norm in t:
-                        rows_aspects.append((s_val, en))  # берём только EN для вывода
+                        rows_aspects.append((s_val, en))
                         matched = True
                         break
                 if not matched and t not in STOPWORDS_NORM:
@@ -523,12 +576,11 @@ with right:
     if not rows_aspects and not unknown_per_s:
         st.info("Нет данных для выбранных фильтров.")
     else:
-        # агрегируем шаблонные
         df_as = (pd.DataFrame(rows_aspects, columns=["S","aspect_en"])
                  if rows_aspects else pd.DataFrame(columns=["S","aspect_en"]))
         lesson_rows = []
-
         lessons_sorted = sorted(set(list(df_as["S"].unique()) + list(unknown_per_s.keys())))
+
         for s in lessons_sorted:
             # шаблонные
             if not df_as.empty and s in df_as["S"].values:
@@ -536,35 +588,44 @@ with right:
                        .value_counts()
                        .sort_values(ascending=False))
                 total_tpl = int(cnt.sum())
+                # -> многострочный текст с буллитами
                 parts_text = []
                 for en_name, c in cnt.items():
                     pct = (c / total_tpl) if total_tpl else 0.0
-                    parts_text.append(f"{en_name} — {c} ({pct:.0%})")
-                aspects_text = " • ".join(parts_text)
+                    parts_text.append(f"• {en_name} — {c} ({pct:.0%})")
+                aspects_text = "\n".join(parts_text)
             else:
                 aspects_text = ""
                 total_tpl = 0
 
-            # вне шаблона
+            # вне шаблона (тоже построчно)
             unk_counter = unknown_per_s.get(s, Counter())
             if unk_counter:
                 top_items = unk_counter.most_common(10)
                 rest = sum(unk_counter.values()) - sum(c for _, c in top_items)
-                unk_parts = [f"{translate_es_to_en(m)} ({c})" for m, c in top_items]
+                unk_parts = [f"• {translate_es_to_en(m)} ({c})" for m, c in top_items]
                 if rest > 0:
-                    unk_parts.append(f"… (+{rest})")
-                unknown_text = " • ".join(unk_parts)
+                    unk_parts.append(f"• … (+{rest})")
+                unknown_text = "\n".join(unk_parts)
             else:
                 unknown_text = ""
 
-            lesson_rows.append({"S": int(s),
-                                "Aspects (EN)": aspects_text,
-                                "Unknown (EN)": unknown_text,
-                                "Total (templ.)": total_tpl})
+            lesson_rows.append({
+                "S": int(s),
+                "Aspects (EN)": aspects_text,
+                "Unknown (EN)": unknown_text,
+                "Total (templ.)": total_tpl
+            })
 
         table = pd.DataFrame(lesson_rows).sort_values("S").reset_index(drop=True)
-        st.dataframe(table[["S","Aspects (EN)","Unknown (EN)","Total (templ.)"]],
-                     use_container_width=True)
+
+        # высота по размеру, чтобы переносы были видны
+        height = min(800, 100 + 28 * len(table))
+        st.dataframe(
+            table[["S","Aspects (EN)","Unknown (EN)","Total (templ.)"]],
+            use_container_width=True,
+            height=height
+        )
 
 # неизвестные упоминания (не из шаблона) — общий список
 st.markdown("#### Упоминания вне шаблона (общий список)")
