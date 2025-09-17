@@ -7,3 +7,4 @@ tk
 streamlit-aggrid
 streamlit>=1.36
 altair
+deep-translator==1.11.4
