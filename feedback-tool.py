@@ -7,6 +7,14 @@ import json
 import string
 import re
 import unicodedata
+from functools import lru_cache
+
+# online-переводчик (если доступен)
+try:
+    from deep_translator import GoogleTranslator
+    _gt = GoogleTranslator(source="auto", target="en")
+except Exception:
+    _gt = None  # нет библиотеки/интернета — используем запасной вариант
 
 st.set_page_config(layout="wide", page_title="40 week courses")
 
@@ -40,12 +48,10 @@ def filter_df(df: pd.DataFrame, course_col: str, date_col: str,
     if df.empty:
         return df
     dff = df.copy()
-    # по курсам
     if selected_courses:
         dff = dff[dff[course_col].isin(selected_courses)]
     else:
-        return dff.iloc[0:0]  # пусто
-    # по датам
+        return dff.iloc[0:0]
     if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
         start_dt = pd.to_datetime(date_range[0])
         end_dt = pd.to_datetime(date_range[1])
@@ -75,7 +81,7 @@ def add_bucket(dff: pd.DataFrame, date_col: str, granularity: str) -> pd.DataFra
     if granularity == "День":
         out["bucket"] = out[date_col].dt.floor("D")
     elif granularity == "Неделя":
-        out["bucket"] = out[date_col].dt.to_period("W-MON").dt.start_time  # старт недели (Пн)
+        out["bucket"] = out[date_col].dt.to_period("W-MON").dt.start_time
     elif granularity == "Месяц":
         out["bucket"] = out[date_col].dt.to_period("M").dt.to_timestamp()
     elif granularity == "Год":
@@ -85,7 +91,6 @@ def add_bucket(dff: pd.DataFrame, date_col: str, granularity: str) -> pd.DataFra
     return out
 
 def ensure_bucket_and_label(dff: pd.DataFrame, date_col: str, granularity: str) -> pd.DataFrame:
-    """Гарантируем наличие столбцов bucket (datetime) и bucket_label (подпись)."""
     if dff.empty:
         return dff.copy()
     out = dff.copy()
@@ -95,7 +100,7 @@ def ensure_bucket_and_label(dff: pd.DataFrame, date_col: str, granularity: str) 
     if granularity == "День":
         fmt = "%Y-%m-%d"
     elif granularity == "Неделя":
-        fmt = "W%W (%Y-%m-%d)"  # дата старта недели
+        fmt = "W%W (%Y-%m-%d)"
     elif granularity == "Месяц":
         fmt = "%Y-%m"
     elif granularity == "Год":
@@ -107,13 +112,6 @@ def ensure_bucket_and_label(dff: pd.DataFrame, date_col: str, granularity: str) 
     return out
 
 def prep_distribution(df_f: pd.DataFrame, value_col: str, allowed_values: list, label_title: str):
-    """
-    Возвращает:
-      out: DataFrame со столбцами [bucket, bucket_label, val, val_str, count, total, pct]
-      bucket_order: порядок оси X по дате
-      val_order: порядок легенды по значениям
-      label_title: заголовок легенды (например, 'G' или 'I')
-    """
     if df_f.empty:
         return pd.DataFrame(), [], [], label_title
     d = df_f[df_f[value_col].isin(allowed_values)].copy()
@@ -134,7 +132,6 @@ def prep_distribution(df_f: pd.DataFrame, value_col: str, allowed_values: list, 
     out = grp.merge(totals, on=["bucket", "bucket_label"], how="left")
     out["pct"] = out["count"] / out["total"]
 
-    # порядок дат строго по bucket (datetime)
     bucket_order = (out[["bucket", "bucket_label"]]
                     .drop_duplicates()
                     .sort_values("bucket")["bucket_label"].tolist())
@@ -142,71 +139,7 @@ def prep_distribution(df_f: pd.DataFrame, value_col: str, allowed_values: list, 
     val_order = [str(v) for v in allowed_values]
     return out, bucket_order, val_order, label_title
 
-def build_aspects_counts(df: pd.DataFrame, text_col: str, date_col: str, granularity: str):
-    """
-    Берём дату из date_col, текст аспектов из text_col.
-    Возвращает:
-      counts: [bucket, bucket_label, aspect, count]
-      unknown: [mention, en, total]
-    """
-    need_cols = [date_col, text_col]
-    if df.empty or not all(c in df.columns for c in need_cols):
-        return pd.DataFrame(columns=["bucket","bucket_label","aspect","count"]), pd.DataFrame(columns=["mention","en","total"])
-
-    d = df[need_cols].copy()
-    d[date_col] = pd.to_datetime(d[date_col], errors="coerce")
-    d = d.dropna(subset=[date_col])
-    if d.empty:
-        return pd.DataFrame(columns=["bucket","bucket_label","aspect","count"]), pd.DataFrame(columns=["mention","en","total"])
-
-    # бакеты
-    d = d.rename(columns={date_col: "A", text_col: "TXT"})
-    d = add_bucket(d, "A", granularity)
-    d = ensure_bucket_and_label(d, "A", granularity)
-
-    rows, unknown = [], []
-    for _, r in d.iterrows():
-        text = r["TXT"]
-        if pd.isna(text):
-            continue
-        txt = str(text).strip()
-        if not txt:
-            continue
-
-        parts = re.split(r"[;,/\n|]+", txt) if re.search(r"[;,/\n|]", txt) else [txt]
-        for p in parts:
-            p_clean = p.strip()
-            t = _norm(p_clean)
-            if not t:
-                continue
-
-            matched = False
-            for es_norm, es, en in _ASPECTS_NORM:
-                if t == es_norm or es_norm in t:
-                    rows.append((r["bucket"], r["bucket_label"], f"{es} (EN: {en})", 1))
-                    matched = True
-                    break
-            if not matched:
-                unknown.append(p_clean)
-
-    counts = pd.DataFrame(rows, columns=["bucket","bucket_label","aspect","count"])
-    if not counts.empty:
-        counts = counts.groupby(["bucket","bucket_label","aspect"], as_index=False)["count"].sum()
-
-    unknown_df = pd.DataFrame(unknown, columns=["mention"])
-    if not unknown_df.empty:
-        unknown_df["mention"] = unknown_df["mention"].str.strip()
-        unknown_df = (unknown_df.groupby("mention", as_index=False)
-                      .size().rename(columns={"size":"total"})
-                      .sort_values("total", ascending=False))
-        unknown_df["en"] = unknown_df["mention"].apply(_naive_translate_es_en)
-        unknown_df = unknown_df[["en","mention","total"]]
-    else:
-        unknown_df = pd.DataFrame(columns=["en","mention","total"])
-
-    return counts, unknown_df
-
-# ===== Аспекты урока: словарь и утилиты (считаем по датам A, текст в E) =====
+# ===== Аспекты и перевод =====
 ASPECTS_ES_EN = [
     ("La materia que se enseñó", "The subject that was taught"),
     ("La explicación del profesor", "The teacher's explanation"),
@@ -227,7 +160,7 @@ def _norm(s: str) -> str:
 
 _ASPECTS_NORM = [(_norm(es), es, en) for es, en in ASPECTS_ES_EN]
 
-# базовый словарик для грубого перевода неизвестных фраз
+# простой пословный словарик (fallback)
 _BASIC_ES_EN = {
     "si": "yes", "sí": "yes", "no": "no", "ok": "ok",
     "materia":"subject","explicacion":"explanation","explicación":"explanation",
@@ -236,78 +169,63 @@ _BASIC_ES_EN = {
     "comportó":"behaved","clase":"class","aclararon":"clarified","dudas":"doubts",
     "trataron":"treated","bien":"well","atencion":"attention","atención":"attention"
 }
-# стоп-слова/мусор для колонки E (в нормализованном виде) — игнорируем
-STOPWORDS_NORM = set([
-    "si","sí","no","ok","n","na","n/a","none","null","-", "y",
-    "la","el","los","las","un","una","uno","al","por","para","con","en","de","del"
-])
 
 def _naive_translate_es_en(text: str) -> str:
-    # токены только из букв, без цифр/знаков, затем подставляем переводы
-    w = re.findall(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+", text)
-    out = []
-    for t in w:
+    tokens = re.findall(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+", text)
+    mapped = []
+    for t in tokens:
         k = unicodedata.normalize("NFKD", t).encode("ascii", "ignore").decode("ascii").lower()
-        out.append(_BASIC_ES_EN.get(k, t))
-    return " ".join(out) if out else ""
+        mapped.append(_BASIC_ES_EN.get(k, t))
+    out = " ".join(mapped).strip()
+    return out[0].upper() + out[1:] if out else ""
 
-def build_aspects_counts_from_E_by_A(df: pd.DataFrame, granularity: str):
-    """
-    Берём дату из A, текст аспектов из E. Считаем упоминания по датам (с учётом granularity).
-    Возвращает:
-      counts: DataFrame [bucket(datetime), bucket_label, aspect, count]
-      unknown: DataFrame [mention, en, total]
-    """
-    if df.empty or ("A" not in df.columns) or ("E" not in df.columns):
-        return pd.DataFrame(columns=["bucket","bucket_label","aspect","count"]), pd.DataFrame(columns=["mention","en","total"])
+@lru_cache(maxsize=5000)
+def translate_es_to_en(text: str) -> str:
+    t = (text or "").strip()
+    if not t:
+        return ""
+    if _gt is not None:
+        try:
+            return _gt.translate(t)
+        except Exception:
+            pass
+    return _naive_translate_es_en(t)
 
-    d = df[["A","E"]].copy()
-    d["A"] = pd.to_datetime(d["A"], errors="coerce")
-    d = d.dropna(subset=["A"])
+def build_aspects_counts(df: pd.DataFrame, text_col: str, date_col: str, granularity: str):
+    need_cols = [date_col, text_col]
+    if df.empty or not all(c in df.columns for c in need_cols):
+        return (pd.DataFrame(columns=["bucket","bucket_label","aspect","count"]),
+                pd.DataFrame(columns=["en","mention","total"]))
+
+    d = df[need_cols].copy()
+    d[date_col] = pd.to_datetime(d[date_col], errors="coerce")
+    d = d.dropna(subset=[date_col])
     if d.empty:
-        return pd.DataFrame(columns=["bucket","bucket_label","aspect","count"]), pd.DataFrame(columns=["mention","en","total"])
+        return (pd.DataFrame(columns=["bucket","bucket_label","aspect","count"]),
+                pd.DataFrame(columns=["en","mention","total"]))
 
-    # bucket & подпись по дате A
+    d = d.rename(columns={date_col: "A", text_col: "TXT"})
     d = add_bucket(d, "A", granularity)
     d = ensure_bucket_and_label(d, "A", granularity)
 
     rows, unknown = [], []
     for _, r in d.iterrows():
-        text = r["E"]
-        if pd.isna(text):
-            continue
-        txt = str(text).strip()
+        txt = str(r["TXT"]).strip()
         if not txt:
             continue
-
-        # допускаем несколько пунктов в одной ячейке
         parts = re.split(r"[;,/\n|]+", txt) if re.search(r"[;,/\n|]", txt) else [txt]
         for p in parts:
-            p_clean = p.strip()
-            t = _norm(p_clean)
+            t = _norm(p.strip())
             if not t:
                 continue
-
-            # фильтруем мусор/стоп-слова/цифры/односимвольные
-            if t in STOPWORDS_NORM or len(t) < 2 or re.fullmatch(r"\d+", t):
-                continue
-
             matched = False
-            # точное совпадение
             for es_norm, es, en in _ASPECTS_NORM:
-                if t == es_norm:
+                if t == es_norm or es_norm in t:
                     rows.append((r["bucket"], r["bucket_label"], f"{es} (EN: {en})", 1))
                     matched = True
                     break
             if not matched:
-                # по вхождению
-                for es_norm, es, en in _ASPECTS_NORM:
-                    if es_norm in t:
-                        rows.append((r["bucket"], r["bucket_label"], f"{es} (EN: {en})", 1))
-                        matched = True
-                        break
-            if not matched:
-                unknown.append(p_clean)
+                unknown.append(p.strip())
 
     counts = pd.DataFrame(rows, columns=["bucket","bucket_label","aspect","count"])
     if not counts.empty:
@@ -316,21 +234,15 @@ def build_aspects_counts_from_E_by_A(df: pd.DataFrame, granularity: str):
     unknown_df = pd.DataFrame(unknown, columns=["mention"])
     if not unknown_df.empty:
         unknown_df["mention"] = unknown_df["mention"].str.strip()
-        # убираем снова стоп-слова и очень короткие элементы
-        unknown_df = unknown_df[unknown_df["mention"].apply(lambda x: (_norm(x) not in STOPWORDS_NORM) and (len(_norm(x)) >= 2))]
-        if not unknown_df.empty:
-            unknown_df = (unknown_df.groupby("mention", as_index=False)
-                          .size().rename(columns={"size":"total"})
-                          .sort_values("total", ascending=False))
-            unknown_df["en"] = unknown_df["mention"].apply(_naive_translate_es_en)
-            unknown_df = unknown_df[["en","mention","total"]]
-        else:
-            unknown_df = pd.DataFrame(columns=["en","mention","total"])
+        unknown_df = (unknown_df.groupby("mention", as_index=False)
+                      .size().rename(columns={"size": "total"})
+                      .sort_values("total", ascending=False))
+        unknown_df["en"] = unknown_df["mention"].apply(translate_es_to_en)
+        unknown_df = unknown_df[["en", "mention", "total"]]
     else:
-        unknown_df = pd.DataFrame(columns=["en","mention","total"])
+        unknown_df = pd.DataFrame(columns=["en", "mention", "total"])
 
     return counts, unknown_df
-
 
 # ==================== ДАННЫЕ ====================
 
@@ -352,7 +264,6 @@ for df, date_col, x_col, y_col in [
 
 st.sidebar.header("Фильтры")
 
-# Курсы: объединяем множества из обеих таблиц
 courses_union = sorted(list(set(
     ([] if df1.empty else df1["N"].dropna().unique().tolist()) +
     ([] if df2.empty else df2["M"].dropna().unique().tolist())
@@ -378,7 +289,6 @@ selected_courses = st.sidebar.multiselect(
 )
 st.sidebar.caption(f"Выбрано: {len(selected_courses)} из {len(courses_union)}")
 
-# Дата: общий диапазон по двум таблицам
 min1, max1 = (df1["A"].min(), df1["A"].max()) if not df1.empty else (pd.NaT, pd.NaT)
 min2, max2 = (df2["A"].min(), df2["A"].max()) if not df2.empty else (pd.NaT, pd.NaT)
 glob_min, glob_max = safe_minmax(min1, max1, min2, max2)
@@ -388,29 +298,17 @@ if pd.isna(glob_min) or pd.isna(glob_max):
 else:
     date_range = st.sidebar.date_input("Дата фидбека (A)", [glob_min.date(), glob_max.date()])
 
-# Гранулярность + ширина столбиков
 granularity = st.sidebar.selectbox("Гранулярность для распределения", ["День", "Неделя", "Месяц", "Год"])
 BAR_SIZE = {"День": 18, "Неделя": 44, "Месяц": 56, "Год": 64}
 bar_size = BAR_SIZE.get(granularity, 36)
 
 # ==================== ПРИМЕНЕНИЕ ФИЛЬТРОВ ====================
 
-# Верхние графики (средние)
-agg1 = apply_filters_and_aggregate(df1, course_col="N", date_col="A",
-                                   x_col="S", y_col="G",
-                                   selected_courses=selected_courses,
-                                   date_range=date_range)
+agg1 = apply_filters_and_aggregate(df1, "N", "A", "S", "G", selected_courses, date_range)
+agg2 = apply_filters_and_aggregate(df2, "M", "A", "R", "I", selected_courses, date_range)
 
-agg2 = apply_filters_and_aggregate(df2, course_col="M", date_col="A",
-                                   x_col="R", y_col="I",
-                                   selected_courses=selected_courses,
-                                   date_range=date_range)
-
-# Нижние распределения: «сырые» значения + bucket/bucket_label
-df1_f = filter_df(df1, course_col="N", date_col="A",
-                  selected_courses=selected_courses, date_range=date_range)
-df2_f = filter_df(df2, course_col="M", date_col="A",
-                  selected_courses=selected_courses, date_range=date_range)
+df1_f = filter_df(df1, "N", "A", selected_courses, date_range)
+df2_f = filter_df(df2, "M", "A", selected_courses, date_range)
 
 if not df1_f.empty:
     df1_f = df1_f.dropna(subset=["A", "G"])
@@ -422,12 +320,8 @@ if not df2_f.empty:
     df2_f = add_bucket(df2_f, "A", granularity)
     df2_f = ensure_bucket_and_label(df2_f, "A", granularity)
 
-# Готовим данные для нижних графиков
-fr1_allowed = [1, 2, 3, 4, 5]
-fr1_out, fr1_bucket_order, fr1_val_order, fr1_title = prep_distribution(df1_f, "G", fr1_allowed, "G")
-
-fr2_allowed = list(range(1, 11))
-fr2_out, fr2_bucket_order, fr2_val_order, fr2_title = prep_distribution(df2_f, "I", fr2_allowed, "I")
+fr1_out, fr1_bucket_order, fr1_val_order, fr1_title = prep_distribution(df1_f, "G", [1,2,3,4,5], "G")
+fr2_out, fr2_bucket_order, fr2_val_order, fr2_title = prep_distribution(df2_f, "I", list(range(1,11)), "I")
 
 # ==================== ОТРИСОВКА ====================
 
@@ -441,8 +335,7 @@ with col1:
         st.info("Нет данных для выбранных фильтров.")
     else:
         chart1 = (
-            alt.Chart(agg1)
-              .mark_line(point=True)
+            alt.Chart(agg1).mark_line(point=True)
               .encode(
                   x=alt.X("S:Q", title="S"),
                   y=alt.Y("avg_y:Q", title="Average G"),
@@ -450,8 +343,7 @@ with col1:
                       alt.Tooltip("S:Q", title="S"),
                       alt.Tooltip("avg_y:Q", title="Average G", format=".2f"),
                       alt.Tooltip("count:Q", title="Кол-во ответов")
-                  ]
-              )
+                  ])
               .properties(height=380)
         )
         st.altair_chart(chart1, use_container_width=True)
@@ -462,8 +354,7 @@ with col2:
         st.info("Нет данных для выбранных фильтров.")
     else:
         chart2 = (
-            alt.Chart(agg2)
-              .mark_line(point=True)
+            alt.Chart(agg2).mark_line(point=True)
               .encode(
                   x=alt.X("R:Q", title="R"),
                   y=alt.Y("avg_y:Q", title="Average I"),
@@ -471,13 +362,11 @@ with col2:
                       alt.Tooltip("R:Q", title="R"),
                       alt.Tooltip("avg_y:Q", title="Average I", format=".2f"),
                       alt.Tooltip("count:Q", title="Кол-во ответов")
-                  ]
-              )
+                  ])
               .properties(height=380)
         )
         st.altair_chart(chart2, use_container_width=True)
 
-# ---------- НИЖНИЙ РЯД: РАСПРЕДЕЛЕНИЯ (широкие stacked bars; высота = кол-во) ----------
 st.markdown("---")
 st.subheader(f"Распределение значений (гранулярность: {granularity.lower()})")
 
@@ -489,8 +378,7 @@ with col3:
         st.info("Нет данных (FR1).")
     else:
         bars1 = (
-            alt.Chart(fr1_out)
-              .mark_bar(size=bar_size)
+            alt.Chart(fr1_out).mark_bar(size=bar_size)
               .encode(
                   x=alt.X("bucket_label:N", title="Период", sort=fr1_bucket_order),
                   y=alt.Y("sum(count):Q", title="Кол-во ответов"),
@@ -501,8 +389,7 @@ with col3:
                       alt.Tooltip("val_str:N", title=fr1_title),
                       alt.Tooltip("count:Q", title="Кол-во"),
                       alt.Tooltip("pct:Q", title="% внутри периода", format=".0%")
-                  ]
-              )
+                  ])
               .properties(height=420)
         )
         st.altair_chart(bars1, use_container_width=True)
@@ -513,8 +400,7 @@ with col4:
         st.info("Нет данных (FR2).")
     else:
         bars2 = (
-            alt.Chart(fr2_out)
-              .mark_bar(size=bar_size)
+            alt.Chart(fr2_out).mark_bar(size=bar_size)
               .encode(
                   x=alt.X("bucket_label:N", title="Период", sort=fr2_bucket_order),
                   y=alt.Y("sum(count):Q", title="Кол-во ответов"),
@@ -525,29 +411,17 @@ with col4:
                       alt.Tooltip("val_str:N", title=fr2_title),
                       alt.Tooltip("count:Q", title="Кол-во"),
                       alt.Tooltip("pct:Q", title="% внутри периода", format=".0%")
-                  ]
-              )
+                  ])
               .properties(height=420)
         )
         st.altair_chart(bars2, use_container_width=True)
 
-# ---------- НИЖЕ: Аспекты урока (E) по датам из A ----------
+# ---------- НИЖЕ: Аспекты урока из FR1 (E по датам A) ----------
 st.markdown("---")
-st.subheader("Аспекты урока (по датам A, текст из E)")
+st.subheader("Аспекты урока (по датам A, текст из E) — Form Responses 1")
 
-# Берём аспекты ТОЛЬКО из Form Responses 1: курс = N, дата = A, текст = E
-df_aspects = filter_df(
-    df1,                # <-- FR1
-    course_col="N",
-    date_col="A",
-    selected_courses=selected_courses,
-    date_range=date_range,
-)
-
-# если у тебя уже есть функция build_aspects_counts(...) — используем её
-asp_counts, unknown_all = build_aspects_counts(
-    df_aspects, text_col="E", date_col="A", granularity=granularity
-)
+df_aspects = filter_df(df1, "N", "A", selected_courses, date_range)
+asp_counts, unknown_all = build_aspects_counts(df_aspects, text_col="E", date_col="A", granularity=granularity)
 
 if asp_counts.empty:
     st.info("Не нашёл упоминаний аспектов (лист 'Form Responses 1', колонка E).")
@@ -559,10 +433,8 @@ else:
     expected_labels = [f"{es} (EN: {en})" for es, en in ASPECTS_ES_EN]
     present = [lbl for lbl in expected_labels if lbl in asp_counts["aspect"].unique()]
 
-    # stacked bar
     bars = (
-        alt.Chart(asp_counts)
-          .mark_bar(size=max(40, bar_size))
+        alt.Chart(asp_counts).mark_bar(size=max(40, bar_size))
           .encode(
               x=alt.X("bucket_label:N", title="Период (по A)", sort=bucket_order),
               y=alt.Y("sum(count):Q", title="Кол-во упоминаний"),
@@ -570,7 +442,6 @@ else:
           )
     )
 
-    # «супер-тултип» (по столбцу)
     wide = (asp_counts
             .pivot_table(index=["bucket","bucket_label"], columns="aspect",
                          values="count", aggfunc="sum", fill_value=0))
@@ -620,7 +491,6 @@ else:
 
     st.altair_chart((bars + bubble).properties(height=460), use_container_width=True)
 
-# неизвестные упоминания (не из шаблона)
 st.markdown("#### Упоминания вне шаблона")
 if unknown_all.empty:
     st.success("Все упоминания соответствуют шаблону.")
@@ -629,3 +499,7 @@ else:
                               .agg(total=("total","sum"))
                               .sort_values("total", ascending=False))
     st.dataframe(unknown_agg[["en","mention","total"]], use_container_width=True)
+
+# Подсказка, если онлайн-переводчик недоступен
+if _gt is None:
+    st.caption("⚠️ deep-translator недоступен — используется упрощённый пословный перевод.")
