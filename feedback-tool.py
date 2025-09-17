@@ -168,9 +168,8 @@ _BASIC_ES_EN = {
     "profesor":"teacher","actividades":"activities","sala":"classroom",
     "tareas":"homework","casa":"home","forma":"way","comporto":"behaved",
     "comportó":"behaved","clase":"class","aclararon":"clarified","dudas":"doubts",
-    "trataron":"treated","bien":"well","atencion":"attention","atención":"attention"
+    "trataron":"treated","bien":"well","atencion":"attention","атención":"attention"
 }
-STOPWORDS_NORM = set(["si","sí","no","ok","-","y","la","el","los","las","un","una","uno","al","por","para","con","en","de","del"])
 
 def _naive_translate_es_en(text: str) -> str:
     tokens = re.findall(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+", text)
@@ -226,7 +225,7 @@ def build_aspects_counts(df: pd.DataFrame, text_col: str, date_col: str, granula
                     rows.append((r["bucket"], r["bucket_label"], f"{es} (EN: {en})", 1))
                     matched = True
                     break
-            if not matched and t not in STOPWORDS_NORM:
+            if not matched:
                 unknown.append(p.strip())
 
     counts = pd.DataFrame(rows, columns=["bucket","bucket_label","aspect","count"])
@@ -246,27 +245,38 @@ def build_aspects_counts(df: pd.DataFrame, text_col: str, date_col: str, granula
 
     return counts, unknown_df
 
-# ---- помощник для динамических границ Y
-def _y_domain(series: pd.Series, pad_ratio: float = 0.1):
-    s = series.dropna()
-    if s.empty:
-        return [0, 1]
-    ymin = float(s.min())
-    ymax = float(s.max())
-    if ymin == ymax:
-        delta = max(0.1, abs(ymin) * 0.1)
-        return [ymin - delta, ymax + delta]
-    pad = (ymax - ymin) * pad_ratio
-    return [ymin - pad, ymax + pad]
+def build_aspects_counts_by_S(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Счётчики аспектов по Урокам S (только шаблонные аспекты, EN).
+    Возвращает DataFrame [S(int), aspect_en(str), count(int)].
+    """
+    if df.empty or not {"S","E"}.issubset(df.columns):
+        return pd.DataFrame(columns=["S","aspect_en","count"])
+    d = df[["S","E"]].copy()
+    d["S"] = pd.to_numeric(d["S"], errors="coerce")
+    d = d.dropna(subset=["S"])
+    d["S"] = d["S"].astype(int)
 
-# ---- безопасная подача данных в Altair
-def _records(df: pd.DataFrame):
-    if df.empty:
-        return []
-    clean = (df.copy()
-               .astype(object)
-               .where(pd.notnull(df), None))
-    return clean.to_dict("records")
+    rows = []
+    for _, r in d.iterrows():
+        txt = str(r["E"] or "").strip()
+        if not txt:
+            continue
+        parts = re.split(r"[;,/\n|]+", txt) if re.search(r"[;,/\n|]", txt) else [txt]
+        for p in parts:
+            t = _norm(p.strip())
+            if not t:
+                continue
+            for es_norm, es, en in _ASPECTS_NORM:
+                if t == es_norm or es_norm in t:
+                    rows.append((int(r["S"]), en, 1))
+                    break
+
+    if not rows:
+        return pd.DataFrame(columns=["S","aspect_en","count"])
+    out = pd.DataFrame(rows, columns=["S","aspect_en","count"])
+    out = out.groupby(["S","aspect_en"], as_index=False)["count"].sum()
+    return out
 
 # ==================== ДАННЫЕ ====================
 
@@ -358,15 +368,17 @@ with col1:
     if agg1.empty:
         st.info("Нет данных для выбранных фильтров.")
     else:
-        y_dom1 = _y_domain(agg1["avg_y"], pad_ratio=0.1)
+        # динамический Y
+        y_min = float(agg1["avg_y"].min()) if len(agg1) else 0.0
+        y_max = float(agg1["avg_y"].max()) if len(agg1) else 5.0
+        pad = (y_max - y_min) * 0.1 if y_max > y_min else 0.5
+        y_scale = alt.Scale(domain=[y_min - pad, y_max + pad], nice=False, clamp=True)
+
         chart1 = (
-            alt.Chart(alt.Data(values=_records(agg1)))
-              .mark_line(point=True)
+            alt.Chart(agg1).mark_line(point=True)
               .encode(
                   x=alt.X("S:Q", title="S"),
-                  y=alt.Y("avg_y:Q",
-                          title="Average G",
-                          scale=alt.Scale(domain=y_dom1, nice=False, clamp=True)),
+                  y=alt.Y("avg_y:Q", title="Average G", scale=y_scale),
                   tooltip=[
                       alt.Tooltip("S:Q", title="S"),
                       alt.Tooltip("avg_y:Q", title="Average G", format=".2f"),
@@ -374,22 +386,24 @@ with col1:
                   ])
               .properties(height=380)
         )
-        st.altair_chart(chart1, theme=None, use_container_width=True)
+        st.altair_chart(chart1, use_container_width=True, theme=None)
 
 with col2:
     st.subheader("Form Responses 2 — Average by R")
     if agg2.empty:
         st.info("Нет данных для выбранных фильтров.")
     else:
-        y_dom2 = _y_domain(agg2["avg_y"], pad_ratio=0.1)
+        # динамический Y
+        y_min2 = float(agg2["avg_y"].min()) if len(agg2) else 0.0
+        y_max2 = float(agg2["avg_y"].max()) if len(agg2) else 10.0
+        pad2 = (y_max2 - y_min2) * 0.1 if y_max2 > y_min2 else 0.5
+        y_scale2 = alt.Scale(domain=[y_min2 - pad2, y_max2 + pad2], nice=False, clamp=True)
+
         chart2 = (
-            alt.Chart(alt.Data(values=_records(agg2)))
-              .mark_line(point=True)
+            alt.Chart(agg2).mark_line(point=True)
               .encode(
                   x=alt.X("R:Q", title="R"),
-                  y=alt.Y("avg_y:Q",
-                          title="Average I",
-                          scale=alt.Scale(domain=y_dom2, nice=False, clamp=True)),
+                  y=alt.Y("avg_y:Q", title="Average I", scale=y_scale2),
                   tooltip=[
                       alt.Tooltip("R:Q", title="R"),
                       alt.Tooltip("avg_y:Q", title="Average I", format=".2f"),
@@ -397,7 +411,7 @@ with col2:
                   ])
               .properties(height=380)
         )
-        st.altair_chart(chart2, theme=None, use_container_width=True)
+        st.altair_chart(chart2, use_container_width=True, theme=None)
 
 st.markdown("---")
 st.subheader(f"Распределение значений (гранулярность: {granularity.lower()})")
@@ -410,11 +424,10 @@ with col3:
         st.info("Нет данных (FR1).")
     else:
         bars1 = (
-            alt.Chart(alt.Data(values=_records(fr1_out)))
-              .mark_bar(size=bar_size)
+            alt.Chart(fr1_out).mark_bar(size=bar_size)
               .encode(
                   x=alt.X("bucket_label:N", title="Период", sort=fr1_bucket_order),
-                  y=alt.Y("count:Q", title="Кол-во ответов", aggregate="sum"),
+                  y=alt.Y("sum(count):Q", title="Кол-во ответов"),
                   color=alt.Color("val_str:N", title=fr1_title, sort=fr1_val_order),
                   order=alt.Order("val:Q", sort="ascending"),
                   tooltip=[
@@ -425,7 +438,7 @@ with col3:
                   ])
               .properties(height=420)
         )
-        st.altair_chart(bars1, theme=None, use_container_width=True)
+        st.altair_chart(bars1, use_container_width=True, theme=None)
 
 with col4:
     st.markdown("**Form Responses 2 — распределение I (1–10)**")
@@ -433,11 +446,10 @@ with col4:
         st.info("Нет данных (FR2).")
     else:
         bars2 = (
-            alt.Chart(alt.Data(values=_records(fr2_out)))
-              .mark_bar(size=bar_size)
+            alt.Chart(fr2_out).mark_bar(size=bar_size)
               .encode(
                   x=alt.X("bucket_label:N", title="Период", sort=fr2_bucket_order),
-                  y=alt.Y("count:Q", title="Кол-во ответов", aggregate="sum"),
+                  y=alt.Y("sum(count):Q", title="Кол-во ответов"),
                   color=alt.Color("val_str:N", title=fr2_title, sort=fr2_val_order),
                   order=alt.Order("val:Q", sort="ascending"),
                   tooltip=[
@@ -448,17 +460,19 @@ with col4:
                   ])
               .properties(height=420)
         )
-        st.altair_chart(bars2, theme=None, use_container_width=True)
+        st.altair_chart(bars2, use_container_width=True, theme=None)
 
-# ---------- НИЖЕ: Аспекты урока из FR1 ----------
+# ---------- НИЖЕ: Аспекты урока из FR1 (E по датам A) ----------
 st.markdown("---")
 st.subheader("Аспекты урока — Form Responses 1")
 
+# Берём аспекты ТОЛЬКО из Form Responses 1
 df_aspects = filter_df(df1, "N", "A", selected_courses, date_range)
-asp_counts, unknown_all = build_aspects_counts(df_aspects, text_col="E", date_col="A", granularity=granularity)
+asp_counts, _unknown_all = build_aspects_counts(df_aspects, text_col="E", date_col="A", granularity=granularity)
 
 left, right = st.columns([1, 1])
 
+# ---- Левая половина: «Аспекты по датам (ось X — A)» с единым тултипом ----
 with left:
     st.markdown("**Аспекты по датам (ось X — A)**")
     if asp_counts.empty:
@@ -468,7 +482,6 @@ with left:
                         .drop_duplicates()
                         .sort_values("bucket")["bucket_label"].tolist())
 
-        # динамический верх оси Y по сумме упоминаний в период
         totals_by_bucket = (asp_counts.groupby("bucket_label", as_index=False)["count"]
                                       .sum().rename(columns={"count":"total"}))
         y_max = max(1, int(totals_by_bucket["total"].max()))
@@ -477,20 +490,16 @@ with left:
         expected_labels = [f"{es} (EN: {en})" for es, en in ASPECTS_ES_EN]
         present = [lbl for lbl in expected_labels if lbl in asp_counts["aspect"].unique()]
 
-        # основной stacked bar
         bars = (
-            alt.Chart(alt.Data(values=_records(asp_counts)))
-              .mark_bar(size=max(40, bar_size))
+            alt.Chart(asp_counts).mark_bar(size=max(40, bar_size))
               .encode(
                   x=alt.X("bucket_label:N", title="Период (по A)", sort=bucket_order),
-                  y=alt.Y("count:Q", title="Кол-во упоминаний",
-                          aggregate="sum", scale=y_scale_bar),
+                  y=alt.Y("sum(count):Q", title="Кол-во упоминаний", scale=y_scale_bar),
                   color=alt.Color("aspect:N", title="Аспект", sort=present)
               )
         )
 
-        # -------- ЕДИНЫЙ ТУЛТИП НА ВЕСЬ СТОЛБЕЦ --------
-        # pivot -> total -> строки line1..line7 (EN + count + %), сорт по убыванию
+        # единый тултип
         wide = (asp_counts.pivot_table(index=["bucket","bucket_label"],
                                        columns="aspect", values="count",
                                        aggfunc="sum", fill_value=0))
@@ -505,6 +514,7 @@ with left:
         wide_safe["total"] = wide_safe[cols].sum(axis=1)
 
         en_names = [en for _, en in ASPECTS_ES_EN]
+
         def _mk_lines(row):
             tot = row["total"]
             items = []
@@ -529,7 +539,7 @@ with left:
         ] + [alt.Tooltip(f"line{i}:N", title="") for i in range(1, len(en_names)+1)]
 
         bubble = (
-            alt.Chart(alt.Data(values=_records(wide_safe)))
+            alt.Chart(wide_safe)
               .mark_bar(size=max(40, bar_size), opacity=0.001)
               .encode(
                   x=alt.X("bucket_label:N", sort=bucket_order),
@@ -541,8 +551,9 @@ with left:
         st.altair_chart((bars + bubble).properties(height=460),
                         theme=None, use_container_width=True)
 
+# ---- Правая половина: таблица «Распределение по урокам (ось X — S)» ----
 with right:
-    st.markdown("**Распределение по урокам (ось X — S)**")
+    st.markdown("**Распределение по урокам (ось X — S) — таблица**")
 
     rows_aspects = []
     unknown_per_s = {}
@@ -570,7 +581,7 @@ with right:
                         rows_aspects.append((s_val, en))
                         matched = True
                         break
-                if not matched and t not in STOPWORDS_NORM:
+                if not matched:
                     unknown_per_s.setdefault(s_val, Counter())[p_clean] += 1
 
     if not rows_aspects and not unknown_per_s:
@@ -582,13 +593,11 @@ with right:
         lessons_sorted = sorted(set(list(df_as["S"].unique()) + list(unknown_per_s.keys())))
 
         for s in lessons_sorted:
-            # шаблонные
             if not df_as.empty and s in df_as["S"].values:
                 cnt = (df_as[df_as["S"] == s]["aspect_en"]
                        .value_counts()
                        .sort_values(ascending=False))
                 total_tpl = int(cnt.sum())
-                # -> многострочный текст с буллитами
                 parts_text = []
                 for en_name, c in cnt.items():
                     pct = (c / total_tpl) if total_tpl else 0.0
@@ -598,7 +607,6 @@ with right:
                 aspects_text = ""
                 total_tpl = 0
 
-            # вне шаблона (тоже построчно)
             unk_counter = unknown_per_s.get(s, Counter())
             if unk_counter:
                 top_items = unk_counter.most_common(10)
@@ -618,8 +626,6 @@ with right:
             })
 
         table = pd.DataFrame(lesson_rows).sort_values("S").reset_index(drop=True)
-
-        # высота по размеру, чтобы переносы были видны
         height = min(800, 100 + 28 * len(table))
         st.dataframe(
             table[["S","Aspects (EN)","Unknown (EN)","Total (templ.)"]],
@@ -627,15 +633,76 @@ with right:
             height=height
         )
 
-# неизвестные упоминания (не из шаблона) — общий список
-st.markdown("#### Упоминания вне шаблона (общий список)")
-if 'unknown_all' in locals() and not unknown_all.empty:
-    unknown_agg = (unknown_all.groupby(["en","mention"], as_index=False)
-                   .agg(total=("total","sum"))
-                   .sort_values("total", ascending=False))
-    st.dataframe(unknown_agg[["en","mention","total"]], use_container_width=True)
+# --------- НИЖЕ (вместо «Упоминания вне шаблона»): ГРАФИК «Распределение по урокам (ось X — S)» ---------
+st.markdown("---")
+st.subheader("Распределение по урокам (ось X — S) — график")
+
+cnt_by_s = build_aspects_counts_by_S(df_aspects)
+if cnt_by_s.empty:
+    st.info("Нет данных для графика по урокам.")
 else:
-    st.success("Все упоминания соответствуют шаблону.")
+    # динамический верх оси Y
+    totals_s = cnt_by_s.groupby("S", as_index=False)["count"].sum().rename(columns={"count":"total"})
+    y_max_s = int(totals_s["total"].max()) if len(totals_s) else 0
+    y_scale_s = alt.Scale(domain=[0, max(1, y_max_s) * 1.1], nice=False, clamp=True)
+
+    # основной stacked bar
+    bars_s = (
+        alt.Chart(cnt_by_s)
+          .mark_bar(size=28)
+          .encode(
+              x=alt.X("S:O", title="S", sort="ascending"),
+              y=alt.Y("sum(count):Q", title="Кол-во упоминаний", scale=y_scale_s),
+              color=alt.Color("aspect_en:N", title="Аспект (EN)")
+          )
+    )
+
+    # единый тултип по столбцу S
+    pivot = cnt_by_s.pivot_table(index="S", columns="aspect_en", values="count",
+                                 aggfunc="sum", fill_value=0)
+    # упорядочим колонки по встречаемости
+    col_order = list(pivot.sum(axis=0).sort_values(ascending=False).index)
+    pivot = pivot[col_order]
+
+    safe_cols = {c: f"c_{i}" for i, c in enumerate(pivot.columns)}
+    wide_s = pivot.rename(columns=safe_cols).reset_index()
+    ccols = list(safe_cols.values())
+    wide_s["total"] = wide_s[ccols].sum(axis=1)
+
+    def mk_lines_s(row):
+        tot = row["total"]
+        items = []
+        for i, name in enumerate(col_order):
+            c = int(row[ccols[i]])
+            p = (c / tot) if tot else 0.0
+            items.append((name, c, p))
+        items.sort(key=lambda x: x[1], reverse=True)
+        for idx in range(len(col_order)):
+            if idx < len(items):
+                name, c, p = items[idx]
+                row[f"line{idx+1}"] = f"{name} — {c} ({p:.0%})"
+            else:
+                row[f"line{idx+1}"] = ""
+        return row
+
+    wide_s = wide_s.apply(mk_lines_s, axis=1)
+
+    tooltip_s = [alt.Tooltip("S:O", title="Урок"),
+                 alt.Tooltip("total:Q", title="Всего упоминаний")] + \
+                [alt.Tooltip(f"line{i}:N", title="") for i in range(1, len(col_order)+1)]
+
+    bubble_s = (
+        alt.Chart(wide_s)
+          .mark_bar(size=28, opacity=0.001)
+          .encode(
+              x=alt.X("S:O", sort="ascending"),
+              y=alt.Y("total:Q", scale=y_scale_s),
+              tooltip=tooltip_s
+          )
+    )
+
+    st.altair_chart((bars_s + bubble_s).properties(height=460),
+                    use_container_width=True, theme=None)
 
 # Подсказка, если онлайн-переводчик недоступен
 if _gt is None:
