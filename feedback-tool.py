@@ -816,13 +816,12 @@ def _build_numeric_counts_by_axis(df_src: pd.DataFrame, axis_col: str, val_col: 
 def _make_percent_stack_by_axis(out_df: pd.DataFrame, axis_col: str, legend_title: str):
     """
     Рисует нормированный стек 0–100% по оси axis_col (S/R).
+    Верхние слои — бОльшие значения шкалы (10 сверху, 1 снизу и т.п.).
     """
     if out_df.empty:
         return None
 
     axis_order = sorted(out_df[axis_col].unique().tolist())
-    val_order  = sorted(out_df["val"].unique().tolist())
-    val_order_str = [str(v) for v in val_order]
 
     base = alt.Chart(out_df).transform_calculate(pct='datum.count / datum.total')
 
@@ -836,10 +835,12 @@ def _make_percent_stack_by_axis(out_df: pd.DataFrame, axis_col: str, legend_titl
                     axis=alt.Axis(format="%", title="% от ответов"),
                     scale=alt.Scale(domain=[0, 1], nice=False, clamp=True),
                 ),
+                # ⬇️ сортировка легенды/цвета по ЧИСЛОВОМУ полю val (по убыванию),
+                # даже если цвет рисуется по val_str
                 color=alt.Color(
                     "val_str:N",
                     title=legend_title,
-                    sort=val_order_str,  # порядок в легенде (оставляем числовой)
+                    sort=alt.SortField(field="val", order="descending"),
                     legend=alt.Legend(
                         orient="bottom",
                         direction="horizontal",
@@ -849,7 +850,8 @@ def _make_percent_stack_by_axis(out_df: pd.DataFrame, axis_col: str, legend_titl
                         symbolType="square",
                     ),
                 ),
-                order=alt.Order("val:Q", sort="descending"),  # 👈 ключевая строка
+                # ⬇️ ключ: порядок слоёв стека — по убыванию val
+                order=alt.Order("val:Q", sort="descending"),
                 tooltip=[
                     alt.Tooltip(f"{axis_col}:O", title=("Урок (R)" if axis_col=="R" else "Урок (S)")),
                     alt.Tooltip("val_str:N", title=legend_title),
@@ -861,6 +863,7 @@ def _make_percent_stack_by_axis(out_df: pd.DataFrame, axis_col: str, legend_titl
     ).configure_legend(labelLimit=1000, titleLimit=1000)
 
     return chart
+
 
 # Источники с учётом текущих фильтров курсов/дат/уроков
 # ЛЕВЫЙ: FR2 (I по R)
@@ -1781,20 +1784,14 @@ def _build_numeric_counts_by_R(df_src: pd.DataFrame, value_col: str) -> pd.DataF
 
 def _make_percent_stack_by_R(out_df: pd.DataFrame, legend_title: str):
     """
-    Рисует нормированный стек по R (0–100%) с тултипом: урок, значение, count, pct, total.
+    Рисует нормированный стек по R (0–100%) с верхом = бОльшие значения шкалы.
     """
     if out_df.empty:
         return None
 
-    # порядок уроков и значений
     r_order = sorted(out_df["R"].unique().tolist())
-    val_order = sorted(out_df["val"].unique().tolist())
-    val_order_str = [str(v) for v in val_order]
 
-    base = (
-        alt.Chart(out_df)
-          .transform_calculate(pct='datum.count / datum.total')
-    )
+    base = alt.Chart(out_df).transform_calculate(pct='datum.count / datum.total')
 
     chart = (
         base.mark_bar(size=28, stroke=None, strokeWidth=0)
@@ -1809,7 +1806,8 @@ def _make_percent_stack_by_R(out_df: pd.DataFrame, legend_title: str):
                 color=alt.Color(
                     "val_str:N",
                     title=legend_title,
-                    sort=val_order_str,
+                    # ⬇️ легенда и порядок категорий по убыванию ЧИСЛОВОГО val
+                    sort=alt.SortField(field="val", order="descending"),
                     legend=alt.Legend(
                         orient="bottom",
                         direction="horizontal",
@@ -1819,6 +1817,8 @@ def _make_percent_stack_by_R(out_df: pd.DataFrame, legend_title: str):
                         symbolType="square",
                     ),
                 ),
+                # ⬇️ порядок слоёв внутри столбца
+                order=alt.Order("val:Q", sort="descending"),
                 tooltip=[
                     alt.Tooltip("R:O", title="Урок (R)"),
                     alt.Tooltip("val_str:N", title=legend_title),
