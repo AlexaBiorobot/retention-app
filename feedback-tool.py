@@ -140,6 +140,63 @@ def prep_distribution(df_f: pd.DataFrame, value_col: str, allowed_values: list, 
     val_order = [str(v) for v in allowed_values]
     return out, bucket_order, val_order, label_title
 
+def prep_distribution_text_fr2(df_f: pd.DataFrame, text_col: str, granularity: str, title: str):
+    """
+    Готовит распределение по периодам для текстовой колонки (FR2),
+    переводит значения на EN, считает count и % внутри периода.
+
+    Возвращает: (out_df, bucket_order, cat_order, title)
+    где out_df имеет колонки: bucket, bucket_label, cat_en, count, total, pct
+    """
+    if df_f.empty or text_col not in df_f.columns:
+        return pd.DataFrame(), [], [], title
+
+    d = df_f.copy()
+    d = d.dropna(subset=["A", text_col])
+
+    # приводим к периодам
+    d = add_bucket(d, "A", granularity)
+    d = ensure_bucket_and_label(d, "A", granularity)
+
+    rows = []
+    splitter = re.compile(r"[;,/\n|]+")
+    for _, r in d.iterrows():
+        raw = str(r[text_col]).strip()
+        if not raw:
+            continue
+        parts = splitter.split(raw) if splitter.search(raw) else [raw]
+        for p in parts:
+            val = p.strip()
+            if not val:
+                continue
+            en = translate_es_to_en(val)
+            rows.append((r["bucket"], r["bucket_label"], en))
+
+    if not rows:
+        return pd.DataFrame(), [], [], title
+
+    out = (pd.DataFrame(rows, columns=["bucket","bucket_label","cat_en"])
+             .groupby(["bucket","bucket_label","cat_en"], as_index=False)
+             .size()
+             .rename(columns={"size":"count"}))
+
+    totals = (out.groupby(["bucket","bucket_label"], as_index=False)["count"]
+                .sum().rename(columns={"count":"total"}))
+    out = out.merge(totals, on=["bucket","bucket_label"], how="left")
+    out["pct"] = out["count"] / out["total"]
+
+    bucket_order = (out[["bucket","bucket_label"]]
+                    .drop_duplicates()
+                    .sort_values("bucket")["bucket_label"].tolist())
+
+    # категории сортируем по сумме за всё время (по убыванию)
+    cat_order = (out.groupby("cat_en", as_index=False)["count"]
+                   .sum()
+                   .sort_values("count", ascending=False)["cat_en"]
+                   .tolist())
+
+    return out, bucket_order, cat_order, title
+
 # ===== Аспекты и перевод =====
 ASPECTS_ES_EN = [
     ("La materia que se enseñó", "The subject that was taught"),
@@ -1085,3 +1142,81 @@ else:
             use_container_width=True,
             height=height
         )
+
+# ---------- FR2: распределения по текстовым колонкам D и E ----------
+st.markdown("---")
+st.subheader(f"Form Responses 2 — текстовые распределения (гранулярность: {granularity.lower()})")
+
+# Источник: df2_base (курсы/даты) + фильтр по урокам (R)
+def _apply_r_filter(df_src: pd.DataFrame) -> pd.DataFrame:
+    if df_src.empty or "R" not in df_src.columns:
+        return df_src
+    if selected_lessons:
+        d = df_src.copy()
+        d["R_num"] = pd.to_numeric(d["R"], errors="coerce")
+        d = d[d["R_num"].isin(selected_lessons)]
+        return d
+    return df_src
+
+df2_text_src = _apply_r_filter(df2_base)
+
+colD, colE = st.columns(2)
+
+with colD:
+    st.markdown("**FR2 — распределение D (EN)**")
+    if df2_text_src.empty or "D" not in df2_text_src.columns:
+        st.info("Нет данных (колонка D отсутствует или фильтры пустые).")
+    else:
+        d_out, d_bucket_order, d_cat_order, d_title = prep_distribution_text_fr2(
+            df2_text_src, "D", granularity, "D (EN)"
+        )
+        if d_out.empty:
+            st.info("Нет данных для графика по D.")
+        else:
+            barsD = (
+                alt.Chart(d_out)
+                   .mark_bar(size=BAR_SIZE.get(granularity, 36))
+                   .encode(
+                       x=alt.X("bucket_label:N", title="Период", sort=d_bucket_order),
+                       y=alt.Y("sum(count):Q", title="Кол-во ответов"),
+                       color=alt.Color("cat_en:N", title=d_title, sort=d_cat_order),
+                       tooltip=[
+                           alt.Tooltip("bucket_label:N", title="Период"),
+                           alt.Tooltip("cat_en:N", title=d_title),
+                           alt.Tooltip("count:Q", title="Кол-во"),
+                           alt.Tooltip("pct:Q", title="% внутри периода", format=".0%"),
+                       ],
+                   )
+                   .properties(height=420)
+            )
+            st.altair_chart(barsD, use_container_width=True, theme=None)
+
+with colE:
+    st.markdown("**FR2 — распределение E (EN)**")
+    if df2_text_src.empty or "E" not in df2_text_src.columns:
+        st.info("Нет данных (колонка E отсутствует или фильтры пустые).")
+    else:
+        e_out, e_bucket_order, e_cat_order, e_title = prep_distribution_text_fr2(
+            df2_text_src, "E", granularity, "E (EN)"
+        )
+        if e_out.empty:
+            st.info("Нет данных для графика по E.")
+        else:
+            barsE = (
+                alt.Chart(e_out)
+                   .mark_bar(size=BAR_SIZE.get(granularity, 36))
+                   .encode(
+                       x=alt.X("bucket_label:N", title="Период", sort=e_bucket_order),
+                       y=alt.Y("sum(count):Q", title="Кол-во ответов"),
+                       color=alt.Color("cat_en:N", title=e_title, sort=e_cat_order),
+                       tooltip=[
+                           alt.Tooltip("bucket_label:N", title="Период"),
+                           alt.Tooltip("cat_en:N", title=e_title),
+                           alt.Tooltip("count:Q", title="Кол-во"),
+                           alt.Tooltip("pct:Q", title="% внутри периода", format=".0%"),
+                       ],
+                   )
+                   .properties(height=420)
+            )
+            st.altair_chart(barsE, use_container_width=True, theme=None)
+
