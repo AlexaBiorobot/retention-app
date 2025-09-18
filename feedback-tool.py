@@ -191,6 +191,73 @@ def translate_es_to_en(text: str) -> str:
             pass
     return _naive_translate_es_en(t)
 
+# ===== Dislike-аспекты (из F), со стабильным EN-переводом =====
+DISLIKE_ES_EN = [
+    ("Explica mejor el contenido.", "Explain the content better."),
+    ("Tener menos retrasos o ausencias.", "Have fewer delays or absences."),
+    ("Hacer más preguntas.", "Ask more questions."),
+    ("Prestar más atención a los estudiantes.", "Pay more attention to students."),
+    ("Mejorar la disciplina de la clase.", "Improve class discipline."),
+    ("Responde más en WhatsApp.", "Reply more on WhatsApp."),
+]
+
+def _norm_local(s: str) -> str:
+    if not isinstance(s, str):
+        s = "" if pd.isna(s) else str(s)
+    s = unicodedata.normalize("NFKD", s).casefold().strip()
+    s = re.sub(r"[^\w\s]", " ", s)
+    s = re.sub(r"\s+", " ", s)
+    return s
+
+# универсальная сборка для произвольного списка аспектов [(es, en), ...]
+def build_aspects_counts_generic(df: pd.DataFrame, text_col: str, date_col: str,
+                                 granularity: str, aspects_es_en: list[tuple[str, str]]):
+    need_cols = [date_col, text_col]
+    if df.empty or not all(c in df.columns for c in need_cols):
+        return (pd.DataFrame(columns=["bucket","bucket_label","aspect","aspect_en","count"]),
+                pd.DataFrame(columns=["en","mention","total"]))
+
+    d = df[need_cols].copy()
+    d[date_col] = pd.to_datetime(d[date_col], errors="coerce")
+    d = d.dropna(subset=[date_col])
+    if d.empty:
+        return (pd.DataFrame(columns=["bucket","bucket_label","aspect","aspect_en","count"]),
+                pd.DataFrame(columns=["en","mention","total"]))
+
+    # нормализованные ключи для поиска
+    aspects_norm = [(_norm_local(es), es, en) for es, en in aspects_es_en]
+
+    d = d.rename(columns={date_col: "A", text_col: "TXT"})
+    d = add_bucket(d, "A", granularity)
+    d = ensure_bucket_and_label(d, "A", granularity)
+
+    rows, unknown = [], []
+    for _, r in d.iterrows():
+        txt = str(r["TXT"]).strip()
+        if not txt:
+            continue
+        parts = re.split(r"[;,/\n|]+", txt) if re.search(r"[;,/\n|]", txt) else [txt]
+        for p in parts:
+            t = _norm_local(p.strip())
+            if not t:
+                continue
+            matched = False
+            for es_norm, es, en in aspects_norm:
+                if t == es_norm or es_norm in t:
+                    rows.append((r["bucket"], r["bucket_label"], f"{es} (EN: {en})", en, 1))
+                    matched = True
+                    break
+            if not matched:
+                unknown.append(p.strip())
+
+    counts = pd.DataFrame(rows, columns=["bucket","bucket_label","aspect","aspect_en","count"])
+    if not counts.empty:
+        counts = counts.groupby(["bucket","bucket_label","aspect","aspect_en"], as_index=False)["count"].sum()
+
+    # unknown можно вернуть при необходимости (с переводом с помощью translate_es_to_en)
+    unknown_df = pd.DataFrame(columns=["en","mention","total"])
+    return counts, unknown_df
+
 def build_aspects_counts(df: pd.DataFrame, text_col: str, date_col: str, granularity: str):
     need_cols = [date_col, text_col]
     if df.empty or not all(c in df.columns for c in need_cols):
@@ -741,3 +808,90 @@ else:
 # Подсказка, если онлайн-переводчик недоступен
 if _gt is None:
     st.caption("⚠️ deep-translator недоступен — используется упрощённый пословный перевод.")
+
+# ---------- Dislike dynamics (по датам A, текст из F; лист FR1) ----------
+st.markdown("---")
+st.subheader("Dislike dynamics (по датам A из FR1, текст из F)")
+
+df_dislike_src = filter_df(df1, "N", "A", selected_courses, date_range)
+dis_counts, _ = build_aspects_counts_generic(
+    df_dislike_src, text_col="F", date_col="A", granularity=granularity,
+    aspects_es_en=DISLIKE_ES_EN
+)
+
+if dis_counts.empty:
+    st.info("Нет данных для графика Dislike dynamics (Form Responses 1, колонка F).")
+else:
+    # порядок по реальному времени
+    bucket_order = (dis_counts[["bucket","bucket_label"]]
+                    .drop_duplicates().sort_values("bucket")["bucket_label"].tolist())
+
+    # список меток в виде "ES (EN: en)" и параллельно «чистые» EN имена для тултипа
+    expected_labels = [f"{es} (EN: {en})" for es, en in DISLIKE_ES_EN]
+    present = [lbl for lbl in expected_labels if lbl in dis_counts["aspect"].unique()]
+    en_names = [en for _, en in DISLIKE_ES_EN]
+
+    # основной стек-бар (как в «Аспекты по датам (ось X — A)»)
+    bars_dis = (
+        alt.Chart(dis_counts)
+          .mark_bar(size=max(40, bar_size))
+          .encode(
+              x=alt.X("bucket_label:N", title="Период (по A)", sort=bucket_order),
+              y=alt.Y("sum(count):Q", title="Кол-во упоминаний"),
+              color=alt.Color("aspect:N", title="Аспект", sort=present)
+          )
+    )
+
+    # «общий тултип»: одна всплывашка на столбец (показывает все аспекты со счётом и %)
+    wide = (dis_counts
+            .pivot_table(index=["bucket","bucket_label"], columns="aspect",
+                         values="count", aggfunc="sum", fill_value=0))
+
+    # гарантируем наличие всех столбцов по порядку
+    for lbl in expected_labels:
+        if lbl not in wide.columns:
+            wide[lbl] = 0
+    wide = wide[expected_labels]
+
+    # безопасные имена колонок
+    safe_map = {lbl: f"c_{i}" for i, lbl in enumerate(expected_labels)}
+    wide_safe = wide.rename(columns=safe_map).reset_index()
+    cols = list(safe_map.values())
+    wide_safe["total"] = wide_safe[cols].sum(axis=1)
+
+    def make_lines_cols(row):
+        tot = int(row["total"])
+        items = []
+        for i, en in enumerate(en_names):
+            cnt = int(row[cols[i]])
+            pct = (cnt / tot) if tot else 0.0
+            items.append((en, cnt, pct))
+        items.sort(key=lambda x: x[1], reverse=True)
+        for idx in range(len(en_names)):
+            if idx < len(items):
+                en, cnt, pct = items[idx]
+                row[f"line{idx+1}"] = f"{en} — {cnt} ({pct:.0%})"
+            else:
+                row[f"line{idx+1}"] = ""
+        return row
+
+    wide_safe = wide_safe.apply(make_lines_cols, axis=1)
+
+    tooltip_fields = [
+        alt.Tooltip("bucket_label:N", title="Период"),
+        alt.Tooltip("total:Q", title="Всего упоминаний"),
+    ] + [alt.Tooltip(f"line{i}:N", title="") for i in range(1, len(en_names)+1)]
+
+    bubble_dis = (
+        alt.Chart(wide_safe)
+          .mark_bar(size=max(40, bar_size), opacity=0.001)
+          .encode(
+              x=alt.X("bucket_label:N", sort=bucket_order),
+              y=alt.Y("total:Q"),
+              tooltip=tooltip_fields
+          )
+    )
+
+    st.altair_chart((bars_dis + bubble_dis).properties(height=460),
+                    use_container_width=True, theme=None)
+
