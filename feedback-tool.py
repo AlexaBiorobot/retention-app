@@ -1631,4 +1631,117 @@ with cH:
         )
         st.altair_chart(barsH, use_container_width=True, theme=None)
 
+# ---------- FR2: по урокам (ось X — R) — графики (в %) для F / G / H ----------
+st.markdown("---")
+st.subheader("Form Responses 2 — по урокам (ось X — R) — графики (в %)")
+
+def _build_numeric_counts_by_R(df_src: pd.DataFrame, value_col: str) -> pd.DataFrame:
+    """
+    Считает, сколько раз встречается каждое целое значение шкалы в колонке value_col
+    внутри каждого урока R. Возвращает колонки: R, val, val_str, count, total.
+    """
+    if df_src.empty or value_col not in df_src.columns or "R" not in df_src.columns:
+        return pd.DataFrame(columns=["R","val","val_str","count","total"])
+
+    d = df_src.copy()
+    d["R"] = pd.to_numeric(d["R"], errors="coerce")
+    d[value_col] = pd.to_numeric(d[value_col], errors="coerce")
+    d = d.dropna(subset=["R", value_col])
+    if d.empty:
+        return pd.DataFrame(columns=["R","val","val_str","count","total"])
+
+    d["R"] = d["R"].astype(int)
+    d["val"] = d[value_col].astype(int)
+    d["val_str"] = d["val"].astype(str)
+
+    grp = (d.groupby(["R","val","val_str"], as_index=False)
+             .size().rename(columns={"size":"count"}))
+    totals = (grp.groupby("R", as_index=False)["count"]
+                .sum().rename(columns={"count":"total"}))
+    out = grp.merge(totals, on="R", how="left")
+    return out
+
+def _make_percent_stack_by_R(out_df: pd.DataFrame, legend_title: str):
+    """
+    Рисует нормированный стек по R (0–100%) с тултипом: урок, значение, count, pct, total.
+    """
+    if out_df.empty:
+        return None
+
+    # порядок уроков и значений
+    r_order = sorted(out_df["R"].unique().tolist())
+    val_order = sorted(out_df["val"].unique().tolist())
+    val_order_str = [str(v) for v in val_order]
+
+    base = (
+        alt.Chart(out_df)
+          .transform_calculate(pct='datum.count / datum.total')
+    )
+
+    chart = (
+        base.mark_bar(size=28, stroke=None, strokeWidth=0)
+            .encode(
+                x=alt.X("R:O", title="R", sort=r_order),
+                y=alt.Y(
+                    "count:Q",
+                    stack="normalize",
+                    axis=alt.Axis(format="%", title="% от ответов"),
+                    scale=alt.Scale(domain=[0, 1], nice=False, clamp=True)
+                ),
+                color=alt.Color(
+                    "val_str:N",
+                    title=legend_title,
+                    sort=val_order_str,
+                    legend=alt.Legend(
+                        orient="bottom",
+                        direction="horizontal",
+                        columns=3,
+                        labelLimit=1000,
+                        titleLimit=1000,
+                        symbolType="square",
+                    ),
+                ),
+                tooltip=[
+                    alt.Tooltip("R:O", title="Урок (R)"),
+                    alt.Tooltip("val_str:N", title=legend_title),
+                    alt.Tooltip("count:Q", title="Кол-во"),
+                    alt.Tooltip("pct:Q", title="Доля", format=".0%"),
+                    alt.Tooltip("total:Q", title="Всего по уроку"),
+                ],
+            )
+    ).configure_legend(labelLimit=1000, titleLimit=1000)
+
+    return chart
+
+# источник с учётом фильтра по урокам (R)
+df2_lessons_src = _apply_r_filter(df2_base)
+
+cF2, cG2, cH2 = st.columns(3)
+
+with cF2:
+    st.markdown("**FR2 — по урокам (R) — F (в %)**")
+    outF_R = _build_numeric_counts_by_R(df2_lessons_src, "F")
+    if outF_R.empty:
+        st.info("Нет данных по F для выбранных фильтров.")
+    else:
+        chF_R = _make_percent_stack_by_R(outF_R, "F")
+        st.altair_chart(chF_R.properties(height=460), use_container_width=True, theme=None)
+
+with cG2:
+    st.markdown("**FR2 — по урокам (R) — G (в %)**")
+    outG_R = _build_numeric_counts_by_R(df2_lessons_src, "G")
+    if outG_R.empty:
+        st.info("Нет данных по G для выбранных фильтров.")
+    else:
+        chG_R = _make_percent_stack_by_R(outG_R, "G")
+        st.altair_chart(chG_R.properties(height=460), use_container_width=True, theme=None)
+
+with cH2:
+    st.markdown("**FR2 — по урокам (R) — H (в %)**")
+    outH_R = _build_numeric_counts_by_R(df2_lessons_src, "H")
+    if outH_R.empty:
+        st.info("Нет данных по H для выбранных фильтров.")
+    else:
+        chH_R = _make_percent_stack_by_R(outH_R, "H")
+        st.altair_chart(chH_R.properties(height=460), use_container_width=True, theme=None)
 
