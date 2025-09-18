@@ -553,6 +553,12 @@ for df, date_col, x_col, y_col in [
     df[x_col] = pd.to_numeric(df[x_col], errors="coerce")
     df[y_col] = pd.to_numeric(df[y_col], errors="coerce")
 
+# ДОПОЛНИТЕЛЬНО: FR2 — привести F, G, H к числу (если они шкальные)
+if not df2.empty:
+    for col in ["F", "G", "H"]:
+        if col in df2.columns:
+            df2[col] = pd.to_numeric(df2[col], errors="coerce")
+
 # ==================== ЕДИНЫЕ ФИЛЬТРЫ ====================
 
 st.sidebar.header("Фильтры")
@@ -1450,3 +1456,69 @@ with col_right:
               )
         ).configure_legend(labelLimit=1000, titleLimit=1000)
         st.altair_chart(bars_E.properties(height=420), use_container_width=True, theme=None)
+
+# --------- FR2: три графика "Average by R" по колонкам F, G, H ---------
+st.markdown("---")
+st.subheader("Form Responses 2 — Averages by R (F, G, H)")
+
+def _avg_by_r(df_src: pd.DataFrame, y_col: str) -> pd.DataFrame:
+    """Агрегация среднего по колонке y_col с учётом выбранных курсов/дат/уроков (R)."""
+    if df_src.empty or not {"A", "M", "R", y_col}.issubset(df_src.columns):
+        return pd.DataFrame(columns=["R", "avg_y", "count"])
+    d = df_src.copy()
+    # применим единый фильтр уроков
+    if selected_lessons:
+        d["R"] = pd.to_numeric(d["R"], errors="coerce")
+        d = d[d["R"].isin(selected_lessons)]
+    d = d.dropna(subset=["R", y_col])
+    if d.empty:
+        return pd.DataFrame(columns=["R", "avg_y", "count"])
+    out = (d.groupby("R", as_index=False)
+             .agg(avg_y=(y_col, "mean"),
+                  count=(y_col, "size"))
+             .sort_values("R"))
+    # приведение типа R к int, чтобы ось была аккуратной
+    out["R"] = out["R"].astype(int)
+    return out
+
+aggF = _avg_by_r(df2_base, "F") if "F" in df2.columns else pd.DataFrame()
+aggG_2 = _avg_by_r(df2_base, "G") if "G" in df2.columns else pd.DataFrame()
+aggH = _avg_by_r(df2_base, "H") if "H" in df2.columns else pd.DataFrame()
+
+colF, colG2, colH = st.columns(3)
+
+def _make_avg_chart(df_avg: pd.DataFrame, title_y: str):
+    if df_avg.empty or len(df_avg) == 0:
+        return st.info("Нет данных для выбранных фильтров.")
+    y_min = float(df_avg["avg_y"].min())
+    y_max = float(df_avg["avg_y"].max())
+    pad = (y_max - y_min) * 0.1 if y_max > y_min else 0.5
+    y_scale = alt.Scale(domain=[y_min - pad, y_max + pad], nice=False, clamp=True)
+    chart = (
+        alt.Chart(df_avg)
+          .mark_line(point=True)
+          .encode(
+              x=alt.X("R:Q", title="R"),
+              y=alt.Y("avg_y:Q", title=title_y, scale=y_scale),
+              tooltip=[
+                  alt.Tooltip("R:Q", title="R"),
+                  alt.Tooltip("avg_y:Q", title=title_y, format=".2f"),
+                  alt.Tooltip("count:Q", title="Кол-во ответов"),
+              ],
+          )
+          .properties(height=340)
+    )
+    st.altair_chart(chart, use_container_width=True, theme=None)
+
+with colF:
+    st.markdown("**FR2 — Average F by R**")
+    _make_avg_chart(aggF, "Average F")
+
+with colG2:
+    st.markdown("**FR2 — Average G by R**")
+    _make_avg_chart(aggG_2, "Average G")
+
+with colH:
+    st.markdown("**FR2 — Average H by R**")
+    _make_avg_chart(aggH, "Average H")
+
