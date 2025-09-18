@@ -492,6 +492,51 @@ def build_dislike_counts_by_S(df: pd.DataFrame) -> pd.DataFrame:
     out = out.groupby(["S", "aspect_en"], as_index=False)["count"].sum()
     return out
 
+def build_template_counts_by_R(
+    df: pd.DataFrame,
+    text_col: str,
+    templates_es_en: list[tuple[str, str]],
+) -> pd.DataFrame:
+    """
+    Счётчики шаблонов по урокам R (FR2).
+    Возвращает DataFrame [R(int), templ_en(str), count(int)].
+    Важно: запятая НЕ является разделителем (чтобы не ломать 'Sí, todo a tiempo').
+    """
+    if df.empty or not {"R", text_col}.issubset(df.columns):
+        return pd.DataFrame(columns=["R", "templ_en", "count"])
+
+    d = df[["R", text_col]].copy()
+    d["R"] = pd.to_numeric(d["R"], errors="coerce")
+    d = d.dropna(subset=["R"])
+    d["R"] = d["R"].astype(int)
+
+    # нормализованные шаблоны
+    tmpl_norm = [(_norm_local(es), en) for es, en in templates_es_en]
+
+    rows = []
+    splitter = re.compile(r"[;\/\n|]+")  # ; / | и перенос строки (БЕЗ запятой)
+    for _, r in d.iterrows():
+        raw = str(r[text_col] or "").strip()
+        if not raw:
+            continue
+        parts = splitter.split(raw) if splitter.search(raw) else [raw]
+        for p in parts:
+            t = _norm_local(p.strip())
+            if not t:
+                continue
+            for es_norm, en in tmpl_norm:
+                if t == es_norm or es_norm in t:
+                    rows.append((int(r["R"]), en, 1))
+                    break
+
+    if not rows:
+        return pd.DataFrame(columns=["R", "templ_en", "count"])
+
+    out = (pd.DataFrame(rows, columns=["R", "templ_en", "count"])
+           .groupby(["R", "templ_en"], as_index=False)["count"].sum())
+    return out
+
+
 # ==================== ДАННЫЕ ====================
 
 df1 = load_sheet_as_letter_df("Form Responses 1")   # A=date, N=course, S=x, G=y, E=aspects, F=dislike, H=comments
@@ -1312,3 +1357,96 @@ with colE:
             )
             st.altair_chart(barsE, use_container_width=True, theme=None)
 
+# --------- FR2: по урокам (ось X — R) — графики в % по D и E ---------
+st.markdown("---")
+st.subheader("FR2 — распределение по урокам (ось X — R) — графики (в %)")
+
+# Источник — df2_base + фильтр по выбранным урокам (R)
+df2_lessons = df2_base.copy()
+if not df2_lessons.empty and selected_lessons:
+    df2_lessons["R_num"] = pd.to_numeric(df2_lessons["R"], errors="coerce")
+    df2_lessons = df2_lessons[df2_lessons["R_num"].isin(selected_lessons)]
+
+col_left, col_right = st.columns(2)
+
+with col_left:
+    st.markdown("**FR2 — по D (шаблоны), % внутри R**")
+    cnt_by_r_D = build_template_counts_by_R(df2_lessons, text_col="D", templates_es_en=FR2_D_TEMPL_ES_EN)
+    if cnt_by_r_D.empty:
+        st.info("Нет данных для графика по D.")
+    else:
+        legend_domain_D = [en for _, en in FR2_D_TEMPL_ES_EN]
+        base_D = (
+            alt.Chart(cnt_by_r_D)
+              .transform_aggregate(count='sum(count)', groupby=['R', 'templ_en'])
+              .transform_joinaggregate(total='sum(count)', groupby=['R'])
+              .transform_calculate(pct='datum.count / datum.total')
+        )
+        bars_D = (
+            base_D.mark_bar(size=28, stroke=None, strokeWidth=0)
+              .encode(
+                  x=alt.X("R:O", title="R", sort="ascending"),
+                  y=alt.Y("count:Q",
+                          stack="normalize",
+                          axis=alt.Axis(format="%", title="% от упоминаний"),
+                          scale=alt.Scale(domain=[0, 1], nice=False, clamp=True)),
+                  color=alt.Color(
+                      "templ_en:N",
+                      title="Template (EN)",
+                      scale=alt.Scale(domain=legend_domain_D),
+                      legend=alt.Legend(
+                          orient="bottom", direction="horizontal", columns=2,
+                          labelLimit=1000, titleLimit=1000, symbolType="square"
+                      ),
+                  ),
+                  tooltip=[
+                      alt.Tooltip("R:O", title="Урок"),
+                      alt.Tooltip("templ_en:N", title="Шаблон"),
+                      alt.Tooltip("count:Q", title="Кол-во"),
+                      alt.Tooltip("pct:Q", title="Доля", format=".0%"),
+                      alt.Tooltip("total:Q", title="Всего по уроку"),
+                  ],
+              )
+        ).configure_legend(labelLimit=1000, titleLimit=1000)
+        st.altair_chart(bars_D.properties(height=420), use_container_width=True, theme=None)
+
+with col_right:
+    st.markdown("**FR2 — по E (шаблоны), % внутри R**")
+    cnt_by_r_E = build_template_counts_by_R(df2_lessons, text_col="E", templates_es_en=FR2_E_TEMPL_ES_EN)
+    if cnt_by_r_E.empty:
+        st.info("Нет данных для графика по E.")
+    else:
+        legend_domain_E = [en for _, en in FR2_E_TEMPL_ES_EN]
+        base_E = (
+            alt.Chart(cnt_by_r_E)
+              .transform_aggregate(count='sum(count)', groupby=['R', 'templ_en'])
+              .transform_joinaggregate(total='sum(count)', groupby=['R'])
+              .transform_calculate(pct='datum.count / datum.total')
+        )
+        bars_E = (
+            base_E.mark_bar(size=28, stroke=None, strokeWidth=0)
+              .encode(
+                  x=alt.X("R:O", title="R", sort="ascending"),
+                  y=alt.Y("count:Q",
+                          stack="normalize",
+                          axis=alt.Axis(format="%", title="% от упоминаний"),
+                          scale=alt.Scale(domain=[0, 1], nice=False, clamp=True)),
+                  color=alt.Color(
+                      "templ_en:N",
+                      title="Template (EN)",
+                      scale=alt.Scale(domain=legend_domain_E),
+                      legend=alt.Legend(
+                          orient="bottom", direction="horizontal", columns=2,
+                          labelLimit=1000, titleLimit=1000, symbolType="square"
+                      ),
+                  ),
+                  tooltip=[
+                      alt.Tooltip("R:O", title="Урок"),
+                      alt.Tooltip("templ_en:N", title="Шаблон"),
+                      alt.Tooltip("count:Q", title="Кол-во"),
+                      alt.Tooltip("pct:Q", title="Доля", format=".0%"),
+                      alt.Tooltip("total:Q", title="Всего по уроку"),
+                  ],
+              )
+        ).configure_legend(labelLimit=1000, titleLimit=1000)
+        st.altair_chart(bars_E.properties(height=420), use_container_width=True, theme=None)
