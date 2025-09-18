@@ -778,6 +778,123 @@ with col4:
         )
         st.altair_chart(bars2, use_container_width=True, theme=None)
 
+# ---------- РАСПРЕДЕЛЕНИЕ ПО УРОКАМ (в %) ДЛЯ ТЕХ ЖЕ ШКАЛ ----------
+st.markdown("---")
+st.subheader("Распределение по урокам (в %) — те же шкалы G (FR1) и I (FR2)")
+
+def _build_numeric_counts_by_axis(df_src: pd.DataFrame, axis_col: str, val_col: str, allowed_vals: list[int] | None):
+    """
+    Готовит счётчики по урокам (ось = axis_col: 'S' или 'R').
+    Возвращает: [axis_col, val, val_str, count, total]
+    """
+    if df_src.empty or axis_col not in df_src.columns or val_col not in df_src.columns:
+        return pd.DataFrame(columns=[axis_col, "val", "val_str", "count", "total"])
+
+    d = df_src.copy()
+    d[axis_col] = pd.to_numeric(d[axis_col], errors="coerce")
+    d[val_col]  = pd.to_numeric(d[val_col],  errors="coerce")
+    d = d.dropna(subset=[axis_col, val_col])
+    if d.empty:
+        return pd.DataFrame(columns=[axis_col, "val", "val_str", "count", "total"])
+
+    if allowed_vals is not None:
+        d = d[d[val_col].isin(allowed_vals)]
+        if d.empty:
+            return pd.DataFrame(columns=[axis_col, "val", "val_str", "count", "total"])
+
+    d[axis_col] = d[axis_col].astype(int)
+    d["val"] = d[val_col].astype(int)
+    d["val_str"] = d["val"].astype(str)
+
+    grp = (d.groupby([axis_col, "val", "val_str"], as_index=False)
+             .size().rename(columns={"size": "count"}))
+    totals = (grp.groupby(axis_col, as_index=False)["count"]
+                .sum().rename(columns={"count": "total"}))
+    out = grp.merge(totals, on=axis_col, how="left")
+    return out
+
+def _make_percent_stack_by_axis(out_df: pd.DataFrame, axis_col: str, legend_title: str):
+    """
+    Рисует нормированный стек 0–100% по оси axis_col (S/R).
+    """
+    if out_df.empty:
+        return None
+
+    axis_order = sorted(out_df[axis_col].unique().tolist())
+    val_order  = sorted(out_df["val"].unique().tolist())
+    val_order_str = [str(v) for v in val_order]
+
+    base = alt.Chart(out_df).transform_calculate(pct='datum.count / datum.total')
+
+    chart = (
+        base.mark_bar(size=28, stroke=None, strokeWidth=0)
+            .encode(
+                x=alt.X(f"{axis_col}:O", title=axis_col, sort=axis_order),
+                y=alt.Y(
+                    "count:Q",
+                    stack="normalize",
+                    axis=alt.Axis(format="%", title="% от ответов"),
+                    scale=alt.Scale(domain=[0, 1], nice=False, clamp=True),
+                ),
+                color=alt.Color(
+                    "val_str:N",
+                    title=legend_title,
+                    sort=val_order_str,
+                    legend=alt.Legend(
+                        orient="bottom",
+                        direction="horizontal",
+                        columns=5,
+                        labelLimit=1000,
+                        titleLimit=1000,
+                        symbolType="square",
+                    ),
+                ),
+                tooltip=[
+                    alt.Tooltip(f"{axis_col}:O", title=("Урок (R)" if axis_col=="R" else "Урок (S)")),
+                    alt.Tooltip("val_str:N", title=legend_title),
+                    alt.Tooltip("count:Q",  title="Кол-во"),
+                    alt.Tooltip("pct:Q",    title="Доля", format=".0%"),
+                    alt.Tooltip("total:Q",  title="Всего по уроку"),
+                ],
+            )
+    ).configure_legend(labelLimit=1000, titleLimit=1000)
+
+    return chart
+
+# Источники с учётом текущих фильтров курсов/дат/уроков
+# ЛЕВЫЙ: FR2 (I по R)
+df2_lessons_I = df2_base.copy()
+if not df2_lessons_I.empty and selected_lessons:
+    df2_lessons_I["R_num"] = pd.to_numeric(df2_lessons_I["R"], errors="coerce")
+    df2_lessons_I = df2_lessons_I[df2_lessons_I["R_num"].isin(selected_lessons)]
+
+# ПРАВЫЙ: FR1 (G по S)
+df1_lessons_G = df1_base.copy()
+if not df1_lessons_G.empty and selected_lessons:
+    df1_lessons_G["S_num"] = pd.to_numeric(df1_lessons_G["S"], errors="coerce")
+    df1_lessons_G = df1_lessons_G[df1_lessons_G["S_num"].isin(selected_lessons)]
+
+left_col, right_col = st.columns(2)
+
+with left_col:
+    st.markdown("**FR2 — по урокам (R) — I (в %)**")
+    out_I_R = _build_numeric_counts_by_axis(df2_lessons_I, axis_col="R", val_col="I", allowed_vals=list(range(1, 11)))
+    if out_I_R.empty:
+        st.info("Нет данных по I (FR2) для выбранных фильтров.")
+    else:
+        ch_I_R = _make_percent_stack_by_axis(out_I_R, axis_col="R", legend_title="I")
+        st.altair_chart(ch_I_R.properties(height=460), use_container_width=True, theme=None)
+
+with right_col:
+    st.markdown("**FR1 — по урокам (S) — G (в %)**")
+    out_G_S = _build_numeric_counts_by_axis(df1_lessons_G, axis_col="S", val_col="G", allowed_vals=[1,2,3,4,5])
+    if out_G_S.empty:
+        st.info("Нет данных по G (FR1) для выбранных фильтров.")
+    else:
+        ch_G_S = _make_percent_stack_by_axis(out_G_S, axis_col="S", legend_title="G")
+        st.altair_chart(ch_G_S.properties(height=460), use_container_width=True, theme=None)
+
+
 # ---------- НИЖЕ: Аспекты урока — Form Responses 1 ----------
 st.markdown("---")
 st.subheader("Аспекты урока — Form Responses 1")
