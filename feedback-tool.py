@@ -329,11 +329,6 @@ def build_template_counts(
     granularity: str,
     templates_es_en: list[tuple[str, str]],
 ):
-    """
-    Считает распределение упоминаний по заданным шаблонам (templates_es_en)
-    в текстовой колонке text_col. Возвращает DataFrame со столбцами:
-    [bucket, bucket_label, templ_es, templ_en, count]
-    """
     need_cols = [date_col, text_col]
     if df.empty or not all(c in df.columns for c in need_cols):
         return pd.DataFrame(columns=["bucket","bucket_label","templ_es","templ_en","count"])
@@ -344,7 +339,6 @@ def build_template_counts(
     if d.empty:
         return pd.DataFrame(columns=["bucket","bucket_label","templ_es","templ_en","count"])
 
-    # нормализуем эталоны
     tmpl_norm = [(_norm_local(es), es, en) for es, en in templates_es_en]
 
     d = d.rename(columns={date_col: "A", text_col: "TXT"})
@@ -352,7 +346,8 @@ def build_template_counts(
     d = ensure_bucket_and_label(d, "A", granularity)
 
     rows = []
-    splitter = re.compile(r"[;,/\n|]+")
+    # ⚠️ запятую НЕ используем как разделитель, чтобы не ломать "Sí, todo a tiempo"
+    splitter = re.compile(r"[;\/\n|]+")  # ; / | и перенос строки
     for _, r in d.iterrows():
         raw = str(r["TXT"] or "").strip()
         if not raw:
