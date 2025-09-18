@@ -167,7 +167,7 @@ _BASIC_ES_EN = {
     "profesor":"teacher","actividades":"activities","sala":"classroom",
     "tareas":"homework","casa":"home","forma":"way","comporto":"behaved",
     "comportó":"behaved","clase":"class","aclararon":"clarified","dudas":"doubts",
-    "trataron":"treated","bien":"well","atencion":"attention","atención":"attention"
+    "trataron":"treated","bien":"well","atencion":"attention","атención":"attention".replace("а","a")
 }
 
 def _naive_translate_es_en(text: str) -> str:
@@ -224,7 +224,6 @@ def build_aspects_counts_generic(df: pd.DataFrame, text_col: str, date_col: str,
         return (pd.DataFrame(columns=["bucket","bucket_label","aspect","aspect_en","count"]),
                 pd.DataFrame(columns=["en","mention","total"]))
 
-    # нормализованные ключи для поиска
     aspects_norm = [(_norm_local(es), es, en) for es, en in aspects_es_en]
 
     d = d.rename(columns={date_col: "A", text_col: "TXT"})
@@ -254,9 +253,7 @@ def build_aspects_counts_generic(df: pd.DataFrame, text_col: str, date_col: str,
     if not counts.empty:
         counts = counts.groupby(["bucket","bucket_label","aspect","aspect_en"], as_index=False)["count"].sum()
 
-    # unknown можно вернуть при необходимости (с переводом с помощью translate_es_to_en)
-    unknown_df = pd.DataFrame(columns=["en","mention","total"])
-    return counts, unknown_df
+    return counts, pd.DataFrame(columns=["en","mention","total"])
 
 def build_aspects_counts(df: pd.DataFrame, text_col: str, date_col: str, granularity: str):
     need_cols = [date_col, text_col]
@@ -312,10 +309,7 @@ def build_aspects_counts(df: pd.DataFrame, text_col: str, date_col: str, granula
     return counts, unknown_df
 
 def build_aspects_counts_by_S(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Счётчики аспектов по Урокам S (только шаблонные аспекты, EN).
-    Возвращает DataFrame [S(int), aspect_en(str), count(int)].
-    """
+    """Счётчики аспектов по урокам S (только шаблонные аспекты, EN)."""
     if df.empty or not {"S","E"}.issubset(df.columns):
         return pd.DataFrame(columns=["S","aspect_en","count"])
     d = df[["S","E"]].copy()
@@ -350,10 +344,7 @@ def aspect_to_en_label(s: str) -> str:
     return m.group(1).strip() if m else str(s)
 
 def build_dislike_counts_by_S(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Счётчики dislike-аспектов по урокам S из колонки F (FR1).
-    Возвращает DataFrame [S(int), aspect_en(str), count(int)].
-    """
+    """Счётчики dislike-аспектов по урокам S из колонки F (FR1)."""
     if df.empty or not {"S", "F"}.issubset(df.columns):
         return pd.DataFrame(columns=["S", "aspect_en", "count"])
 
@@ -362,7 +353,6 @@ def build_dislike_counts_by_S(df: pd.DataFrame) -> pd.DataFrame:
     d = d.dropna(subset=["S"])
     d["S"] = d["S"].astype(int)
 
-    # нормализованные шаблоны dislike-фраз
     dislike_norm = [(_norm_local(es), en) for es, en in DISLIKE_ES_EN]
 
     rows = []
@@ -389,7 +379,7 @@ def build_dislike_counts_by_S(df: pd.DataFrame) -> pd.DataFrame:
 
 # ==================== ДАННЫЕ ====================
 
-df1 = load_sheet_as_letter_df("Form Responses 1")   # A=date, N=course, S=x, G=y, E=aspects
+df1 = load_sheet_as_letter_df("Form Responses 1")   # A=date, N=course, S=x, G=y, E=aspects, F=dislike, H=comments
 df2 = load_sheet_as_letter_df("Form Responses 2")   # A=date, M=course, R=x, I=y
 
 # Приведение типов
@@ -480,7 +470,7 @@ selected_lessons = st.sidebar.multiselect(
     help="Фильтр единый для S (FR1) и R (FR2)"
 )
 
-# ==================== ПРИМЕНЕНИЕ ФИЛЬТРОВ ====================
+# ==================== ПРИМЕНЕНИЕ ПИЛЬТРОВ ====================
 
 # Верхние графики (средние)
 agg1 = apply_filters_and_aggregate(df1, "N", "A", "S", "G", selected_courses, date_range)
@@ -634,7 +624,7 @@ if not df_aspects.empty and selected_lessons:
 
 asp_counts, _unknown_all = build_aspects_counts(df_aspects, text_col="E", date_col="A", granularity=granularity)
 
-# ---- График: «Аспекты по датам (ось X — A)» с единым тултипом ----
+# ---- График: «Аспекты по датам (ось X — A)» с быстрым общим тултипом ----
 st.markdown("**Аспекты по датам (ось X — A)**")
 if asp_counts.empty:
     st.info("Не нашёл упоминаний аспектов (лист 'Form Responses 1', колонка E).")
@@ -661,45 +651,38 @@ else:
           )
     )
 
-    wide = (asp_counts.pivot_table(index=["bucket","bucket_label"],
-                                   columns="aspect_en", values="count",
-                                   aggfunc="sum", fill_value=0))
+    # ---------- быстрый «общий тултип» ----------
+    wide = (
+        asp_counts
+        .pivot_table(index=["bucket","bucket_label"], columns="aspect_en",
+                     values="count", aggfunc="sum", fill_value=0)
+    )
+
     col_order = list(wide.sum(axis=0).sort_values(ascending=False).index)
-    safe_map = {c: f"c_{i}" for i, c in enumerate(col_order)}  # <-- FIXED
-    wide_safe = wide.rename(columns=safe_map).reset_index()
-    ccols = list(safe_map.values())
-    wide_safe["total"] = wide_safe[ccols].sum(axis=1)
 
-    def _mk_lines(row):
-        tot = row["total"]
-        items = []
-        for i, name in enumerate(col_order):
-            c = int(row[ccols[i]])
-            p = (c / tot) if tot else 0.0
-            items.append((name, c, p))
-        items.sort(key=lambda x: x[1], reverse=True)
-        for idx in range(len(col_order)):
-            if idx < len(items):
-                name, c, p = items[idx]
-                row[f"line{idx+1}"] = f"{name} — {c} ({p:.0%})"
-            else:
-                row[f"line{idx+1}"] = ""
-        return row
+    def _pack_row(r, top_k=6):
+        total = int(r[col_order].sum())
+        if total == 0:
+            return pd.Series({"total": 0, "tooltip_text": ""})
+        pairs = [(name, int(r[name])) for name in col_order if r[name] > 0]
+        pairs.sort(key=lambda x: x[1], reverse=True)
+        pairs = pairs[:top_k]
+        lines = [f"{name} — {c} ({c/total:.0%})" for name, c in pairs]
+        return pd.Series({"total": total, "tooltip_text": "\n".join(lines)})
 
-    wide_safe = wide_safe.apply(_mk_lines, axis=1)
-
-    tooltip_fields = [
-        alt.Tooltip("bucket_label:N", title="Период"),
-        alt.Tooltip("total:Q", title="Всего упоминаний"),
-    ] + [alt.Tooltip(f"line{i}:N", title="") for i in range(1, len(col_order)+1)]
+    packed = wide.apply(_pack_row, axis=1).reset_index()
 
     bubble = (
-        alt.Chart(wide_safe)
+        alt.Chart(packed)
           .mark_bar(size=max(40, BAR_SIZE.get(granularity, 36)), opacity=0.001)
           .encode(
               x=alt.X("bucket_label:N", sort=bucket_order),
               y=alt.Y("total:Q", scale=y_scale_bar),
-              tooltip=tooltip_fields
+              tooltip=[
+                  alt.Tooltip("bucket_label:N", title="Период"),
+                  alt.Tooltip("total:Q", title="Всего упоминаний"),
+                  alt.Tooltip("tooltip_text:N", title="", aggregate=None),
+              ]
           )
     )
 
@@ -714,7 +697,6 @@ cnt_by_s_all = build_aspects_counts_by_S(df_aspects)
 if cnt_by_s_all.empty:
     st.info("Нет данных для графика по урокам.")
 else:
-    # агрегируем данные и считаем долю внутри урока S
     base = (
         alt.Chart(cnt_by_s_all)
           .transform_aggregate(count='sum(count)', groupby=['S', 'aspect_en'])
@@ -722,11 +704,10 @@ else:
           .transform_calculate(pct='datum.count / datum.total')
     )
 
-    # ТОЛЬКО секционные тултипы (без общего прозрачного слоя)
     legend_domain_en = [en for _, en in ASPECTS_ES_EN]
     
     bars_s = (
-        base.mark_bar(size=28, stroke=None, strokeWidth=0)  # ⬅️ контур выключен
+        base.mark_bar(size=28, stroke=None, strokeWidth=0)
             .encode(
                 x=alt.X("S:O", title="S", sort="ascending"),
                 y=alt.Y(
@@ -759,7 +740,6 @@ else:
     ).configure_legend(labelLimit=1000, titleLimit=1000)
     
     st.altair_chart(bars_s.properties(height=460), use_container_width=True, theme=None)
-
 
 # --------- ТАБЛИЦА ВНИЗУ ---------
 st.markdown("---")
@@ -860,16 +840,12 @@ dis_counts, _ = build_aspects_counts_generic(
 if dis_counts.empty:
     st.info("Нет данных для графика Dislike dynamics (Form Responses 1, колонка F).")
 else:
-    # порядок по реальному времени
     bucket_order = (dis_counts[["bucket","bucket_label"]]
                     .drop_duplicates().sort_values("bucket")["bucket_label"].tolist())
 
-    # список меток в виде "ES (EN: en)" и параллельно «чистые» EN имена для тултипа
     expected_labels = [f"{es} (EN: {en})" for es, en in DISLIKE_ES_EN]
     present = [lbl for lbl in expected_labels if lbl in dis_counts["aspect"].unique()]
-    en_names = [en for _, en in DISLIKE_ES_EN]
 
-    # основной стек-бар (как в «Аспекты по датам (ось X — A)»)
     bars_dis = (
         alt.Chart(dis_counts)
           .mark_bar(size=max(40, bar_size))
@@ -880,53 +856,38 @@ else:
           )
     )
 
-    # «общий тултип»: одна всплывашка на столбец (показывает все аспекты со счётом и %)
-    wide = (dis_counts
-            .pivot_table(index=["bucket","bucket_label"], columns="aspect",
-                         values="count", aggfunc="sum", fill_value=0))
+    # ---------- быстрый «общий тултип» для dislike ----------
+    wide = (
+        dis_counts
+        .pivot_table(index=["bucket","bucket_label"], columns="aspect_en",
+                     values="count", aggfunc="sum", fill_value=0)
+    )
 
-    # гарантируем наличие всех столбцов по порядку
-    for lbl in expected_labels:
-        if lbl not in wide.columns:
-            wide[lbl] = 0
-    wide = wide[expected_labels]
+    col_order = list(wide.sum(axis=0).sort_values(ascending=False).index)
 
-    # безопасные имена колонок
-    safe_map = {lbl: f"c_{i}" for i, lbl in enumerate(expected_labels)}
-    wide_safe = wide.rename(columns=safe_map).reset_index()
-    cols = list(safe_map.values())
-    wide_safe["total"] = wide_safe[cols].sum(axis=1)
+    def _pack_row_dis(r, top_k=6):
+        total = int(r[col_order].sum())
+        if total == 0:
+            return pd.Series({"total": 0, "tooltip_text": ""})
+        pairs = [(name, int(r[name])) for name in col_order if r[name] > 0]
+        pairs.sort(key=lambda x: x[1], reverse=True)
+        pairs = pairs[:top_k]
+        lines = [f"{name} — {c} ({c/total:.0%})" for name, c in pairs]
+        return pd.Series({"total": total, "tooltip_text": "\n".join(lines)})
 
-    def make_lines_cols(row):
-        tot = int(row["total"])
-        items = []
-        for i, en in enumerate(en_names):
-            cnt = int(row[cols[i]])
-            pct = (cnt / tot) if tot else 0.0
-            items.append((en, cnt, pct))
-        items.sort(key=lambda x: x[1], reverse=True)
-        for idx in range(len(en_names)):
-            if idx < len(items):
-                en, cnt, pct = items[idx]
-                row[f"line{idx+1}"] = f"{en} — {cnt} ({pct:.0%})"
-            else:
-                row[f"line{idx+1}"] = ""
-        return row
-
-    wide_safe = wide_safe.apply(make_lines_cols, axis=1)
-
-    tooltip_fields = [
-        alt.Tooltip("bucket_label:N", title="Период"),
-        alt.Tooltip("total:Q", title="Всего упоминаний"),
-    ] + [alt.Tooltip(f"line{i}:N", title="") for i in range(1, len(en_names)+1)]
+    packed_dis = wide.apply(_pack_row_dis, axis=1).reset_index()
 
     bubble_dis = (
-        alt.Chart(wide_safe)
+        alt.Chart(packed_dis)
           .mark_bar(size=max(40, bar_size), opacity=0.001)
           .encode(
               x=alt.X("bucket_label:N", sort=bucket_order),
               y=alt.Y("total:Q"),
-              tooltip=tooltip_fields
+              tooltip=[
+                  alt.Tooltip("bucket_label:N", title="Период"),
+                  alt.Tooltip("total:Q", title="Всего упоминаний"),
+                  alt.Tooltip("tooltip_text:N", title="", aggregate=None),
+              ]
           )
     )
 
@@ -937,7 +898,6 @@ else:
 st.markdown("---")
 st.subheader("Dislike по урокам (ось X — S) — график (в %)")
 
-# источник — FR1 с уже применёнными курс/датами; дополнительно — S-фильтр
 df_dislike_lessons = df1_base.copy()
 if not df_dislike_lessons.empty and selected_lessons:
     df_dislike_lessons["S_num"] = pd.to_numeric(df_dislike_lessons["S"], errors="coerce")
@@ -947,7 +907,6 @@ cnt_by_s_dis = build_dislike_counts_by_S(df_dislike_lessons)
 if cnt_by_s_dis.empty:
     st.info("Нет данных для dislike-графика по урокам.")
 else:
-    # считаем долю внутри каждого урока S
     base_dis = (
         alt.Chart(cnt_by_s_dis)
           .transform_aggregate(count='sum(count)', groupby=['S', 'aspect_en'])
@@ -1005,7 +964,6 @@ if not df_dislike_lessons.empty and {"S", "F"}.issubset(df_dislike_lessons.colum
     df_tmp = df_tmp.dropna(subset=["S"])
     df_tmp["S"] = df_tmp["S"].astype(int)
 
-    # нормализованные шаблоны dislike-фраз для матчинга
     dislike_norm = [(_norm_local(es), en) for es, en in DISLIKE_ES_EN]
 
     for _, rr in df_tmp.iterrows():
@@ -1081,7 +1039,6 @@ else:
 st.markdown("---")
 st.subheader("Additional comments — по урокам (S)")
 
-# источник — FR1 с уже применёнными курс/датами; дополнительно — S-фильтр
 df_additional = df1_base.copy()
 if not df_additional.empty and selected_lessons:
     df_additional["S_num"] = pd.to_numeric(df_additional["S"], errors="coerce")
@@ -1095,7 +1052,6 @@ else:
     df_tmp = df_tmp.dropna(subset=["S"])
     df_tmp["S"] = df_tmp["S"].astype(int)
 
-    # собираем комментарии по урокам
     comments_per_s = {}
     for _, rr in df_tmp.iterrows():
         s_val = int(rr["S"])
@@ -1116,14 +1072,11 @@ else:
         for s in sorted(comments_per_s.keys()):
             counter = comments_per_s[s]
             total = int(sum(counter.values()))
-            # сортируем по убыванию встречаемости, затем по алфавиту
             items = sorted(counter.items(), key=lambda x: (-x[1], x[0]))
-            # формируем буллет-список с переводом и процентами
             bullets_en = []
             for txt, c in items:
                 pct = (c / total) if total else 0.0
                 bullets_en.append(f"• {translate_es_to_en(txt)} — {c} ({pct:.0%})")
-            # при желании можно ограничить длину list, но оставим все — это таблица со скроллом
             rows.append({
                 "S": s,
                 "Comments (EN)": "\n".join(bullets_en),
