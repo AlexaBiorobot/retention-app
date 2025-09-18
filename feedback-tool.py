@@ -849,7 +849,7 @@ def _make_percent_stack_by_axis(out_df: pd.DataFrame, axis_col: str, legend_titl
                         symbolType="square",
                     ),
                 ),
-                order=alt.Order("count:Q", sort="ascending"),  # 👈 ключевая строка
+                order=alt.Order("val:Q", sort="descending"),  # 👈 ключевая строка
                 tooltip=[
                     alt.Tooltip(f"{axis_col}:O", title=("Урок (R)" if axis_col=="R" else "Урок (S)")),
                     alt.Tooltip("val_str:N", title=legend_title),
