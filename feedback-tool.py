@@ -991,3 +991,88 @@ else:
     ).configure_legend(labelLimit=1000, titleLimit=1000)
 
     st.altair_chart(bars_s_dis.properties(height=460), use_container_width=True, theme=None)
+
+# --------- DISLIKE: «Распределение по урокам (ось X — S) — таблица» из F ---------
+st.markdown("---")
+st.subheader("Dislike по урокам (ось X — S) — таблица")
+
+rows_dislike = []
+unknown_dislike_per_s = {}
+
+if not df_dislike_lessons.empty and {"S", "F"}.issubset(df_dislike_lessons.columns):
+    df_tmp = df_dislike_lessons[["S", "F"]].copy()
+    df_tmp["S"] = pd.to_numeric(df_tmp["S"], errors="coerce")
+    df_tmp = df_tmp.dropna(subset=["S"])
+    df_tmp["S"] = df_tmp["S"].astype(int)
+
+    # нормализованные шаблоны dislike-фраз для матчинга
+    dislike_norm = [(_norm_local(es), en) for es, en in DISLIKE_ES_EN]
+
+    for _, rr in df_tmp.iterrows():
+        s_val = int(rr["S"])
+        txt = str(rr["F"] or "").strip()
+        if not txt:
+            continue
+        parts = re.split(r"[;,/\n|]+", txt) if re.search(r"[;,/\n|]", txt) else [txt]
+        for p in parts:
+            p_clean = p.strip()
+            t = _norm_local(p_clean)
+            if not t:
+                continue
+            matched = False
+            for es_norm, en in dislike_norm:
+                if t == es_norm or es_norm in t:
+                    rows_dislike.append((s_val, en))
+                    matched = True
+                    break
+            if not matched:
+                unknown_dislike_per_s.setdefault(s_val, Counter())[p_clean] += 1
+
+if not rows_dislike and not unknown_dislike_per_s:
+    st.info("Нет данных для таблицы dislike по урокам.")
+else:
+    df_dis = (pd.DataFrame(rows_dislike, columns=["S", "aspect_en"])
+              if rows_dislike else pd.DataFrame(columns=["S", "aspect_en"]))
+    lesson_rows = []
+    lessons_sorted = sorted(set(list(df_dis["S"].unique()) + list(unknown_dislike_per_s.keys())))
+
+    for s in lessons_sorted:
+        if not df_dis.empty and s in df_dis["S"].values:
+            cnt = (df_dis[df_dis["S"] == s]["aspect_en"]
+                   .value_counts()
+                   .sort_values(ascending=False))
+            total_tpl = int(cnt.sum())
+            parts_text = []
+            for en_name, c in cnt.items():
+                pct = (c / total_tpl) if total_tpl else 0.0
+                parts_text.append(f"• {en_name} — {c} ({pct:.0%})")
+            aspects_text = "\n".join(parts_text)
+        else:
+            aspects_text = ""
+            total_tpl = 0
+
+        unk_counter = unknown_dislike_per_s.get(s, Counter())
+        if unk_counter:
+            top_items = unk_counter.most_common(10)
+            rest = sum(unk_counter.values()) - sum(c for _, c in top_items)
+            unk_parts = [f"• {translate_es_to_en(m)} ({c})" for m, c in top_items]
+            if rest > 0:
+                unk_parts.append(f"• … (+{rest})")
+            unknown_text = "\n".join(unk_parts)
+        else:
+            unknown_text = ""
+
+        lesson_rows.append({
+            "S": int(s),
+            "Dislike (EN)": aspects_text,
+            "Unknown (EN)": unknown_text,
+            "Total (templ.)": total_tpl
+        })
+
+    dislike_table = pd.DataFrame(lesson_rows).sort_values("S").reset_index(drop=True)
+    height = min(800, 100 + 28 * len(dislike_table))
+    st.dataframe(
+        dislike_table[["S", "Dislike (EN)", "Unknown (EN)", "Total (templ.)"]],
+        use_container_width=True,
+        height=height
+    )
