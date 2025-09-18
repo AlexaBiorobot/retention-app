@@ -840,7 +840,7 @@ def _make_percent_stack_by_axis(out_df: pd.DataFrame, axis_col: str, legend_titl
                 color=alt.Color(
                     "val_str:N",
                     title=legend_title,
-                    sort=alt.SortField(field="val", order="descending"),
+                    sort=alt.SortField(field="val", order="ascending"),
                     legend=alt.Legend(
                         orient="bottom",
                         direction="horizontal",
@@ -851,7 +851,7 @@ def _make_percent_stack_by_axis(out_df: pd.DataFrame, axis_col: str, legend_titl
                     ),
                 ),
                 # ⬇️ ключ: порядок слоёв стека — по убыванию val
-                order=alt.Order("val:Q", sort="descending"),
+                order=alt.Order("val:Q", sort="ascending"),
                 tooltip=[
                     alt.Tooltip(f"{axis_col}:O", title=("Урок (R)" if axis_col=="R" else "Урок (S)")),
                     alt.Tooltip("val_str:N", title=legend_title),
@@ -1807,7 +1807,7 @@ def _make_percent_stack_by_R(out_df: pd.DataFrame, legend_title: str):
                     "val_str:N",
                     title=legend_title,
                     # ⬇️ легенда и порядок категорий по убыванию ЧИСЛОВОГО val
-                    sort=alt.SortField(field="val", order="descending"),
+                    sort=alt.SortField(field="val", order="ascending"),
                     legend=alt.Legend(
                         orient="bottom",
                         direction="horizontal",
@@ -1818,7 +1818,7 @@ def _make_percent_stack_by_R(out_df: pd.DataFrame, legend_title: str):
                     ),
                 ),
                 # ⬇️ порядок слоёв внутри столбца
-                order=alt.Order("val:Q", sort="descending"),
+                order=alt.Order("val:Q", sort="ascending"),
                 tooltip=[
                     alt.Tooltip("R:O", title="Урок (R)"),
                     alt.Tooltip("val_str:N", title=legend_title),
