@@ -197,6 +197,15 @@ def prep_distribution_text_fr2(df_f: pd.DataFrame, text_col: str, granularity: s
 
     return out, bucket_order, cat_order, title
 
+def _to_percentile_0_100(df: pd.DataFrame, val_col: str) -> pd.Series:
+    """
+    Возвращает Series с перцентилем (0–100) для каждого значения val_col в df,
+    считанным внутри df (учтены дубликаты; метод 'average').
+    """
+    if df.empty or val_col not in df.columns:
+        return pd.Series([], dtype=float)
+    return df[val_col].rank(pct=True, method="average") * 100.0
+
 # ===== Аспекты и перевод =====
 ASPECTS_ES_EN = [
     ("La materia que se enseñó", "The subject that was taught"),
@@ -1984,3 +1993,80 @@ with cH2:
     else:
         chH_R = _make_percent_stack_by_R(outH_R, "H")
         st.altair_chart(chH_R.properties(height=460), use_container_width=True, theme=None)
+
+# ---------- ЕДИНАЯ «РЕАЛИСТИЧНАЯ» ШКАЛА (перцентиль 0–100) ПО УРОКАМ ----------
+st.markdown("---")
+st.subheader("Unified realistic score (percentile 0–100) — by lessons")
+
+# Источники под текущие фильтры и по выбранным урокам
+# FR1: берем S и G
+df1_pct = df1_base.copy()
+if not df1_pct.empty:
+    df1_pct["S"] = pd.to_numeric(df1_pct["S"], errors="coerce")
+    df1_pct["G"] = pd.to_numeric(df1_pct["G"], errors="coerce")
+    df1_pct = df1_pct.dropna(subset=["S", "G"])
+    if selected_lessons:
+        df1_pct = df1_pct[df1_pct["S"].astype(int).isin(selected_lessons)]
+    if not df1_pct.empty:
+        df1_pct["S"] = df1_pct["S"].astype(int)
+        # перцентиль в пределах текущей выборки FR1
+        df1_pct["score100"] = _to_percentile_0_100(df1_pct, "G")
+        fr1_u = (df1_pct.groupby("S", as_index=False)
+                          .agg(avg_score100=("score100","mean"),
+                               count=("score100","size"))
+                          .assign(source="FR1 (G)"))
+    else:
+        fr1_u = pd.DataFrame(columns=["S","avg_score100","count","source"])
+else:
+    fr1_u = pd.DataFrame(columns=["S","avg_score100","count","source"])
+
+# FR2: берем R и I
+df2_pct = df2_base.copy()
+if not df2_pct.empty:
+    df2_pct["R"] = pd.to_numeric(df2_pct["R"], errors="coerce")
+    df2_pct["I"] = pd.to_numeric(df2_pct["I"], errors="coerce")
+    df2_pct = df2_pct.dropna(subset=["R", "I"])
+    if selected_lessons:
+        df2_pct = df2_pct[df2_pct["R"].astype(int).isin(selected_lessons)]
+    if not df2_pct.empty:
+        df2_pct["R"] = df2_pct["R"].astype(int)
+        df2_pct["score100"] = _to_percentile_0_100(df2_pct, "I")
+        fr2_u = (df2_pct.groupby("R", as_index=False)
+                          .agg(avg_score100=("score100","mean"),
+                               count=("score100","size"))
+                          .rename(columns={"R":"S"})  # приводим к общей оси "S" для склейки
+                          .assign(source="FR2 (I)"))
+    else:
+        fr2_u = pd.DataFrame(columns=["S","avg_score100","count","source"])
+else:
+    fr2_u = pd.DataFrame(columns=["S","avg_score100","count","source"])
+
+unified = pd.concat([fr1_u, fr2_u], ignore_index=True)
+
+if unified.empty:
+    st.info("Нет данных для объединённой шкалы (перцентиль 0–100) при текущих фильтрах.")
+else:
+    # аккуратный диапазон Y
+    ymin = float(unified["avg_score100"].min())
+    ymax = float(unified["avg_score100"].max())
+    pad = (ymax - ymin) * 0.1 if ymax > ymin else 2.5
+    y_scale_u = alt.Scale(domain=[max(0, ymin - pad), min(100, ymax + pad)], nice=False, clamp=True)
+
+    ch_unified = (
+        alt.Chart(unified)
+          .mark_line(point=True)
+          .encode(
+              x=alt.X("S:Q", title="Lesson (S/R)"),
+              y=alt.Y("avg_score100:Q", title="Percentile score (0–100)", scale=y_scale_u),
+              color=alt.Color("source:N", title="Source"),
+              tooltip=[
+                  alt.Tooltip("S:Q", title="Lesson"),
+                  alt.Tooltip("source:N", title="Source"),
+                  alt.Tooltip("avg_score100:Q", title="Avg percentile", format=".1f"),
+                  alt.Tooltip("count:Q", title="N"),
+              ],
+          )
+          .properties(height=380)
+    )
+    st.altair_chart(ch_unified, use_container_width=True, theme=None)
+
