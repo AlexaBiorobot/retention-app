@@ -248,6 +248,16 @@ def translate_es_to_en(text: str) -> str:
             pass
     return _naive_translate_es_en(t)
 
+# ---- безопасные обёртки для перевода (чтобы не падать на нестроках) ----
+def _safe_text(v) -> str:
+    return "" if v is None else str(v).strip()
+
+def translate_es_to_en_safe(v) -> str:
+    try:
+        return translate_es_to_en(_safe_text(v))
+    except Exception:
+        return _safe_text(v)
+
 # ===== Dislike-аспекты (из F), со стабильным EN-переводом =====
 DISLIKE_ES_EN = [
     ("Explica mejor el contenido.", "Explain the content better."),
@@ -1381,11 +1391,13 @@ else:
     for s in sorted(comments_per_lesson.keys()):
         counter = comments_per_lesson[s]
         total = int(sum(counter.values()))
-        items = sorted(counter.items(), key=lambda x: (-x[1], translate_es_to_en(x[0])))
+        # ---- изменено: безопасная сортировка по переводу
+        items = sorted(counter.items(), key=lambda x: (-x[1], translate_es_to_en_safe(x[0])))
         bullets_en = []
         for txt, c in items:
             pct = (c / total) if total else 0.0
-            bullets_en.append(f"• {translate_es_to_en(txt)} — {c} ({pct:.0%})")
+            # ---- изменено: безопасный перевод в выводе
+            bullets_en.append(f"• {translate_es_to_en_safe(txt)} — {c} ({pct:.0%})")
         rows.append({
             "S": s,
             "Comments (EN)": "\n".join(bullets_en),
