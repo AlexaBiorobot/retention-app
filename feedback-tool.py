@@ -167,7 +167,7 @@ _BASIC_ES_EN = {
     "profesor":"teacher","actividades":"activities","sala":"classroom",
     "tareas":"homework","casa":"home","forma":"way","comporto":"behaved",
     "comportó":"behaved","clase":"class","aclararon":"clarified","dudas":"doubts",
-    "trataron":"treated","bien":"well","atencion":"attention","атención":"attention".replace("а","a")
+    "trataron":"treated","bien":"well","atencion":"attention","atención":"attention"
 }
 
 def _naive_translate_es_en(text: str) -> str:
@@ -230,7 +230,7 @@ def build_aspects_counts_generic(df: pd.DataFrame, text_col: str, date_col: str,
     d = add_bucket(d, "A", granularity)
     d = ensure_bucket_and_label(d, "A", granularity)
 
-    rows, unknown = [], []
+    rows, _unknown = [], []
     for _, r in d.iterrows():
         txt = str(r["TXT"]).strip()
         if not txt:
@@ -240,14 +240,10 @@ def build_aspects_counts_generic(df: pd.DataFrame, text_col: str, date_col: str,
             t = _norm_local(p.strip())
             if not t:
                 continue
-            matched = False
             for es_norm, es, en in aspects_norm:
                 if t == es_norm or es_norm in t:
                     rows.append((r["bucket"], r["bucket_label"], f"{es} (EN: {en})", en, 1))
-                    matched = True
                     break
-            if not matched:
-                unknown.append(p.strip())
 
     counts = pd.DataFrame(rows, columns=["bucket","bucket_label","aspect","aspect_en","count"])
     if not counts.empty:
@@ -470,7 +466,7 @@ selected_lessons = st.sidebar.multiselect(
     help="Фильтр единый для S (FR1) и R (FR2)"
 )
 
-# ==================== ПРИМЕНЕНИЕ ПИЛЬТРОВ ====================
+# ==================== ПРИМЕНЕНИЕ ФИЛЬТРОВ ====================
 
 # Верхние графики (средние)
 agg1 = apply_filters_and_aggregate(df1, "N", "A", "S", "G", selected_courses, date_range)
@@ -616,7 +612,6 @@ with col4:
 st.markdown("---")
 st.subheader("Аспекты урока — Form Responses 1")
 
-# FR1 для аспектов с учётом S-фильтра
 df_aspects = df1_base.copy()
 if not df_aspects.empty and selected_lessons:
     df_aspects["S_num"] = pd.to_numeric(df_aspects["S"], errors="coerce")
@@ -681,7 +676,7 @@ else:
               tooltip=[
                   alt.Tooltip("bucket_label:N", title="Период"),
                   alt.Tooltip("total:Q", title="Всего упоминаний"),
-                  alt.Tooltip("tooltip_text:N", title="", aggregate=None),
+                  alt.Tooltip("tooltip_text:N", title=""),
               ]
           )
     )
@@ -886,7 +881,7 @@ else:
               tooltip=[
                   alt.Tooltip("bucket_label:N", title="Период"),
                   alt.Tooltip("total:Q", title="Всего упоминаний"),
-                  alt.Tooltip("tooltip_text:N", title="", aggregate=None),
+                  alt.Tooltip("tooltip_text:N", title=""),
               ]
           )
     )
