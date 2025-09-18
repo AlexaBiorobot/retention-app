@@ -1522,3 +1522,113 @@ with colH:
     st.markdown("**FR2 — Average H by R**")
     _make_avg_chart(aggH, "Average H")
 
+# ---------- FR2: распределения по F / G / H (по типу "Распределение значений") ----------
+st.markdown("---")
+st.subheader(f"Form Responses 2 — распределение F / G / H (гранулярность: {granularity.lower()})")
+
+def _prep_df2_numeric_dist(df_src: pd.DataFrame, value_col: str, granularity: str):
+    """Готовим df с bucket’ами и списком допустимых значений (инт)."""
+    if df_src.empty or value_col not in df_src.columns:
+        return pd.DataFrame(), [], [], value_col
+    d = df_src.copy()
+    d = d.dropna(subset=["A", value_col])
+    # приводим к числу и убираем NaN
+    d[value_col] = pd.to_numeric(d[value_col], errors="coerce")
+    d = d.dropna(subset=[value_col])
+    if d.empty:
+        return pd.DataFrame(), [], [], value_col
+
+    # только целые значения шкалы
+    d[value_col] = d[value_col].astype(int)
+
+    # добавляем buckets и подписи
+    d = add_bucket(d, "A", granularity)
+    d = ensure_bucket_and_label(d, "A", granularity)
+
+    # динамически определяем допустимые значения (встречающиеся целые)
+    allowed_values = sorted(d[value_col].dropna().unique().tolist())
+    if not allowed_values:
+        return pd.DataFrame(), [], [], value_col
+
+    # используем существующую утилиту, чтобы получить out/pct и порядки
+    out, bucket_order, val_order, title = prep_distribution(d, value_col, allowed_values, value_col)
+    return out, bucket_order, val_order, title
+
+# источник с учётом фильтра по урокам (R)
+df2_numeric_src = _apply_r_filter(df2_base)
+
+cF, cG, cH = st.columns(3)
+
+with cF:
+    st.markdown("**FR2 — распределение F**")
+    outF, orderF, valsF, titleF = _prep_df2_numeric_dist(df2_numeric_src, "F", granularity)
+    if outF.empty:
+        st.info("Нет данных по колонке F для выбранных фильтров.")
+    else:
+        barsF = (
+            alt.Chart(outF).mark_bar(size=BAR_SIZE.get(granularity, 36))
+              .encode(
+                  x=alt.X("bucket_label:N", title="Период", sort=orderF),
+                  y=alt.Y("sum(count):Q", title="Кол-во ответов"),
+                  color=alt.Color("val_str:N", title=titleF, sort=valsF),
+                  order=alt.Order("val:Q", sort="ascending"),
+                  tooltip=[
+                      alt.Tooltip("bucket_label:N", title="Период"),
+                      alt.Tooltip("val_str:N", title=titleF),
+                      alt.Tooltip("count:Q", title="Кол-во"),
+                      alt.Tooltip("pct:Q", title="% внутри периода", format=".0%"),
+                  ],
+              )
+              .properties(height=420)
+        )
+        st.altair_chart(barsF, use_container_width=True, theme=None)
+
+with cG:
+    st.markdown("**FR2 — распределение G**")
+    outG, orderG, valsG, titleG = _prep_df2_numeric_dist(df2_numeric_src, "G", granularity)
+    if outG.empty:
+        st.info("Нет данных по колонке G для выбранных фильтров.")
+    else:
+        barsG = (
+            alt.Chart(outG).mark_bar(size=BAR_SIZE.get(granularity, 36))
+              .encode(
+                  x=alt.X("bucket_label:N", title="Период", sort=orderG),
+                  y=alt.Y("sum(count):Q", title="Кол-во ответов"),
+                  color=alt.Color("val_str:N", title=titleG, sort=valsG),
+                  order=alt.Order("val:Q", sort="ascending"),
+                  tooltip=[
+                      alt.Tooltip("bucket_label:N", title="Период"),
+                      alt.Tooltip("val_str:N", title=titleG),
+                      alt.Tooltip("count:Q", title="Кол-во"),
+                      alt.Tooltip("pct:Q", title="% внутри периода", format=".0%"),
+                  ],
+              )
+              .properties(height=420)
+        )
+        st.altair_chart(barsG, use_container_width=True, theme=None)
+
+with cH:
+    st.markdown("**FR2 — распределение H**")
+    outH, orderH, valsH, titleH = _prep_df2_numeric_dist(df2_numeric_src, "H", granularity)
+    if outH.empty:
+        st.info("Нет данных по колонке H для выбранных фильтров.")
+    else:
+        barsH = (
+            alt.Chart(outH).mark_bar(size=BAR_SIZE.get(granularity, 36))
+              .encode(
+                  x=alt.X("bucket_label:N", title="Период", sort=orderH),
+                  y=alt.Y("sum(count):Q", title="Кол-во ответов"),
+                  color=alt.Color("val_str:N", title=titleH, sort=valsH),
+                  order=alt.Order("val:Q", sort="ascending"),
+                  tooltip=[
+                      alt.Tooltip("bucket_label:N", title="Период"),
+                      alt.Tooltip("val_str:N", title=titleH),
+                      alt.Tooltip("count:Q", title="Кол-во"),
+                      alt.Tooltip("pct:Q", title="% внутри периода", format=".0%"),
+                  ],
+              )
+              .properties(height=420)
+        )
+        st.altair_chart(barsH, use_container_width=True, theme=None)
+
+
