@@ -546,6 +546,25 @@ def build_template_counts_by_R(
            .groupby(["R", "templ_en"], as_index=False)["count"].sum())
     return out
 
+def _safe_text(x):
+    """Всегда возвращает строку (безопасно для сортировки)."""
+    if x is None:
+        return ""
+    try:
+        if isinstance(x, float) and pd.isna(x):
+            return ""
+    except Exception:
+        pass
+    return str(x)
+
+def translate_es_to_en_safe(text: str) -> str:
+    """Перевод с защитой от эксепшенов и None."""
+    s = _safe_text(text)
+    try:
+        out = translate_es_to_en(s)
+        return _safe_text(out)  # гарантия строки
+    except Exception:
+        return s
 
 # ==================== ДАННЫЕ ====================
 
@@ -1945,7 +1964,10 @@ else:
                 cnts = pairs_per_r[r]
                 total = int(sum(cnts.values()))
                 # сортируем: чаще выше; при равенстве — по убыванию оценки, затем по тексту
-                items = sorted(cnts.items(), key=lambda kv: (-kv[1], -kv[0][0], kv[0][1]))
+                items = sorted(
+                    cnts.items(),
+                    key=lambda kv: (-kv[1], -int(kv[0][0]), _safe_text(kv[0][1]).casefold())
+                )
                 bullets = []
                 for (score, txt_en), c in items:
                     pct = (c / total) if total else 0.0
