@@ -308,6 +308,73 @@ def build_aspects_counts_generic(df: pd.DataFrame, text_col: str, date_col: str,
 
     return counts, pd.DataFrame(columns=["en","mention","total"])
 
+# ===== FR2: шаблонные фразы для D и E =====
+FR2_D_TEMPL_ES_EN = [
+    ("Sí, todo a tiempo", "Yes, everything on time"),
+    ("Empezó tarde la clase", "The class started late"),
+    ("El profesor llegó muy tarde o no vino en absoluto", "The teacher arrived very late or didn't come at all"),
+]
+
+FR2_E_TEMPL_ES_EN = [
+    ("Sí", "Yes"),
+    ("Terminó demasiado pronto", "Finished too soon"),
+    ("Fue demasiado larga", "It was too long"),
+    ("No hubo clase", "There was no class"),
+]
+
+def build_template_counts(
+    df: pd.DataFrame,
+    text_col: str,
+    date_col: str,
+    granularity: str,
+    templates_es_en: list[tuple[str, str]],
+):
+    """
+    Считает распределение упоминаний по заданным шаблонам (templates_es_en)
+    в текстовой колонке text_col. Возвращает DataFrame со столбцами:
+    [bucket, bucket_label, templ_es, templ_en, count]
+    """
+    need_cols = [date_col, text_col]
+    if df.empty or not all(c in df.columns for c in need_cols):
+        return pd.DataFrame(columns=["bucket","bucket_label","templ_es","templ_en","count"])
+
+    d = df[need_cols].copy()
+    d[date_col] = pd.to_datetime(d[date_col], errors="coerce")
+    d = d.dropna(subset=[date_col])
+    if d.empty:
+        return pd.DataFrame(columns=["bucket","bucket_label","templ_es","templ_en","count"])
+
+    # нормализуем эталоны
+    tmpl_norm = [(_norm_local(es), es, en) for es, en in templates_es_en]
+
+    d = d.rename(columns={date_col: "A", text_col: "TXT"})
+    d = add_bucket(d, "A", granularity)
+    d = ensure_bucket_and_label(d, "A", granularity)
+
+    rows = []
+    splitter = re.compile(r"[;,/\n|]+")
+    for _, r in d.iterrows():
+        raw = str(r["TXT"] or "").strip()
+        if not raw:
+            continue
+        parts = splitter.split(raw) if splitter.search(raw) else [raw]
+        for p in parts:
+            t = _norm_local(p.strip())
+            if not t:
+                continue
+            for es_norm, es, en in tmpl_norm:
+                if t == es_norm or es_norm in t:
+                    rows.append((r["bucket"], r["bucket_label"], es, en))
+                    break
+
+    if not rows:
+        return pd.DataFrame(columns=["bucket","bucket_label","templ_es","templ_en","count"])
+
+    out = (pd.DataFrame(rows, columns=["bucket","bucket_label","templ_es","templ_en"])
+             .groupby(["bucket","bucket_label","templ_es","templ_en"], as_index=False)
+             .size().rename(columns={"size":"count"}))
+    return out
+
 def build_aspects_counts(df: pd.DataFrame, text_col: str, date_col: str, granularity: str):
     need_cols = [date_col, text_col]
     if df.empty or not all(c in df.columns for c in need_cols):
@@ -1143,9 +1210,9 @@ else:
             height=height
         )
 
-# ---------- FR2: распределения по текстовым колонкам D и E ----------
+# ---------- FR2: распределения по шаблонным текстам D и E ----------
 st.markdown("---")
-st.subheader(f"Form Responses 2 — текстовые распределения (гранулярность: {granularity.lower()})")
+st.subheader(f"Form Responses 2 — шаблонные распределения (гранулярность: {granularity.lower()})")
 
 # Источник: df2_base (курсы/даты) + фильтр по урокам (R)
 def _apply_r_filter(df_src: pd.DataFrame) -> pd.DataFrame:
@@ -1162,27 +1229,43 @@ df2_text_src = _apply_r_filter(df2_base)
 
 colD, colE = st.columns(2)
 
+# ---- D (по шаблонам) ----
 with colD:
-    st.markdown("**FR2 — распределение D (EN)**")
+    st.markdown("**FR2 — распределение по D (шаблоны)**")
     if df2_text_src.empty or "D" not in df2_text_src.columns:
         st.info("Нет данных (колонка D отсутствует или фильтры пустые).")
     else:
-        d_out, d_bucket_order, d_cat_order, d_title = prep_distribution_text_fr2(
-            df2_text_src, "D", granularity, "D (EN)"
-        )
-        if d_out.empty:
-            st.info("Нет данных для графика по D.")
+        d_cnt = build_template_counts(df2_text_src, text_col="D", date_col="A",
+                                      granularity=granularity, templates_es_en=FR2_D_TEMPL_ES_EN)
+        if d_cnt.empty:
+            st.info("Нет совпадений с шаблонными фразами для D.")
         else:
+            # период и легенда
+            d_bucket_order = (d_cnt[["bucket","bucket_label"]]
+                              .drop_duplicates()
+                              .sort_values("bucket")["bucket_label"].tolist())
+            legend_domain = [en for _, en in FR2_D_TEMPL_ES_EN]
+
+            # добавим total/pct для тултипов
+            d_totals = (d_cnt.groupby(["bucket","bucket_label"], as_index=False)["count"]
+                            .sum().rename(columns={"count":"total"}))
+            d_out = d_cnt.merge(d_totals, on=["bucket","bucket_label"], how="left")
+            d_out["pct"] = d_out["count"] / d_out["total"]
+
             barsD = (
                 alt.Chart(d_out)
                    .mark_bar(size=BAR_SIZE.get(granularity, 36))
                    .encode(
                        x=alt.X("bucket_label:N", title="Период", sort=d_bucket_order),
                        y=alt.Y("sum(count):Q", title="Кол-во ответов"),
-                       color=alt.Color("cat_en:N", title=d_title, sort=d_cat_order),
+                       color=alt.Color(
+                           "templ_en:N",
+                           title="D (EN)",
+                           scale=alt.Scale(domain=legend_domain),
+                       ),
                        tooltip=[
                            alt.Tooltip("bucket_label:N", title="Период"),
-                           alt.Tooltip("cat_en:N", title=d_title),
+                           alt.Tooltip("templ_en:N", title="Шаблон (EN)"),
                            alt.Tooltip("count:Q", title="Кол-во"),
                            alt.Tooltip("pct:Q", title="% внутри периода", format=".0%"),
                        ],
@@ -1191,27 +1274,41 @@ with colD:
             )
             st.altair_chart(barsD, use_container_width=True, theme=None)
 
+# ---- E (по шаблонам) ----
 with colE:
-    st.markdown("**FR2 — распределение E (EN)**")
+    st.markdown("**FR2 — распределение по E (шаблоны)**")
     if df2_text_src.empty or "E" not in df2_text_src.columns:
         st.info("Нет данных (колонка E отсутствует или фильтры пустые).")
     else:
-        e_out, e_bucket_order, e_cat_order, e_title = prep_distribution_text_fr2(
-            df2_text_src, "E", granularity, "E (EN)"
-        )
-        if e_out.empty:
-            st.info("Нет данных для графика по E.")
+        e_cnt = build_template_counts(df2_text_src, text_col="E", date_col="A",
+                                      granularity=granularity, templates_es_en=FR2_E_TEMPL_ES_EN)
+        if e_cnt.empty:
+            st.info("Нет совпадений с шаблонными фразами для E.")
         else:
+            e_bucket_order = (e_cnt[["bucket","bucket_label"]]
+                              .drop_duplicates()
+                              .sort_values("bucket")["bucket_label"].tolist())
+            legend_domain_e = [en for _, en in FR2_E_TEMPL_ES_EN]
+
+            e_totals = (e_cnt.groupby(["bucket","bucket_label"], as_index=False)["count"]
+                           .sum().rename(columns={"count":"total"}))
+            e_out = e_cnt.merge(e_totals, on=["bucket","bucket_label"], how="left")
+            e_out["pct"] = e_out["count"] / e_out["total"]
+
             barsE = (
                 alt.Chart(e_out)
                    .mark_bar(size=BAR_SIZE.get(granularity, 36))
                    .encode(
                        x=alt.X("bucket_label:N", title="Период", sort=e_bucket_order),
                        y=alt.Y("sum(count):Q", title="Кол-во ответов"),
-                       color=alt.Color("cat_en:N", title=e_title, sort=e_cat_order),
+                       color=alt.Color(
+                           "templ_en:N",
+                           title="E (EN)",
+                           scale=alt.Scale(domain=legend_domain_e),
+                       ),
                        tooltip=[
                            alt.Tooltip("bucket_label:N", title="Период"),
-                           alt.Tooltip("cat_en:N", title=e_title),
+                           alt.Tooltip("templ_en:N", title="Шаблон (EN)"),
                            alt.Tooltip("count:Q", title="Кол-во"),
                            alt.Tooltip("pct:Q", title="% внутри периода", format=".0%"),
                        ],
