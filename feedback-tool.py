@@ -1863,3 +1863,71 @@ with cH2:
         chH_R = _make_percent_stack_by_R(outH_R, "H")
         st.altair_chart(chH_R.properties(height=460), use_container_width=True, theme=None)
 
+# --------- FR2: свободные ответы J+K — единая таблица по урокам (ось X — R) ---------
+st.markdown("---")
+st.subheader("FR2 — свободные ответы (J + K) по урокам (ось X — R) — единая таблица")
+
+available_text_cols = [c for c in ["J", "K"] if c in df2.columns]
+if not available_text_cols:
+    st.info("На листе Form Responses 2 нет колонок J или K.")
+else:
+    # Источник: FR2 с учётом курсов/дат и выбранных уроков
+    df2_free_src = df2_base.copy()
+    if not df2_free_src.empty:
+        if selected_lessons:
+            df2_free_src["R_num"] = pd.to_numeric(df2_free_src["R"], errors="coerce")
+            df2_free_src = df2_free_src[df2_free_src["R_num"].isin(selected_lessons)]
+        df2_free_src["R"] = pd.to_numeric(df2_free_src["R"], errors="coerce")
+        df2_free_src = df2_free_src.dropna(subset=["R"])
+        df2_free_src["R"] = df2_free_src["R"].astype(int)
+
+    if df2_free_src.empty:
+        st.info("Нет данных для J/K по выбранным фильтрам.")
+    else:
+        splitter = re.compile(r"[;\/\n|]+")  # без запятой, чтобы не ломать фразы
+        per_r = {}
+
+        for _, rr in df2_free_src.iterrows():
+            r_val = int(rr["R"])
+            for col in available_text_cols:
+                raw = str(rr.get(col, "") or "").strip()
+                if not raw:
+                    continue
+                parts = splitter.split(raw) if splitter.search(raw) else [raw]
+                for p in parts:
+                    item = p.strip()
+                    if not item:
+                        continue
+                    per_r.setdefault(r_val, Counter())[item] += 1
+
+        if not per_r:
+            st.info("Нет данных для J/K по выбранным фильтрам.")
+        else:
+            rows = []
+            for r in sorted(per_r.keys()):
+                cnts = per_r[r]
+                total = int(sum(cnts.values()))
+                # сортируем по частоте убыв., затем по переводу (для стабильности)
+                items = sorted(
+                    cnts.items(),
+                    key=lambda x: (-x[1], translate_es_to_en(x[0]))
+                )
+                bullets = []
+                for txt, c in items:
+                    pct = (c / total) if total else 0.0
+                    bullets.append(f"• {translate_es_to_en(txt)} — {c} ({pct:.0%})")
+                rows.append({
+                    "R": r,
+                    "Answers (EN)": "\n".join(bullets),
+                    "Total items": total
+                })
+
+            tbl = pd.DataFrame(rows).sort_values("R").reset_index(drop=True)
+            height = min(900, 120 + 28 * len(tbl))
+            st.dataframe(
+                tbl[["R", "Answers (EN)", "Total items"]],
+                use_container_width=True,
+                height=height
+            )
+
+
