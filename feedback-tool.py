@@ -1392,7 +1392,7 @@ else:
         counter = comments_per_lesson[s]
         total = int(sum(counter.values()))
         # ---- изменено: безопасная сортировка по переводу
-        items = sorted(counter.items(), key=lambda x: (-x[1], translate_es_to_en_safe(x[0])))
+        items = sorted(counter.items(), key=lambda x: (-x[1], _safe_text(x[0]).casefold()))
         bullets_en = []
         for txt, c in items:
             pct = (c / total) if total else 0.0
