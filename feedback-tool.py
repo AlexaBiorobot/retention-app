@@ -1076,3 +1076,64 @@ else:
         use_container_width=True,
         height=height
     )
+
+# --------- ADDITIONAL COMMENTS (колонка H, по урокам S) ---------
+st.markdown("---")
+st.subheader("Additional comments — по урокам (S)")
+
+# источник — FR1 с уже применёнными курс/датами; дополнительно — S-фильтр
+df_additional = df1_base.copy()
+if not df_additional.empty and selected_lessons:
+    df_additional["S_num"] = pd.to_numeric(df_additional["S"], errors="coerce")
+    df_additional = df_additional[df_additional["S_num"].isin(selected_lessons)]
+
+if df_additional.empty or not {"S", "H"}.issubset(df_additional.columns):
+    st.info("Нет данных для Additional comments (ожидаются колонки S и H на листе Form Responses 1).")
+else:
+    df_tmp = df_additional[["S", "H"]].copy()
+    df_tmp["S"] = pd.to_numeric(df_tmp["S"], errors="coerce")
+    df_tmp = df_tmp.dropna(subset=["S"])
+    df_tmp["S"] = df_tmp["S"].astype(int)
+
+    # собираем комментарии по урокам
+    comments_per_s = {}
+    for _, rr in df_tmp.iterrows():
+        s_val = int(rr["S"])
+        txt = str(rr["H"] or "").strip()
+        if not txt:
+            continue
+        parts = re.split(r"[;,/\n|]+", txt) if re.search(r"[;,/\n|]", txt) else [txt]
+        for p in parts:
+            p_clean = p.strip()
+            if not p_clean:
+                continue
+            comments_per_s.setdefault(s_val, Counter())[p_clean] += 1
+
+    if not comments_per_s:
+        st.info("Нет данных для Additional comments по выбранным фильтрам.")
+    else:
+        rows = []
+        for s in sorted(comments_per_s.keys()):
+            counter = comments_per_s[s]
+            total = int(sum(counter.values()))
+            # сортируем по убыванию встречаемости, затем по алфавиту
+            items = sorted(counter.items(), key=lambda x: (-x[1], x[0]))
+            # формируем буллет-список с переводом и процентами
+            bullets_en = []
+            for txt, c in items:
+                pct = (c / total) if total else 0.0
+                bullets_en.append(f"• {translate_es_to_en(txt)} — {c} ({pct:.0%})")
+            # при желании можно ограничить длину list, но оставим все — это таблица со скроллом
+            rows.append({
+                "S": s,
+                "Comments (EN)": "\n".join(bullets_en),
+                "Total comments": total,
+            })
+
+        add_table = pd.DataFrame(rows).sort_values("S").reset_index(drop=True)
+        height = min(900, 120 + 28 * len(add_table))
+        st.dataframe(
+            add_table[["S", "Comments (EN)", "Total comments"]],
+            use_container_width=True,
+            height=height
+        )
