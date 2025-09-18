@@ -1321,61 +1321,84 @@ else:
         height=height
     )
 
-# --------- ADDITIONAL COMMENTS (колонка H, по урокам S) ---------
+# --------- Additional comments — объединяем FR1:H (по S) + FR2:K (по R) ---------
 st.markdown("---")
-st.subheader("Additional comments — по урокам (S)")
+st.subheader("Additional comments — по урокам (S) (FR1:H + FR2:K)")
 
-df_additional = df1_base.copy()
-if not df_additional.empty and selected_lessons:
-    df_additional["S_num"] = pd.to_numeric(df_additional["S"], errors="coerce")
-    df_additional = df_additional[df_additional["S_num"].isin(selected_lessons)]
+# Источники с учётом фильтров
+df_add_1 = df1_base.copy()
+if not df_add_1.empty and selected_lessons:
+    df_add_1["S_num"] = pd.to_numeric(df_add_1["S"], errors="coerce")
+    df_add_1 = df_add_1[df_add_1["S_num"].isin(selected_lessons)]
 
-if df_additional.empty or not {"S", "H"}.issubset(df_additional.columns):
-    st.info("Нет данных для Additional comments (ожидаются колонки S и H на листе Form Responses 1).")
-else:
-    df_tmp = df_additional[["S", "H"]].copy()
-    df_tmp["S"] = pd.to_numeric(df_tmp["S"], errors="coerce")
-    df_tmp = df_tmp.dropna(subset=["S"])
-    df_tmp["S"] = df_tmp["S"].astype(int)
+df_add_2 = df2_base.copy()
+if not df_add_2.empty and selected_lessons:
+    df_add_2["R_num"] = pd.to_numeric(df_add_2["R"], errors="coerce")
+    df_add_2 = df_add_2[df_add_2["R_num"].isin(selected_lessons)]
 
-    comments_per_s = {}
-    for _, rr in df_tmp.iterrows():
-        s_val = int(rr["S"])
-        txt = str(rr["H"] or "").strip()
-        if not txt:
+splitter = re.compile(r"[;\/\n|]+")  # без запятой — чтобы не ломать фразы
+
+comments_per_lesson = {}
+
+# FR1:H по S
+if not df_add_1.empty and {"S","H"}.issubset(df_add_1.columns):
+    d1 = df_add_1[["S","H"]].copy()
+    d1["S"] = pd.to_numeric(d1["S"], errors="coerce")
+    d1 = d1.dropna(subset=["S"])
+    d1["S"] = d1["S"].astype(int)
+    for _, rr in d1.iterrows():
+        s = int(rr["S"])
+        raw = str(rr["H"] or "").strip()
+        if not raw:
             continue
-        parts = re.split(r"[;,/\n|]+", txt) if re.search(r"[;,/\n|]", txt) else [txt]
+        parts = splitter.split(raw) if splitter.search(raw) else [raw]
         for p in parts:
-            p_clean = p.strip()
-            if not p_clean:
-                continue
-            comments_per_s.setdefault(s_val, Counter())[p_clean] += 1
+            t = p.strip()
+            if t:
+                comments_per_lesson.setdefault(s, Counter())[t] += 1
 
-    if not comments_per_s:
-        st.info("Нет данных для Additional comments по выбранным фильтрам.")
-    else:
-        rows = []
-        for s in sorted(comments_per_s.keys()):
-            counter = comments_per_s[s]
-            total = int(sum(counter.values()))
-            items = sorted(counter.items(), key=lambda x: (-x[1], x[0]))
-            bullets_en = []
-            for txt, c in items:
-                pct = (c / total) if total else 0.0
-                bullets_en.append(f"• {translate_es_to_en(txt)} — {c} ({pct:.0%})")
-            rows.append({
-                "S": s,
-                "Comments (EN)": "\n".join(bullets_en),
-                "Total comments": total,
-            })
+# FR2:K по R (складываем в те же уроки по номеру)
+if not df_add_2.empty and {"R","K"}.issubset(df_add_2.columns):
+    d2 = df_add_2[["R","K"]].copy()
+    d2["R"] = pd.to_numeric(d2["R"], errors="coerce")
+    d2 = d2.dropna(subset=["R"])
+    d2["R"] = d2["R"].astype(int)
+    for _, rr in d2.iterrows():
+        s = int(rr["R"])  # считаем, что номера уроков S и R — одна шкала
+        raw = str(rr["K"] or "").strip()
+        if not raw:
+            continue
+        parts = splitter.split(raw) if splitter.search(raw) else [raw]
+        for p in parts:
+            t = p.strip()
+            if t:
+                comments_per_lesson.setdefault(s, Counter())[t] += 1
 
-        add_table = pd.DataFrame(rows).sort_values("S").reset_index(drop=True)
-        height = min(900, 120 + 28 * len(add_table))
-        st.dataframe(
-            add_table[["S", "Comments (EN)", "Total comments"]],
-            use_container_width=True,
-            height=height
-        )
+if not comments_per_lesson:
+    st.info("Нет данных для Additional comments по выбранным фильтрам.")
+else:
+    rows = []
+    for s in sorted(comments_per_lesson.keys()):
+        counter = comments_per_lesson[s]
+        total = int(sum(counter.values()))
+        items = sorted(counter.items(), key=lambda x: (-x[1], translate_es_to_en(x[0])))
+        bullets_en = []
+        for txt, c in items:
+            pct = (c / total) if total else 0.0
+            bullets_en.append(f"• {translate_es_to_en(txt)} — {c} ({pct:.0%})")
+        rows.append({
+            "S": s,
+            "Comments (EN)": "\n".join(bullets_en),
+            "Total comments": total,
+        })
+
+    add_table = pd.DataFrame(rows).sort_values("S").reset_index(drop=True)
+    height = min(900, 120 + 28 * len(add_table))
+    st.dataframe(
+        add_table[["S", "Comments (EN)", "Total comments"]],
+        use_container_width=True,
+        height=height
+    )
 
 # ---------- FR2: распределения по шаблонным текстам D и E ----------
 st.markdown("---")
@@ -1863,71 +1886,68 @@ with cH2:
         chH_R = _make_percent_stack_by_R(outH_R, "H")
         st.altair_chart(chH_R.properties(height=460), use_container_width=True, theme=None)
 
-# --------- FR2: свободные ответы J+K — единая таблица по урокам (ось X — R) ---------
+# --------- FR2 — таблица «Оценка I — ответ J» по урокам (R) ---------
 st.markdown("---")
-st.subheader("FR2 — свободные ответы (J + K) по урокам (ось X — R) — единая таблица")
+st.subheader("FR2 — по урокам (R): Оценка (I) — ответ (J)")
 
-available_text_cols = [c for c in ["J", "K"] if c in df2.columns]
-if not available_text_cols:
-    st.info("На листе Form Responses 2 нет колонок J или K.")
+df2_IJ = df2_base.copy()
+if not df2_IJ.empty and selected_lessons:
+    df2_IJ["R_num"] = pd.to_numeric(df2_IJ["R"], errors="coerce")
+    df2_IJ = df2_IJ[df2_IJ["R_num"].isin(selected_lessons)]
+
+if df2_IJ.empty or not {"R","I","J"}.issubset(df2_IJ.columns):
+    st.info("Нет данных для I/J по выбранным фильтрам.")
 else:
-    # Источник: FR2 с учётом курсов/дат и выбранных уроков
-    df2_free_src = df2_base.copy()
-    if not df2_free_src.empty:
-        if selected_lessons:
-            df2_free_src["R_num"] = pd.to_numeric(df2_free_src["R"], errors="coerce")
-            df2_free_src = df2_free_src[df2_free_src["R_num"].isin(selected_lessons)]
-        df2_free_src["R"] = pd.to_numeric(df2_free_src["R"], errors="coerce")
-        df2_free_src = df2_free_src.dropna(subset=["R"])
-        df2_free_src["R"] = df2_free_src["R"].astype(int)
-
-    if df2_free_src.empty:
-        st.info("Нет данных для J/K по выбранным фильтрам.")
+    d = df2_IJ[["R","I","J"]].copy()
+    d["R"] = pd.to_numeric(d["R"], errors="coerce")
+    d["I"] = pd.to_numeric(d["I"], errors="coerce")
+    d = d.dropna(subset=["R","I","J"])
+    if d.empty:
+        st.info("Нет данных для I/J по выбранным фильтрам.")
     else:
-        splitter = re.compile(r"[;\/\n|]+")  # без запятой, чтобы не ломать фразы
-        per_r = {}
+        d["R"] = d["R"].astype(int)
+        d["I"] = d["I"].astype(int)
 
-        for _, rr in df2_free_src.iterrows():
-            r_val = int(rr["R"])
-            for col in available_text_cols:
-                raw = str(rr.get(col, "") or "").strip()
-                if not raw:
+        splitter = re.compile(r"[;\/\n|]+")  # без запятой
+        pairs_per_r = {}
+
+        for _, rr in d.iterrows():
+            r = int(rr["R"])
+            score = int(rr["I"])
+            raw = str(rr["J"] or "").strip()
+            if not raw:
+                continue
+            parts = splitter.split(raw) if splitter.search(raw) else [raw]
+            for p in parts:
+                t = p.strip()
+                if not t:
                     continue
-                parts = splitter.split(raw) if splitter.search(raw) else [raw]
-                for p in parts:
-                    item = p.strip()
-                    if not item:
-                        continue
-                    per_r.setdefault(r_val, Counter())[item] += 1
+                key = (score, translate_es_to_en(t))
+                pairs_per_r.setdefault(r, Counter())[key] += 1
 
-        if not per_r:
-            st.info("Нет данных для J/K по выбранным фильтрам.")
+        if not pairs_per_r:
+            st.info("Нет данных для I/J по выбранным фильтрам.")
         else:
             rows = []
-            for r in sorted(per_r.keys()):
-                cnts = per_r[r]
+            for r in sorted(pairs_per_r.keys()):
+                cnts = pairs_per_r[r]
                 total = int(sum(cnts.values()))
-                # сортируем по частоте убыв., затем по переводу (для стабильности)
-                items = sorted(
-                    cnts.items(),
-                    key=lambda x: (-x[1], translate_es_to_en(x[0]))
-                )
+                # сортируем: чаще выше; при равенстве — по убыванию оценки, затем по тексту
+                items = sorted(cnts.items(), key=lambda kv: (-kv[1], -kv[0][0], kv[0][1]))
                 bullets = []
-                for txt, c in items:
+                for (score, txt_en), c in items:
                     pct = (c / total) if total else 0.0
-                    bullets.append(f"• {translate_es_to_en(txt)} — {c} ({pct:.0%})")
+                    bullets.append(f"• {score} — {txt_en} — {c} ({pct:.0%})")
                 rows.append({
                     "R": r,
-                    "Answers (EN)": "\n".join(bullets),
-                    "Total items": total
+                    "I — J (EN)": "\n".join(bullets),
+                    "Total pairs": total
                 })
 
-            tbl = pd.DataFrame(rows).sort_values("R").reset_index(drop=True)
-            height = min(900, 120 + 28 * len(tbl))
+            ij_table = pd.DataFrame(rows).sort_values("R").reset_index(drop=True)
+            height = min(900, 120 + 28 * len(ij_table))
             st.dataframe(
-                tbl[["R", "Answers (EN)", "Total items"]],
+                ij_table[["R", "I — J (EN)", "Total pairs"]],
                 use_container_width=True,
                 height=height
             )
-
-
