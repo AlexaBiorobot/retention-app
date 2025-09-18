@@ -927,6 +927,74 @@ with right_col:
         ch_I_R = _make_percent_stack_by_axis(out_I_R, axis_col="R", legend_title="I")
         st.altair_chart(ch_I_R.properties(height=460), use_container_width=True, theme=None)
 
+# --------- FR2 — таблица «Оценка I — ответ J» по урокам (R) ---------
+st.markdown("---")
+st.subheader("FR2 — по урокам (R): Оценка (I) — ответ (J)")
+
+df2_IJ = df2_base.copy()
+if not df2_IJ.empty and selected_lessons:
+    df2_IJ["R_num"] = pd.to_numeric(df2_IJ["R"], errors="coerce")
+    df2_IJ = df2_IJ[df2_IJ["R_num"].isin(selected_lessons)]
+
+if df2_IJ.empty or not {"R","I","J"}.issubset(df2_IJ.columns):
+    st.info("Нет данных для I/J по выбранным фильтрам.")
+else:
+    d = df2_IJ[["R","I","J"]].copy()
+    d["R"] = pd.to_numeric(d["R"], errors="coerce")
+    d["I"] = pd.to_numeric(d["I"], errors="coerce")
+    d = d.dropna(subset=["R","I","J"])
+    if d.empty:
+        st.info("Нет данных для I/J по выбранным фильтрам.")
+    else:
+        d["R"] = d["R"].astype(int)
+        d["I"] = d["I"].astype(int)
+
+        splitter = re.compile(r"[;\/\n|]+")  # без запятой
+        pairs_per_r = {}
+
+        for _, rr in d.iterrows():
+            r = int(rr["R"])
+            score = int(rr["I"])
+            raw = str(rr["J"] or "").strip()
+            if not raw:
+                continue
+            parts = splitter.split(raw) if splitter.search(raw) else [raw]
+            for p in parts:
+                t = p.strip()
+                if not t:
+                    continue
+                key = (score, translate_es_to_en(t))
+                pairs_per_r.setdefault(r, Counter())[key] += 1
+
+        if not pairs_per_r:
+            st.info("Нет данных для I/J по выбранным фильтрам.")
+        else:
+            rows = []
+            for r in sorted(pairs_per_r.keys()):
+                cnts = pairs_per_r[r]
+                total = int(sum(cnts.values()))
+                # сортируем: чаще выше; при равенстве — по убыванию оценки, затем по тексту
+                items = sorted(
+                    cnts.items(),
+                    key=lambda kv: (-kv[1], -int(kv[0][0]), _safe_text(kv[0][1]).casefold())
+                )
+                bullets = []
+                for (score, txt_en), c in items:
+                    pct = (c / total) if total else 0.0
+                    bullets.append(f"• {score} — {txt_en} — {c} ({pct:.0%})")
+                rows.append({
+                    "R": r,
+                    "I — J (EN)": "\n".join(bullets),
+                    "Total pairs": total
+                })
+
+            ij_table = pd.DataFrame(rows).sort_values("R").reset_index(drop=True)
+            height = min(900, 120 + 28 * len(ij_table))
+            st.dataframe(
+                ij_table[["R", "I — J (EN)", "Total pairs"]],
+                use_container_width=True,
+                height=height
+            )
 
 # ---------- НИЖЕ: Аспекты урока — Form Responses 1 ----------
 st.markdown("---")
@@ -1916,72 +1984,3 @@ with cH2:
     else:
         chH_R = _make_percent_stack_by_R(outH_R, "H")
         st.altair_chart(chH_R.properties(height=460), use_container_width=True, theme=None)
-
-# --------- FR2 — таблица «Оценка I — ответ J» по урокам (R) ---------
-st.markdown("---")
-st.subheader("FR2 — по урокам (R): Оценка (I) — ответ (J)")
-
-df2_IJ = df2_base.copy()
-if not df2_IJ.empty and selected_lessons:
-    df2_IJ["R_num"] = pd.to_numeric(df2_IJ["R"], errors="coerce")
-    df2_IJ = df2_IJ[df2_IJ["R_num"].isin(selected_lessons)]
-
-if df2_IJ.empty or not {"R","I","J"}.issubset(df2_IJ.columns):
-    st.info("Нет данных для I/J по выбранным фильтрам.")
-else:
-    d = df2_IJ[["R","I","J"]].copy()
-    d["R"] = pd.to_numeric(d["R"], errors="coerce")
-    d["I"] = pd.to_numeric(d["I"], errors="coerce")
-    d = d.dropna(subset=["R","I","J"])
-    if d.empty:
-        st.info("Нет данных для I/J по выбранным фильтрам.")
-    else:
-        d["R"] = d["R"].astype(int)
-        d["I"] = d["I"].astype(int)
-
-        splitter = re.compile(r"[;\/\n|]+")  # без запятой
-        pairs_per_r = {}
-
-        for _, rr in d.iterrows():
-            r = int(rr["R"])
-            score = int(rr["I"])
-            raw = str(rr["J"] or "").strip()
-            if not raw:
-                continue
-            parts = splitter.split(raw) if splitter.search(raw) else [raw]
-            for p in parts:
-                t = p.strip()
-                if not t:
-                    continue
-                key = (score, translate_es_to_en(t))
-                pairs_per_r.setdefault(r, Counter())[key] += 1
-
-        if not pairs_per_r:
-            st.info("Нет данных для I/J по выбранным фильтрам.")
-        else:
-            rows = []
-            for r in sorted(pairs_per_r.keys()):
-                cnts = pairs_per_r[r]
-                total = int(sum(cnts.values()))
-                # сортируем: чаще выше; при равенстве — по убыванию оценки, затем по тексту
-                items = sorted(
-                    cnts.items(),
-                    key=lambda kv: (-kv[1], -int(kv[0][0]), _safe_text(kv[0][1]).casefold())
-                )
-                bullets = []
-                for (score, txt_en), c in items:
-                    pct = (c / total) if total else 0.0
-                    bullets.append(f"• {score} — {txt_en} — {c} ({pct:.0%})")
-                rows.append({
-                    "R": r,
-                    "I — J (EN)": "\n".join(bullets),
-                    "Total pairs": total
-                })
-
-            ij_table = pd.DataFrame(rows).sort_values("R").reset_index(drop=True)
-            height = min(900, 120 + 28 * len(ij_table))
-            st.dataframe(
-                ij_table[["R", "I — J (EN)", "Total pairs"]],
-                use_container_width=True,
-                height=height
-            )
