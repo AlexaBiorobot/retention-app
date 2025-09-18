@@ -839,7 +839,7 @@ def _make_percent_stack_by_axis(out_df: pd.DataFrame, axis_col: str, legend_titl
                 color=alt.Color(
                     "val_str:N",
                     title=legend_title,
-                    sort=val_order_str,
+                    sort=val_order_str,  # порядок в легенде (оставляем числовой)
                     legend=alt.Legend(
                         orient="bottom",
                         direction="horizontal",
@@ -849,6 +849,7 @@ def _make_percent_stack_by_axis(out_df: pd.DataFrame, axis_col: str, legend_titl
                         symbolType="square",
                     ),
                 ),
+                order=alt.Order("count:Q", sort="ascending"),  # 👈 ключевая строка
                 tooltip=[
                     alt.Tooltip(f"{axis_col}:O", title=("Урок (R)" if axis_col=="R" else "Урок (S)")),
                     alt.Tooltip("val_str:N", title=legend_title),
@@ -877,15 +878,6 @@ if not df1_lessons_G.empty and selected_lessons:
 left_col, right_col = st.columns(2)
 
 with left_col:
-    st.markdown("**FR2 — по урокам (R) — I (в %)**")
-    out_I_R = _build_numeric_counts_by_axis(df2_lessons_I, axis_col="R", val_col="I", allowed_vals=list(range(1, 11)))
-    if out_I_R.empty:
-        st.info("Нет данных по I (FR2) для выбранных фильтров.")
-    else:
-        ch_I_R = _make_percent_stack_by_axis(out_I_R, axis_col="R", legend_title="I")
-        st.altair_chart(ch_I_R.properties(height=460), use_container_width=True, theme=None)
-
-with right_col:
     st.markdown("**FR1 — по урокам (S) — G (в %)**")
     out_G_S = _build_numeric_counts_by_axis(df1_lessons_G, axis_col="S", val_col="G", allowed_vals=[1,2,3,4,5])
     if out_G_S.empty:
@@ -893,6 +885,15 @@ with right_col:
     else:
         ch_G_S = _make_percent_stack_by_axis(out_G_S, axis_col="S", legend_title="G")
         st.altair_chart(ch_G_S.properties(height=460), use_container_width=True, theme=None)
+
+with right_col:
+    st.markdown("**FR2 — по урокам (R) — I (в %)**")
+    out_I_R = _build_numeric_counts_by_axis(df2_lessons_I, axis_col="R", val_col="I", allowed_vals=list(range(1, 11)))
+    if out_I_R.empty:
+        st.info("Нет данных по I (FR2) для выбранных фильтров.")
+    else:
+        ch_I_R = _make_percent_stack_by_axis(out_I_R, axis_col="R", legend_title="I")
+        st.altair_chart(ch_I_R.properties(height=460), use_container_width=True, theme=None)
 
 
 # ---------- НИЖЕ: Аспекты урока — Form Responses 1 ----------
