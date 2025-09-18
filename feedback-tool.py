@@ -349,6 +349,44 @@ def aspect_to_en_label(s: str) -> str:
     m = re.search(r"\(EN:\s*(.*?)\)\s*$", str(s))
     return m.group(1).strip() if m else str(s)
 
+def build_dislike_counts_by_S(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Счётчики dislike-аспектов по урокам S из колонки F (FR1).
+    Возвращает DataFrame [S(int), aspect_en(str), count(int)].
+    """
+    if df.empty or not {"S", "F"}.issubset(df.columns):
+        return pd.DataFrame(columns=["S", "aspect_en", "count"])
+
+    d = df[["S", "F"]].copy()
+    d["S"] = pd.to_numeric(d["S"], errors="coerce")
+    d = d.dropna(subset=["S"])
+    d["S"] = d["S"].astype(int)
+
+    # нормализованные шаблоны dislike-фраз
+    dislike_norm = [(_norm_local(es), en) for es, en in DISLIKE_ES_EN]
+
+    rows = []
+    for _, r in d.iterrows():
+        txt = str(r["F"] or "").strip()
+        if not txt:
+            continue
+        parts = re.split(r"[;,/\n|]+", txt) if re.search(r"[;,/\n|]", txt) else [txt]
+        for p in parts:
+            t = _norm_local(p.strip())
+            if not t:
+                continue
+            for es_norm, en in dislike_norm:
+                if t == es_norm or es_norm in t:
+                    rows.append((int(r["S"]), en, 1))
+                    break
+
+    if not rows:
+        return pd.DataFrame(columns=["S", "aspect_en", "count"])
+
+    out = pd.DataFrame(rows, columns=["S", "aspect_en", "count"])
+    out = out.groupby(["S", "aspect_en"], as_index=False)["count"].sum()
+    return out
+
 # ==================== ДАННЫЕ ====================
 
 df1 = load_sheet_as_letter_df("Form Responses 1")   # A=date, N=course, S=x, G=y, E=aspects
@@ -895,3 +933,61 @@ else:
     st.altair_chart((bars_dis + bubble_dis).properties(height=460),
                     use_container_width=True, theme=None)
 
+# --------- DISLIKE: «Распределение по урокам (ось X — S) — график (в %)» из F ---------
+st.markdown("---")
+st.subheader("Dislike по урокам (ось X — S) — график (в %)")
+
+# источник — FR1 с уже применёнными курс/датами; дополнительно — S-фильтр
+df_dislike_lessons = df1_base.copy()
+if not df_dislike_lessons.empty and selected_lessons:
+    df_dislike_lessons["S_num"] = pd.to_numeric(df_dislike_lessons["S"], errors="coerce")
+    df_dislike_lessons = df_dislike_lessons[df_dislike_lessons["S_num"].isin(selected_lessons)]
+
+cnt_by_s_dis = build_dislike_counts_by_S(df_dislike_lessons)
+if cnt_by_s_dis.empty:
+    st.info("Нет данных для dislike-графика по урокам.")
+else:
+    # считаем долю внутри каждого урока S
+    base_dis = (
+        alt.Chart(cnt_by_s_dis)
+          .transform_aggregate(count='sum(count)', groupby=['S', 'aspect_en'])
+          .transform_joinaggregate(total='sum(count)', groupby=['S'])
+          .transform_calculate(pct='datum.count / datum.total')
+    )
+
+    dislike_domain_en = [en for _, en in DISLIKE_ES_EN]
+
+    bars_s_dis = (
+        base_dis.mark_bar(size=28, stroke=None, strokeWidth=0)
+            .encode(
+                x=alt.X("S:O", title="S", sort="ascending"),
+                y=alt.Y(
+                    "count:Q",
+                    stack="normalize",
+                    axis=alt.Axis(format="%", title="% от упоминаний"),
+                    scale=alt.Scale(domain=[0, 1], nice=False, clamp=True)
+                ),
+                color=alt.Color(
+                    "aspect_en:N",
+                    title="Dislike-аспект (EN)",
+                    scale=alt.Scale(domain=dislike_domain_en),
+                    legend=alt.Legend(
+                        orient="bottom",
+                        direction="horizontal",
+                        columns=2,
+                        labelLimit=1000,
+                        titleLimit=1000,
+                        symbolType="square",
+                    ),
+                ),
+                tooltip=[
+                    alt.Tooltip("S:O", title="Урок"),
+                    alt.Tooltip("aspect_en:N", title="Dislike-аспект"),
+                    alt.Tooltip("count:Q", title="Кол-во"),
+                    alt.Tooltip("pct:Q", title="Доля", format=".0%"),
+                    alt.Tooltip("total:Q", title="Всего по уроку"),
+                ],
+            )
+    ).configure_legend(labelLimit=1000, titleLimit=1000)
+
+    st.altair_chart(bars_s_dis.properties(height=460), use_container_width=True, theme=None)
