@@ -1002,80 +1002,40 @@ with right_col:
         ch_I_R = _make_percent_stack_by_axis(out_I_R, axis_col="R", legend_title="I")
         st.altair_chart(ch_I_R.properties(height=460), use_container_width=True, theme=None)
 
-# --------- FR2 — таблица «Оценка I — ответ J» по урокам (R) ---------
+# --------- ЕДИНАЯ ТАБЛИЦА ПО УРОКАМ: I–J + Aspects+Unknown, Dislike+Unknown, Additional comments ---------
 st.markdown("---")
-st.subheader("FR2 — по урокам (R): Оценка (I) — ответ (J)")
+st.subheader("Сводная таблица по урокам (S) — I–J / Aspects / Dislike / Comments + итоги")
 
-df2_IJ = df2_base.copy()
-if not df2_IJ.empty and selected_lessons:
-    df2_IJ["R_num"] = pd.to_numeric(df2_IJ["R"], errors="coerce")
-    df2_IJ = df2_IJ[df2_IJ["R_num"].isin(selected_lessons)]
+# === Подготовка данных ДЛЯ СВОДНОЙ ТАБЛИЦЫ (самодостаточно) ===
 
-if df2_IJ.empty or not {"R","I","J"}.issubset(df2_IJ.columns):
-    st.info("Нет данных для I/J по выбранным фильтрам.")
-else:
-    d = df2_IJ[["R","I","J"]].copy()
-    d["R"] = pd.to_numeric(d["R"], errors="coerce")
-    d["I"] = pd.to_numeric(d["I"], errors="coerce")
-    d = d.dropna(subset=["R","I","J"])
-    if d.empty:
-        st.info("Нет данных для I/J по выбранным фильтрам.")
-    else:
-        d["R"] = d["R"].astype(int)
-        d["I"] = d["I"].astype(int)
-
-        splitter = re.compile(r"[;\/\n|]+")  # без запятой
-        pairs_per_r = {}
-
-        for _, rr in d.iterrows():
-            r = int(rr["R"])
+# 0) FR2 — I–J пары по урокам (R) -> кладём в те же номера S
+ij_pairs_per_s = {}
+if not df2_base.empty and {"R","I","J"}.issubset(df2_base.columns):
+    df2_IJ_src = df2_base.copy()
+    if selected_lessons:
+        df2_IJ_src["R_num"] = pd.to_numeric(df2_IJ_src["R"], errors="coerce")
+        df2_IJ_src = df2_IJ_src[df2_IJ_src["R_num"].isin(selected_lessons)]
+    dIJ = df2_IJ_src[["R","I","J"]].copy()
+    dIJ["R"] = pd.to_numeric(dIJ["R"], errors="coerce")
+    dIJ["I"] = pd.to_numeric(dIJ["I"], errors="coerce")
+    dIJ = dIJ.dropna(subset=["R","I","J"])
+    if not dIJ.empty:
+        dIJ["R"] = dIJ["R"].astype(int)
+        dIJ["I"] = dIJ["I"].astype(int)
+        splitter_ij = re.compile(r"[;\/\n|]+")  # без запятой
+        for _, rr in dIJ.iterrows():
+            s = int(rr["R"])  # та же шкала уроков
             score = int(rr["I"])
             raw = str(rr["J"] or "").strip()
             if not raw:
                 continue
-            parts = splitter.split(raw) if splitter.search(raw) else [raw]
+            parts = splitter_ij.split(raw) if splitter_ij.search(raw) else [raw]
             for p in parts:
                 t = p.strip()
                 if not t:
                     continue
-                key = (score, translate_es_to_en(t))
-                pairs_per_r.setdefault(r, Counter())[key] += 1
-
-        if not pairs_per_r:
-            st.info("Нет данных для I/J по выбранным фильтрам.")
-        else:
-            rows = []
-            for r in sorted(pairs_per_r.keys()):
-                cnts = pairs_per_r[r]
-                total = int(sum(cnts.values()))
-                # сортируем: чаще выше; при равенстве — по убыванию оценки, затем по тексту
-                items = sorted(
-                    cnts.items(),
-                    key=lambda kv: (-kv[1], -int(kv[0][0]), _safe_text(kv[0][1]).casefold())
-                )
-                bullets = []
-                for (score, txt_en), c in items:
-                    pct = (c / total) if total else 0.0
-                    bullets.append(f"• {score} — {txt_en} — {c} ({pct:.0%})")
-                rows.append({
-                    "R": r,
-                    "I — J (EN)": "\n".join(bullets),
-                    "Total pairs": total
-                })
-
-            ij_table = pd.DataFrame(rows).sort_values("R").reset_index(drop=True)
-            height = min(900, 120 + 28 * len(ij_table))
-            st.dataframe(
-                ij_table[["R", "I — J (EN)", "Total pairs"]],
-                use_container_width=True,
-                height=height
-            )
-
-# --------- ЕДИНАЯ ТАБЛИЦА ПО УРОКАМ: Aspects+Unknown, Dislike+Unknown, Additional comments ---------
-st.markdown("---")
-st.subheader("Сводная таблица по урокам (S) — Aspects/Dislike/Comments + итоги")
-
-# === Подготовка данных ДЛЯ СВОДНОЙ ТАБЛИЦЫ (самодостаточно) ===
+                key = (score, translate_es_to_en_safe(t))
+                ij_pairs_per_s.setdefault(s, Counter())[key] += 1
 
 # 1) Aspects + Unknown из FR1:E по S
 rows_aspects = []
@@ -1195,6 +1155,7 @@ if not df2_base.empty and {"R","K"}.issubset(df2_base.columns):
 
 # === Формирование сводной таблицы ===
 all_lessons = sorted(set(
+    list(ij_pairs_per_s.keys()) +
     (df_as["S"].unique().tolist() if not df_as.empty else []) +
     list(unknown_per_s.keys()) +
     (df_dis["S"].unique().tolist() if not df_dis.empty else []) +
@@ -1207,7 +1168,24 @@ if not all_lessons:
 else:
     unified_rows = []
     for s in all_lessons:
-        # Aspects + Unknown
+        # ---------- I — J ----------
+        ij_counter = ij_pairs_per_s.get(s, Counter())
+        total_pairs = int(sum(ij_counter.values()))
+        if ij_counter:
+            # сортируем: чаще выше; при равенстве — по убыванию оценки, затем по тексту (EN)
+            ij_items = sorted(
+                ij_counter.items(),
+                key=lambda kv: (-kv[1], -int(kv[0][0]), _safe_text(kv[0][1]).casefold())
+            )
+            ij_bullets = []
+            for (score, txt_en), c in ij_items:
+                pct = (c / total_pairs) if total_pairs else 0.0
+                ij_bullets.append(f"• {score} — {txt_en} — {c} ({pct:.0%})")
+            ij_text = "\n".join(ij_bullets)
+        else:
+            ij_text = ""
+
+        # ---------- Aspects + Unknown ----------
         if not df_as.empty and s in df_as["S"].values:
             cnt_aspects = (df_as[df_as["S"] == s]["aspect_en"]
                            .value_counts()
@@ -1235,7 +1213,7 @@ else:
             if rest_as_unk > 0:
                 aspects_bul.append(f"• … (+{rest_as_unk})")
 
-        # Dislike + Unknown
+        # ---------- Dislike + Unknown ----------
         if not df_dis.empty and s in df_dis["S"].values:
             cnt_dis = (df_dis[df_dis["S"] == s]["aspect_en"]
                        .value_counts()
@@ -1263,7 +1241,7 @@ else:
             if rest_dis_unk > 0:
                 dis_bul.append(f"• … (+{rest_dis_unk})")
 
-        # Comments (EN)
+        # ---------- Comments (EN) ----------
         comm = comments_per_lesson.get(s, Counter())
         total_comm = int(sum(comm.values()))
         if comm:
@@ -1274,10 +1252,13 @@ else:
         else:
             comm_txt = ""
 
+        # ---------- Итоги ----------
         total_all = total_aspects_all + total_dis_all + total_comm
 
         unified_rows.append({
             "S": int(s),
+            "I — J (EN)": ij_text,
+            "Total I–J pairs": total_pairs,
             "Aspects + Unknown (EN)": "\n".join(aspects_bul),
             "Total aspects": total_aspects_all,
             "Dislike + Unknown (EN)": "\n".join(dis_bul),
@@ -1292,6 +1273,7 @@ else:
     st.dataframe(
         unified_table[
             ["S",
+             "I — J (EN)", "Total I–J pairs",
              "Aspects + Unknown (EN)", "Total aspects",
              "Dislike + Unknown (EN)", "Total dislike",
              "Comments (EN)", "Total comments",
