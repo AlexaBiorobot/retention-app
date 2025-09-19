@@ -1251,42 +1251,55 @@ else:
     lessons_sorted = sorted(set(list(df_as["S"].unique()) + list(unknown_per_s.keys())))
 
     for s in lessons_sorted:
+        # агрегат по аспектам
         if not df_as.empty and s in df_as["S"].values:
-            cnt = (df_as[df_as["S"] == s]["aspect_en"]
-                   .value_counts()
-                   .sort_values(ascending=False))
-            total_tpl = int(cnt.sum())
-            parts_text = []
-            for en_name, c in cnt.items():
-                pct = (c / total_tpl) if total_tpl else 0.0
-                parts_text.append(f"• {en_name} — {c} ({pct:.0%})")
-            aspects_text = "\n".join(parts_text)
+            cnt_aspects = (df_as[df_as["S"] == s]["aspect_en"]
+                           .value_counts()
+                           .sort_values(ascending=False))
+            total_aspects = int(cnt_aspects.sum())
         else:
-            aspects_text = ""
-            total_tpl = 0
+            cnt_aspects = pd.Series(dtype=int)
+            total_aspects = 0
 
+        # агрегат по unknown
         unk_counter = unknown_per_s.get(s, Counter())
-        if unk_counter:
-            top_items = unk_counter.most_common(10)
-            rest = sum(unk_counter.values()) - sum(c for _, c in top_items)
-            unk_parts = [f"• {translate_es_to_en(m)} ({c})" for m, c in top_items]
-            if rest > 0:
-                unk_parts.append(f"• … (+{rest})")
-            unknown_text = "\n".join(unk_parts)
-        else:
-            unknown_text = ""
+        total_unknown = int(sum(unk_counter.values()))
+        # можно оставить топ-10, чтобы ячейки не разрастались
+        unk_items = sorted(unk_counter.items(), key=lambda x: (-x[1], translate_es_to_en(x[0])))
+        top_unk = unk_items[:10]
+        rest_unk = total_unknown - sum(c for _, c in top_unk)
 
+        # общий итог для процентов
+        total_all = total_aspects + total_unknown
+        bullets = []
+
+        # сначала — аспекты
+        for en_name, c in cnt_aspects.items():
+            pct = (c / total_all) if total_all else 0.0
+            bullets.append(f"• {en_name} — {c} ({pct:.0%})")
+
+        # затем — unknown (переводим)
+        if top_unk:
+            if bullets:
+                bullets.append("")  # пустая строка как разделитель групп
+            for raw_txt, c in top_unk:
+                txt_en = translate_es_to_en(raw_txt)
+                pct = (c / total_all) if total_all else 0.0
+                bullets.append(f"• {txt_en} — {c} ({pct:.0%})")
+            if rest_unk > 0:
+                bullets.append(f"• … (+{rest_unk})")
+
+        combined_text = "\n".join(bullets)
         lesson_rows.append({
             "S": int(s),
-            "Aspects (EN)": aspects_text,
-            "Unknown (EN)": unknown_text,
-            "Total (templ.)": total_tpl
+            "Aspects + Unknown (EN)": combined_text,
+            "Total mentions": total_all
         })
 
     table = pd.DataFrame(lesson_rows).sort_values("S").reset_index(drop=True)
-    height = min(800, 100 + 28 * len(table))
+    height = min(900, 120 + 28 * len(table))
     st.dataframe(
-        table[["S","Aspects (EN)","Unknown (EN)","Total (templ.)"]],
+        table[["S","Aspects + Unknown (EN)","Total mentions"]],
         use_container_width=True,
         height=height
     )
