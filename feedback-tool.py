@@ -257,16 +257,6 @@ def translate_es_to_en(text: str) -> str:
             pass
     return _naive_translate_es_en(t)
 
-# ---- безопасные обёртки для перевода (чтобы не падать на нестроках) ----
-def _safe_text(v) -> str:
-    return "" if v is None else str(v).strip()
-
-def translate_es_to_en_safe(v) -> str:
-    try:
-        return translate_es_to_en(_safe_text(v))
-    except Exception:
-        return _safe_text(v)
-
 # ===== Dislike-аспекты (из F), со стабильным EN-переводом =====
 DISLIKE_ES_EN = [
     ("Explica mejor el contenido.", "Explain the content better."),
@@ -1081,6 +1071,237 @@ else:
                 height=height
             )
 
+# --------- ЕДИНАЯ ТАБЛИЦА ПО УРОКАМ: Aspects+Unknown, Dislike+Unknown, Additional comments ---------
+st.markdown("---")
+st.subheader("Сводная таблица по урокам (S) — Aspects/Dislike/Comments + итоги")
+
+# === Подготовка данных ДЛЯ СВОДНОЙ ТАБЛИЦЫ (самодостаточно) ===
+
+# 1) Aspects + Unknown из FR1:E по S
+rows_aspects = []
+unknown_per_s = {}
+if not df1_base.empty and {"S","E"}.issubset(df1_base.columns):
+    df_aspects_src = df1_base.copy()
+    if selected_lessons:
+        df_aspects_src["S_num"] = pd.to_numeric(df_aspects_src["S"], errors="coerce")
+        df_aspects_src = df_aspects_src[df_aspects_src["S_num"].isin(selected_lessons)]
+    df_tmp = df_aspects_src[["S","E"]].copy()
+    df_tmp["S"] = pd.to_numeric(df_tmp["S"], errors="coerce")
+    df_tmp = df_tmp.dropna(subset=["S"])
+    df_tmp["S"] = df_tmp["S"].astype(int)
+    for _, rr in df_tmp.iterrows():
+        s_val = int(rr["S"])
+        txt = str(rr["E"] or "").strip()
+        if not txt:
+            continue
+        parts = re.split(r"[;,/\n|]+", txt) if re.search(r"[;,/\n|]", txt) else [txt]
+        for p in parts:
+            p_clean = p.strip()
+            t = _norm(p_clean)
+            if not t:
+                continue
+            matched = False
+            for es_norm, es, en in _ASPECTS_NORM:
+                if t == es_norm or es_norm in t:
+                    rows_aspects.append((s_val, en))
+                    matched = True
+                    break
+            if not matched:
+                unknown_per_s.setdefault(s_val, Counter())[p_clean] += 1
+df_as = (pd.DataFrame(rows_aspects, columns=["S","aspect_en"])
+         if rows_aspects else pd.DataFrame(columns=["S","aspect_en"]))
+
+# 2) Dislike + Unknown из FR1:F по S
+rows_dislike = []
+unknown_dislike_per_s = {}
+if not df1_base.empty and {"S","F"}.issubset(df1_base.columns):
+    df_dislike_src = df1_base.copy()
+    if selected_lessons:
+        df_dislike_src["S_num"] = pd.to_numeric(df_dislike_src["S"], errors="coerce")
+        df_dislike_src = df_dislike_src[df_dislike_src["S_num"].isin(selected_lessons)]
+    df_tmp = df_dislike_src[["S","F"]].copy()
+    df_tmp["S"] = pd.to_numeric(df_tmp["S"], errors="coerce")
+    df_tmp = df_tmp.dropna(subset=["S"])
+    df_tmp["S"] = df_tmp["S"].astype(int)
+    dislike_norm = [(_norm_local(es), en) for es, en in DISLIKE_ES_EN]
+    for _, rr in df_tmp.iterrows():
+        s_val = int(rr["S"])
+        txt = str(rr["F"] or "").strip()
+        if not txt:
+            continue
+        parts = re.split(r"[;,/\n|]+", txt) if re.search(r"[;,/\n|]", txt) else [txt]
+        for p in parts:
+            p_clean = p.strip()
+            t = _norm_local(p_clean)
+            if not t:
+                continue
+            matched = False
+            for es_norm, en in dislike_norm:
+                if t == es_norm or es_norm in t:
+                    rows_dislike.append((s_val, en))
+                    matched = True
+                    break
+            if not matched:
+                unknown_dislike_per_s.setdefault(s_val, Counter())[p_clean] += 1
+df_dis = (pd.DataFrame(rows_dislike, columns=["S","aspect_en"])
+          if rows_dislike else pd.DataFrame(columns=["S","aspect_en"]))
+
+# 3) Additional comments — FR1:H по S + FR2:K по R (кладём в те же S)
+comments_per_lesson = {}
+splitter = re.compile(r"[;\/\n|]+")  # без запятой
+
+# FR1:H
+if not df1_base.empty and {"S","H"}.issubset(df1_base.columns):
+    df_add_1 = df1_base.copy()
+    if selected_lessons:
+        df_add_1["S_num"] = pd.to_numeric(df_add_1["S"], errors="coerce")
+        df_add_1 = df_add_1[df_add_1["S_num"].isin(selected_lessons)]
+    d1 = df_add_1[["S","H"]].copy()
+    d1["S"] = pd.to_numeric(d1["S"], errors="coerce")
+    d1 = d1.dropna(subset=["S"])
+    d1["S"] = d1["S"].astype(int)
+    for _, rr in d1.iterrows():
+        s = int(rr["S"])
+        raw = str(rr["H"] or "").strip()
+        if not raw:
+            continue
+        parts = splitter.split(raw) if splitter.search(raw) else [raw]
+        for p in parts:
+            t = p.strip()
+            if t:
+                comments_per_lesson.setdefault(s, Counter())[t] += 1
+
+# FR2:K по R -> в S с тем же номером
+if not df2_base.empty and {"R","K"}.issubset(df2_base.columns):
+    df_add_2 = df2_base.copy()
+    if selected_lessons:
+        df_add_2["R_num"] = pd.to_numeric(df_add_2["R"], errors="coerce")
+        df_add_2 = df_add_2[df_add_2["R_num"].isin(selected_lessons)]
+    d2 = df_add_2[["R","K"]].copy()
+    d2["R"] = pd.to_numeric(d2["R"], errors="coerce")
+    d2 = d2.dropna(subset=["R"])
+    d2["R"] = d2["R"].astype(int)
+    for _, rr in d2.iterrows():
+        s = int(rr["R"])
+        raw = str(rr["K"] or "").strip()
+        if not raw:
+            continue
+        parts = splitter.split(raw) if splitter.search(raw) else [raw]
+        for p in parts:
+            t = p.strip()
+            if t:
+                comments_per_lesson.setdefault(s, Counter())[t] += 1
+# === Конец подготовки данных ===
+
+# === Формирование сводной таблицы ===
+all_lessons = sorted(set(
+    (df_as["S"].unique().tolist() if not df_as.empty else []) +
+    list(unknown_per_s.keys()) +
+    (df_dis["S"].unique().tolist() if not df_dis.empty else []) +
+    list(unknown_dislike_per_s.keys()) +
+    list(comments_per_lesson.keys())
+))
+
+if not all_lessons:
+    st.info("Нет данных для сводной таблицы по выбранным фильтрам.")
+else:
+    unified_rows = []
+    for s in all_lessons:
+        # Aspects + Unknown
+        if not df_as.empty and s in df_as["S"].values:
+            cnt_aspects = (df_as[df_as["S"] == s]["aspect_en"]
+                           .value_counts()
+                           .sort_values(ascending=False))
+            total_aspects_known = int(cnt_aspects.sum())
+        else:
+            cnt_aspects = pd.Series(dtype=int)
+            total_aspects_known = 0
+
+        unk_as = unknown_per_s.get(s, Counter())
+        total_aspects_unknown = int(sum(unk_as.values()))
+        unk_as_items = sorted(unk_as.items(), key=lambda x: (-x[1], _safe_text(x[0]).casefold()))[:10]
+        rest_as_unk = total_aspects_unknown - sum(c for _, c in unk_as_items)
+        total_aspects_all = total_aspects_known + total_aspects_unknown
+
+        aspects_bul = []
+        for en_name, c in cnt_aspects.items():
+            pct = (c / total_aspects_all) if total_aspects_all else 0.0
+            aspects_bul.append(f"• {en_name} — {c} ({pct:.0%})")
+        if unk_as_items:
+            if aspects_bul: aspects_bul.append("")
+            for raw_txt, c in unk_as_items:
+                pct = (c / total_aspects_all) if total_aspects_all else 0.0
+                aspects_bul.append(f"• {translate_es_to_en_safe(raw_txt)} — {c} ({pct:.0%})")
+            if rest_as_unk > 0:
+                aspects_bul.append(f"• … (+{rest_as_unk})")
+
+        # Dislike + Unknown
+        if not df_dis.empty and s in df_dis["S"].values:
+            cnt_dis = (df_dis[df_dis["S"] == s]["aspect_en"]
+                       .value_counts()
+                       .sort_values(ascending=False))
+            total_dis_known = int(cnt_dis.sum())
+        else:
+            cnt_dis = pd.Series(dtype=int)
+            total_dis_known = 0
+
+        unk_dis = unknown_dislike_per_s.get(s, Counter())
+        total_dis_unknown = int(sum(unk_dis.values()))
+        unk_dis_items = sorted(unk_dis.items(), key=lambda x: (-x[1], _safe_text(x[0]).casefold()))[:10]
+        rest_dis_unk = total_dis_unknown - sum(c for _, c in unk_dis_items)
+        total_dis_all = total_dis_known + total_dis_unknown
+
+        dis_bul = []
+        for en_name, c in cnt_dis.items():
+            pct = (c / total_dis_all) if total_dis_all else 0.0
+            dis_bul.append(f"• {en_name} — {c} ({pct:.0%})")
+        if unk_dis_items:
+            if dis_bul: dis_bul.append("")
+            for raw_txt, c in unk_dis_items:
+                pct = (c / total_dis_all) if total_dis_all else 0.0
+                dis_bul.append(f"• {translate_es_to_en_safe(raw_txt)} — {c} ({pct:.0%})")
+            if rest_dis_unk > 0:
+                dis_bul.append(f"• … (+{rest_dis_unk})")
+
+        # Comments (EN)
+        comm = comments_per_lesson.get(s, Counter())
+        total_comm = int(sum(comm.values()))
+        if comm:
+            comm_items = sorted(comm.items(), key=lambda x: (-x[1], _safe_text(x[0]).casefold()))
+            comm_bul = [f"• {translate_es_to_en_safe(txt)} — {c} ({(c/total_comm if total_comm else 0):.0%})"
+                        for txt, c in comm_items]
+            comm_txt = "\n".join(comm_bul)
+        else:
+            comm_txt = ""
+
+        total_all = total_aspects_all + total_dis_all + total_comm
+
+        unified_rows.append({
+            "S": int(s),
+            "Aspects + Unknown (EN)": "\n".join(aspects_bul),
+            "Total aspects": total_aspects_all,
+            "Dislike + Unknown (EN)": "\n".join(dis_bul),
+            "Total dislike": total_dis_all,
+            "Comments (EN)": comm_txt,
+            "Total comments": total_comm,
+            "Total mentions (all)": total_all,
+        })
+
+    unified_table = pd.DataFrame(unified_rows).sort_values("S").reset_index(drop=True)
+    height = min(1000, 140 + 28 * len(unified_table))
+    st.dataframe(
+        unified_table[
+            ["S",
+             "Aspects + Unknown (EN)", "Total aspects",
+             "Dislike + Unknown (EN)", "Total dislike",
+             "Comments (EN)", "Total comments",
+             "Total mentions (all)"]
+        ],
+        use_container_width=True,
+        height=height
+    )
+
+
 # ---------- НИЖЕ: Аспекты урока — Form Responses 1 ----------
 st.markdown("---")
 st.subheader("Аспекты урока — Form Responses 1")
@@ -1209,101 +1430,6 @@ else:
     
     st.altair_chart(bars_s.properties(height=460), use_container_width=True, theme=None)
 
-# --------- ТАБЛИЦА ВНИЗУ ---------
-st.markdown("---")
-st.subheader("Распределение по урокам (ось X — S) — таблица")
-
-rows_aspects = []
-unknown_per_s = {}
-
-if not df_aspects.empty and {"S","E"}.issubset(df_aspects.columns):
-    df_tmp = df_aspects[["S","E"]].copy()
-    df_tmp["S"] = pd.to_numeric(df_tmp["S"], errors="coerce")
-    df_tmp = df_tmp.dropna(subset=["S"])
-    df_tmp["S"] = df_tmp["S"].astype(int)
-
-    for _, rr in df_tmp.iterrows():
-        s_val = int(rr["S"])
-        txt = str(rr["E"] or "").strip()
-        if not txt:
-            continue
-        parts = re.split(r"[;,/\n|]+", txt) if re.search(r"[;,/\n|]", txt) else [txt]
-        for p in parts:
-            p_clean = p.strip()
-            t = _norm(p_clean)
-            if not t:
-                continue
-            matched = False
-            for es_norm, es, en in _ASPECTS_NORM:
-                if t == es_norm or es_norm in t:
-                    rows_aspects.append((s_val, en))
-                    matched = True
-                    break
-            if not matched:
-                unknown_per_s.setdefault(s_val, Counter())[p_clean] += 1
-
-if not rows_aspects and not unknown_per_s:
-    st.info("Нет данных для выбранных фильтров.")
-else:
-    df_as = (pd.DataFrame(rows_aspects, columns=["S","aspect_en"])
-             if rows_aspects else pd.DataFrame(columns=["S","aspect_en"]))
-    lesson_rows = []
-    lessons_sorted = sorted(set(list(df_as["S"].unique()) + list(unknown_per_s.keys())))
-
-    for s in lessons_sorted:
-        # агрегат по аспектам
-        if not df_as.empty and s in df_as["S"].values:
-            cnt_aspects = (df_as[df_as["S"] == s]["aspect_en"]
-                           .value_counts()
-                           .sort_values(ascending=False))
-            total_aspects = int(cnt_aspects.sum())
-        else:
-            cnt_aspects = pd.Series(dtype=int)
-            total_aspects = 0
-
-        # агрегат по unknown
-        unk_counter = unknown_per_s.get(s, Counter())
-        total_unknown = int(sum(unk_counter.values()))
-        # можно оставить топ-10, чтобы ячейки не разрастались
-        unk_items = sorted(unk_counter.items(), key=lambda x: (-x[1], translate_es_to_en(x[0])))
-        top_unk = unk_items[:10]
-        rest_unk = total_unknown - sum(c for _, c in top_unk)
-
-        # общий итог для процентов
-        total_all = total_aspects + total_unknown
-        bullets = []
-
-        # сначала — аспекты
-        for en_name, c in cnt_aspects.items():
-            pct = (c / total_all) if total_all else 0.0
-            bullets.append(f"• {en_name} — {c} ({pct:.0%})")
-
-        # затем — unknown (переводим)
-        if top_unk:
-            if bullets:
-                bullets.append("")  # пустая строка как разделитель групп
-            for raw_txt, c in top_unk:
-                txt_en = translate_es_to_en(raw_txt)
-                pct = (c / total_all) if total_all else 0.0
-                bullets.append(f"• {txt_en} — {c} ({pct:.0%})")
-            if rest_unk > 0:
-                bullets.append(f"• … (+{rest_unk})")
-
-        combined_text = "\n".join(bullets)
-        lesson_rows.append({
-            "S": int(s),
-            "Aspects + Unknown (EN)": combined_text,
-            "Total mentions": total_all
-        })
-
-    table = pd.DataFrame(lesson_rows).sort_values("S").reset_index(drop=True)
-    height = min(900, 120 + 28 * len(table))
-    st.dataframe(
-        table[["S","Aspects + Unknown (EN)","Total mentions"]],
-        use_container_width=True,
-        height=height
-    )
-
 # Подсказка, если онлайн-переводчик недоступен
 if _gt is None:
     st.caption("⚠️ deep-translator недоступен — используется упрощённый пословный перевод.")
@@ -1431,183 +1557,6 @@ else:
     ).configure_legend(labelLimit=1000, titleLimit=1000)
 
     st.altair_chart(bars_s_dis.properties(height=460), use_container_width=True, theme=None)
-
-# --------- DISLIKE: «Распределение по урокам (ось X — S) — таблица» из F ---------
-st.markdown("---")
-st.subheader("Dislike по урокам (ось X — S) — таблица")
-
-rows_dislike = []
-unknown_dislike_per_s = {}
-
-if not df_dislike_lessons.empty and {"S", "F"}.issubset(df_dislike_lessons.columns):
-    df_tmp = df_dislike_lessons[["S", "F"]].copy()
-    df_tmp["S"] = pd.to_numeric(df_tmp["S"], errors="coerce")
-    df_tmp = df_tmp.dropna(subset=["S"])
-    df_tmp["S"] = df_tmp["S"].astype(int)
-
-    dislike_norm = [(_norm_local(es), en) for es, en in DISLIKE_ES_EN]
-
-    for _, rr in df_tmp.iterrows():
-        s_val = int(rr["S"])
-        txt = str(rr["F"] or "").strip()
-        if not txt:
-            continue
-        parts = re.split(r"[;,/\n|]+", txt) if re.search(r"[;,/\n|]", txt) else [txt]
-        for p in parts:
-            p_clean = p.strip()
-            t = _norm_local(p_clean)
-            if not t:
-                continue
-            matched = False
-            for es_norm, en in dislike_norm:
-                if t == es_norm or es_norm in t:
-                    rows_dislike.append((s_val, en))
-                    matched = True
-                    break
-            if not matched:
-                unknown_dislike_per_s.setdefault(s_val, Counter())[p_clean] += 1
-
-if not rows_dislike and not unknown_dislike_per_s:
-    st.info("Нет данных для таблицы dislike по урокам.")
-else:
-    df_dis = (pd.DataFrame(rows_dislike, columns=["S", "aspect_en"])
-              if rows_dislike else pd.DataFrame(columns=["S", "aspect_en"]))
-    lesson_rows = []
-    lessons_sorted = sorted(set(list(df_dis["S"].unique()) + list(unknown_dislike_per_s.keys())))
-
-    for s in lessons_sorted:
-        # Аспекты (EN)
-        if not df_dis.empty and s in df_dis["S"].values:
-            cnt_aspects = (df_dis[df_dis["S"] == s]["aspect_en"]
-                           .value_counts()
-                           .sort_values(ascending=False))
-            total_aspects = int(cnt_aspects.sum())
-        else:
-            cnt_aspects = pd.Series(dtype=int)
-            total_aspects = 0
-
-        # Unknown (переводим при выводе)
-        unk_counter = unknown_dislike_per_s.get(s, Counter())
-        total_unknown = int(sum(unk_counter.values()))
-        # Оставим топ-10, чтобы не раздувать ячейки
-        unk_items = sorted(unk_counter.items(), key=lambda x: (-x[1], x[0]))[:10]
-        rest_unknown = total_unknown - sum(c for _, c in unk_items)
-
-        total_all = total_aspects + total_unknown
-        bullets = []
-
-        # Сначала — известные аспекты
-        for en_name, c in cnt_aspects.items():
-            pct = (c / total_all) if total_all else 0.0
-            bullets.append(f"• {en_name} — {c} ({pct:.0%})")
-
-        # Затем — Unknown (перевод на EN)
-        if unk_items:
-            if bullets:
-                bullets.append("")  # разделитель
-            for raw_txt, c in unk_items:
-                txt_en = translate_es_to_en(raw_txt)
-                pct = (c / total_all) if total_all else 0.0
-                bullets.append(f"• {txt_en} — {c} ({pct:.0%})")
-            if rest_unknown > 0:
-                bullets.append(f"• … (+{rest_unknown})")
-
-        combined_text = "\n".join(bullets)
-
-        lesson_rows.append({
-            "S": int(s),
-            "Dislike + Unknown (EN)": combined_text,
-            "Total mentions": total_all
-        })
-
-    dislike_table = pd.DataFrame(lesson_rows).sort_values("S").reset_index(drop=True)
-    height = min(900, 120 + 28 * len(dislike_table))
-    st.dataframe(
-        dislike_table[["S", "Dislike + Unknown (EN)", "Total mentions"]],
-        use_container_width=True,
-        height=height
-    )
-
-# --------- Additional comments — объединяем FR1:H (по S) + FR2:K (по R) ---------
-st.markdown("---")
-st.subheader("Additional comments — по урокам (S) (FR1:H + FR2:K)")
-
-# Источники с учётом фильтров
-df_add_1 = df1_base.copy()
-if not df_add_1.empty and selected_lessons:
-    df_add_1["S_num"] = pd.to_numeric(df_add_1["S"], errors="coerce")
-    df_add_1 = df_add_1[df_add_1["S_num"].isin(selected_lessons)]
-
-df_add_2 = df2_base.copy()
-if not df_add_2.empty and selected_lessons:
-    df_add_2["R_num"] = pd.to_numeric(df_add_2["R"], errors="coerce")
-    df_add_2 = df_add_2[df_add_2["R_num"].isin(selected_lessons)]
-
-splitter = re.compile(r"[;\/\n|]+")  # без запятой — чтобы не ломать фразы
-
-comments_per_lesson = {}
-
-# FR1:H по S
-if not df_add_1.empty and {"S","H"}.issubset(df_add_1.columns):
-    d1 = df_add_1[["S","H"]].copy()
-    d1["S"] = pd.to_numeric(d1["S"], errors="coerce")
-    d1 = d1.dropna(subset=["S"])
-    d1["S"] = d1["S"].astype(int)
-    for _, rr in d1.iterrows():
-        s = int(rr["S"])
-        raw = str(rr["H"] or "").strip()
-        if not raw:
-            continue
-        parts = splitter.split(raw) if splitter.search(raw) else [raw]
-        for p in parts:
-            t = p.strip()
-            if t:
-                comments_per_lesson.setdefault(s, Counter())[t] += 1
-
-# FR2:K по R (складываем в те же уроки по номеру)
-if not df_add_2.empty and {"R","K"}.issubset(df_add_2.columns):
-    d2 = df_add_2[["R","K"]].copy()
-    d2["R"] = pd.to_numeric(d2["R"], errors="coerce")
-    d2 = d2.dropna(subset=["R"])
-    d2["R"] = d2["R"].astype(int)
-    for _, rr in d2.iterrows():
-        s = int(rr["R"])  # считаем, что номера уроков S и R — одна шкала
-        raw = str(rr["K"] or "").strip()
-        if not raw:
-            continue
-        parts = splitter.split(raw) if splitter.search(raw) else [raw]
-        for p in parts:
-            t = p.strip()
-            if t:
-                comments_per_lesson.setdefault(s, Counter())[t] += 1
-
-if not comments_per_lesson:
-    st.info("Нет данных для Additional comments по выбранным фильтрам.")
-else:
-    rows = []
-    for s in sorted(comments_per_lesson.keys()):
-        counter = comments_per_lesson[s]
-        total = int(sum(counter.values()))
-        # ---- изменено: безопасная сортировка по переводу
-        items = sorted(counter.items(), key=lambda x: (-x[1], _safe_text(x[0]).casefold()))
-        bullets_en = []
-        for txt, c in items:
-            pct = (c / total) if total else 0.0
-            # ---- изменено: безопасный перевод в выводе
-            bullets_en.append(f"• {translate_es_to_en_safe(txt)} — {c} ({pct:.0%})")
-        rows.append({
-            "S": s,
-            "Comments (EN)": "\n".join(bullets_en),
-            "Total comments": total,
-        })
-
-    add_table = pd.DataFrame(rows).sort_values("S").reset_index(drop=True)
-    height = min(900, 120 + 28 * len(add_table))
-    st.dataframe(
-        add_table[["S", "Comments (EN)", "Total comments"]],
-        use_container_width=True,
-        height=height
-    )
 
 # ---------- FR2: распределения по шаблонным текстам D и E ----------
 st.markdown("---")
