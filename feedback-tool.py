@@ -1476,42 +1476,54 @@ else:
     lessons_sorted = sorted(set(list(df_dis["S"].unique()) + list(unknown_dislike_per_s.keys())))
 
     for s in lessons_sorted:
+        # Аспекты (EN)
         if not df_dis.empty and s in df_dis["S"].values:
-            cnt = (df_dis[df_dis["S"] == s]["aspect_en"]
-                   .value_counts()
-                   .sort_values(ascending=False))
-            total_tpl = int(cnt.sum())
-            parts_text = []
-            for en_name, c in cnt.items():
-                pct = (c / total_tpl) if total_tpl else 0.0
-                parts_text.append(f"• {en_name} — {c} ({pct:.0%})")
-            aspects_text = "\n".join(parts_text)
+            cnt_aspects = (df_dis[df_dis["S"] == s]["aspect_en"]
+                           .value_counts()
+                           .sort_values(ascending=False))
+            total_aspects = int(cnt_aspects.sum())
         else:
-            aspects_text = ""
-            total_tpl = 0
+            cnt_aspects = pd.Series(dtype=int)
+            total_aspects = 0
 
+        # Unknown (переводим при выводе)
         unk_counter = unknown_dislike_per_s.get(s, Counter())
-        if unk_counter:
-            top_items = unk_counter.most_common(10)
-            rest = sum(unk_counter.values()) - sum(c for _, c in top_items)
-            unk_parts = [f"• {translate_es_to_en(m)} ({c})" for m, c in top_items]
-            if rest > 0:
-                unk_parts.append(f"• … (+{rest})")
-            unknown_text = "\n".join(unk_parts)
-        else:
-            unknown_text = ""
+        total_unknown = int(sum(unk_counter.values()))
+        # Оставим топ-10, чтобы не раздувать ячейки
+        unk_items = sorted(unk_counter.items(), key=lambda x: (-x[1], x[0]))[:10]
+        rest_unknown = total_unknown - sum(c for _, c in unk_items)
+
+        total_all = total_aspects + total_unknown
+        bullets = []
+
+        # Сначала — известные аспекты
+        for en_name, c in cnt_aspects.items():
+            pct = (c / total_all) if total_all else 0.0
+            bullets.append(f"• {en_name} — {c} ({pct:.0%})")
+
+        # Затем — Unknown (перевод на EN)
+        if unk_items:
+            if bullets:
+                bullets.append("")  # разделитель
+            for raw_txt, c in unk_items:
+                txt_en = translate_es_to_en(raw_txt)
+                pct = (c / total_all) if total_all else 0.0
+                bullets.append(f"• {txt_en} — {c} ({pct:.0%})")
+            if rest_unknown > 0:
+                bullets.append(f"• … (+{rest_unknown})")
+
+        combined_text = "\n".join(bullets)
 
         lesson_rows.append({
             "S": int(s),
-            "Dislike (EN)": aspects_text,
-            "Unknown (EN)": unknown_text,
-            "Total (templ.)": total_tpl
+            "Dislike + Unknown (EN)": combined_text,
+            "Total mentions": total_all
         })
 
     dislike_table = pd.DataFrame(lesson_rows).sort_values("S").reset_index(drop=True)
-    height = min(800, 100 + 28 * len(dislike_table))
+    height = min(900, 120 + 28 * len(dislike_table))
     st.dataframe(
-        dislike_table[["S", "Dislike (EN)", "Unknown (EN)", "Total (templ.)"]],
+        dislike_table[["S", "Dislike + Unknown (EN)", "Total mentions"]],
         use_container_width=True,
         height=height
     )
