@@ -958,7 +958,7 @@ def _make_percent_stack_by_axis(out_df: pd.DataFrame, axis_col: str, legend_titl
                 tooltip=[
                     alt.Tooltip(f"{axis_col}:O", title="Month"),
                     alt.Tooltip("val_str:N", title=legend_title),
-                    alt.Tooltip("count:Q",  title="Number"),
+                    alt.Tooltip("count:Q",  title="Answers"),
                     alt.Tooltip("pct:Q",    title="% of answers", format=".0%"),
                     alt.Tooltip("total:Q",  title="All answers"),
                 ],
