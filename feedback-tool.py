@@ -882,9 +882,6 @@ with col2:
         )
         st.altair_chart(chart2, use_container_width=True, theme=None)
 
-st.markdown("---")
-st.subheader(f"Распределение значений (гранулярность: {granularity.lower()})")
-
 # ---------- РАСПРЕДЕЛЕНИЕ ПО УРОКАМ (в %) ДЛЯ ТЕХ ЖЕ ШКАЛ ----------
 st.markdown("---")
 st.subheader("Распределение по месяцам (в %) — те же шкалы G (FR1) и I (FR2)")
@@ -1007,6 +1004,9 @@ with right_col:
     else:
         ch_I_M = _make_percent_stack_by_axis(out_I_M, axis_col=AX_FR2, legend_title="I")
         st.altair_chart(ch_I_M.properties(height=460), use_container_width=True, theme=None)
+
+st.markdown("---")
+st.subheader(f"Распределение значений (гранулярность: {granularity.lower()})")
 
 col3, col4 = st.columns([1, 1])
 
