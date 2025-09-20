@@ -736,7 +736,7 @@ st.title("40 week courses")
 
 # ---------- ЕДИНАЯ «РЕАЛИСТИЧНАЯ» ШКАЛА (перцентиль 0–100) ПО УРОКАМ ----------
 st.markdown("---")
-st.subheader("Unified realistic score (percentile 0–100) — by months")
+st.subheader("Unified score (percentile 0–100)")
 
 # Источники под текущие фильтры и по выбранным урокам
 # FR1: берём месяц (AX_FR1="R") и оценку G
@@ -792,15 +792,20 @@ else:
     pad = (ymax - ymin) * 0.1 if ymax > ymin else 2.5
     y_scale_u = alt.Scale(domain=[max(0, ymin - pad), min(100, ymax + pad)], nice=False, clamp=True)
 
+        # ось месяцев строго как целые
+    unified["Month"] = pd.to_numeric(unified["Month"], errors="coerce").astype("Int64")
+    unified = unified.dropna(subset=["Month"]).copy()
+    unified["Month"] = unified["Month"].astype(int)
+
     ch_unified = (
         alt.Chart(unified)
           .mark_line(point=True)
           .encode(
-              x=alt.X("Month:Q", title="Month"),  # <-- новая ось
+              x=alt.X("Month:O", title="Month", sort="ascending"),  # дискретные целые метки
               y=alt.Y("avg_score100:Q", title="Percentile score (0–100)", scale=y_scale_u),
               color=alt.Color("source:N", title="Source"),
               tooltip=[
-                  alt.Tooltip("Month:Q", title="Month"),
+                  alt.Tooltip("Month:O", title="Month"),
                   alt.Tooltip("source:N", title="Source"),
                   alt.Tooltip("avg_score100:Q", title="Avg percentile", format=".1f"),
                   alt.Tooltip("count:Q", title="N"),
