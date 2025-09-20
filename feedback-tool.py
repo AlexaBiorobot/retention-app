@@ -587,6 +587,11 @@ if not df2.empty:
         if col in df2.columns:
             df2[col] = pd.to_numeric(df2[col], errors="coerce")
 
+# === Оси анализа: теперь работаем по МЕСЯЦАМ ===
+AX_FR1 = "R"  # FR1: номер месяца
+AX_FR2 = "Q"  # FR2: номер месяца
+AX_NAME = "Month"
+
 # ==================== ЕДИНЫЕ ФИЛЬТРЫ ====================
 
 st.sidebar.header("Фильтры")
@@ -634,61 +639,64 @@ bar_size = BAR_SIZE.get(granularity, 36)
 df1_base = filter_df(df1, "N", "A", selected_courses, date_range)
 df2_base = filter_df(df2, "M", "A", selected_courses, date_range)
 
-# ---- ЕДИНЫЙ ФИЛЬТР УРОКОВ S/R (union значений S из FR1 и R из FR2) ----
-if not df1_base.empty and "S" in df1_base.columns:
-    s_vals = pd.to_numeric(df1_base["S"], errors="coerce").dropna().astype(int).unique().tolist()
+# ---- ЕДИНЫЙ ФИЛЬТР МЕСЯЦЕВ (union FR1:R и FR2:Q) ----
+if not df1_base.empty and AX_FR1 in df1_base.columns:
+    fr1_vals = pd.to_numeric(df1_base[AX_FR1], errors="coerce").dropna().astype(int).unique().tolist()
 else:
-    s_vals = []
-if not df2_base.empty and "R" in df2_base.columns:
-    r_vals = pd.to_numeric(df2_base["R"], errors="coerce").dropna().astype(int).unique().tolist()
+    fr1_vals = []
+if not df2_base.empty and AX_FR2 in df2_base.columns:
+    fr2_vals = pd.to_numeric(df2_base[AX_FR2], errors="coerce").dropna().astype(int).unique().tolist()
 else:
-    r_vals = []
-lessons_options = sorted(list(set(s_vals + r_vals)))
+    fr2_vals = []
 
-if "s_selected" not in st.session_state:
-    st.session_state["s_selected"] = lessons_options.copy()
+months_options = sorted(list(set(fr1_vals + fr2_vals)))
+
+if "months_selected" not in st.session_state:
+    st.session_state["months_selected"] = months_options.copy()
 
 sb1, sb2 = st.sidebar.columns(2)
-if sb1.button("All S/R"):
-    st.session_state["s_selected"] = lessons_options.copy()
+if sb1.button("All months"):
+    st.session_state["months_selected"] = months_options.copy()
     st.rerun()
-if sb2.button("Clear S/R"):
-    st.session_state["s_selected"] = []
+if sb2.button("Clear months"):
+    st.session_state["months_selected"] = []
     st.rerun()
 
-selected_lessons = st.sidebar.multiselect(
-    "Уроки (S/R)",
-    options=lessons_options,
-    default=st.session_state["s_selected"],
-    key="s_selected",
-    help="Фильтр единый для S (FR1) и R (FR2)"
+selected_months = st.sidebar.multiselect(
+    "Месяцы (FR1:R / FR2:Q)",
+    options=months_options,
+    default=st.session_state["months_selected"],
+    key="months_selected",
+    help="Единый фильтр по номеру месяца"
 )
+
+selected_lessons: list[int] = []
 
 # ==================== ПРИМЕНЕНИЕ ФИЛЬТРОВ ====================
 
 # Верхние графики (средние)
-agg1 = apply_filters_and_aggregate(df1, "N", "A", "S", "G", selected_courses, date_range)
-if not agg1.empty and selected_lessons:
-    agg1["S"] = pd.to_numeric(agg1["S"], errors="coerce").astype("Int64")
-    agg1 = agg1[agg1["S"].isin(selected_lessons)]
-    agg1["S"] = agg1["S"].astype(int)
+agg1 = apply_filters_and_aggregate(df1, "N", "A", AX_FR1, "G", selected_courses, date_range)
+if not agg1.empty and selected_months:
+    agg1[AX_FR1] = pd.to_numeric(agg1[AX_FR1], errors="coerce").astype("Int64")
+    agg1 = agg1[agg1[AX_FR1].isin(selected_months)]
+    agg1[AX_FR1] = agg1[AX_FR1].astype(int)
 
-agg2 = apply_filters_and_aggregate(df2, "M", "A", "R", "I", selected_courses, date_range)
-if not agg2.empty and selected_lessons:
-    agg2["R"] = pd.to_numeric(agg2["R"], errors="coerce").astype("Int64")
-    agg2 = agg2[agg2["R"].isin(selected_lessons)]
-    agg2["R"] = agg2["R"].astype(int)
+agg2 = apply_filters_and_aggregate(df2, "M", "A", AX_FR2, "I", selected_courses, date_range)
+if not agg2.empty and selected_months:
+    agg2[AX_FR2] = pd.to_numeric(agg2[AX_FR2], errors="coerce").astype("Int64")
+    agg2 = agg2[agg2[AX_FR2].isin(selected_months)]
+    agg2[AX_FR2] = agg2[AX_FR2].astype(int)
 
 # Нижние распределения (сырые) + S/R-фильтр
 df1_f = df1_base.copy()
-if not df1_f.empty and selected_lessons:
-    df1_f["S_num"] = pd.to_numeric(df1_f["S"], errors="coerce")
-    df1_f = df1_f[df1_f["S_num"].isin(selected_lessons)]
+if not df1_f.empty and selected_months:
+    df1_f["ax_num"] = pd.to_numeric(df1_f[AX_FR1], errors="coerce")
+    df1_f = df1_f[df1_f["ax_num"].isin(selected_months)]
 
 df2_f = df2_base.copy()
-if not df2_f.empty and selected_lessons:
-    df2_f["R_num"] = pd.to_numeric(df2_f["R"], errors="coerce")
-    df2_f = df2_f[df2_f["R_num"].isin(selected_lessons)]
+if not df2_f.empty and selected_months:
+    df2_f["ax_num"] = pd.to_numeric(df2_f[AX_FR2], errors="coerce")
+    df2_f = df2_f[df2_f["ax_num"].isin(selected_months)]
 
 if not df1_f.empty:
     df1_f = df1_f.dropna(subset=["A", "G"])
@@ -709,57 +717,57 @@ st.title("40 week courses")
 
 # ---------- ЕДИНАЯ «РЕАЛИСТИЧНАЯ» ШКАЛА (перцентиль 0–100) ПО УРОКАМ ----------
 st.markdown("---")
-st.subheader("Unified realistic score (percentile 0–100) — by lessons")
+st.subheader("Unified realistic score (percentile 0–100) — by months")
 
 # Источники под текущие фильтры и по выбранным урокам
-# FR1: берем S и G
+# FR1: берём месяц (AX_FR1="R") и оценку G
 df1_pct = df1_base.copy()
 if not df1_pct.empty:
-    df1_pct["S"] = pd.to_numeric(df1_pct["S"], errors="coerce")
+    df1_pct[AX_FR1] = pd.to_numeric(df1_pct[AX_FR1], errors="coerce")  # R
     df1_pct["G"] = pd.to_numeric(df1_pct["G"], errors="coerce")
-    df1_pct = df1_pct.dropna(subset=["S", "G"])
-    if selected_lessons:
-        df1_pct = df1_pct[df1_pct["S"].astype(int).isin(selected_lessons)]
+    df1_pct = df1_pct.dropna(subset=[AX_FR1, "G"])
+    if selected_months:
+        df1_pct = df1_pct[df1_pct[AX_FR1].astype(int).isin(selected_months)]
     if not df1_pct.empty:
-        df1_pct["S"] = df1_pct["S"].astype(int)
+        df1_pct[AX_FR1] = df1_pct[AX_FR1].astype(int)
         # перцентиль в пределах текущей выборки FR1
         df1_pct["score100"] = _to_percentile_0_100(df1_pct, "G")
-        fr1_u = (df1_pct.groupby("S", as_index=False)
+        fr1_u = (df1_pct.groupby(AX_FR1, as_index=False)
                           .agg(avg_score100=("score100","mean"),
                                count=("score100","size"))
+                          .rename(columns={AX_FR1: "Month"})   # ключевой момент: ось назовём "Month"
                           .assign(source="FR1 (G)"))
     else:
-        fr1_u = pd.DataFrame(columns=["S","avg_score100","count","source"])
+        fr1_u = pd.DataFrame(columns=["Month","avg_score100","count","source"])
 else:
-    fr1_u = pd.DataFrame(columns=["S","avg_score100","count","source"])
+    fr1_u = pd.DataFrame(columns=["Month","avg_score100","count","source"])
 
-# FR2: берем R и I
+# FR2: берём месяц (AX_FR2="Q") и оценку I
 df2_pct = df2_base.copy()
 if not df2_pct.empty:
-    df2_pct["R"] = pd.to_numeric(df2_pct["R"], errors="coerce")
+    df2_pct[AX_FR2] = pd.to_numeric(df2_pct[AX_FR2], errors="coerce")  # Q
     df2_pct["I"] = pd.to_numeric(df2_pct["I"], errors="coerce")
-    df2_pct = df2_pct.dropna(subset=["R", "I"])
-    if selected_lessons:
-        df2_pct = df2_pct[df2_pct["R"].astype(int).isin(selected_lessons)]
+    df2_pct = df2_pct.dropna(subset=[AX_FR2, "I"])
+    if selected_months:
+        df2_pct = df2_pct[df2_pct[AX_FR2].astype(int).isin(selected_months)]
     if not df2_pct.empty:
-        df2_pct["R"] = df2_pct["R"].astype(int)
+        df2_pct[AX_FR2] = df2_pct[AX_FR2].astype(int)
         df2_pct["score100"] = _to_percentile_0_100(df2_pct, "I")
-        fr2_u = (df2_pct.groupby("R", as_index=False)
+        fr2_u = (df2_pct.groupby(AX_FR2, as_index=False)
                           .agg(avg_score100=("score100","mean"),
                                count=("score100","size"))
-                          .rename(columns={"R":"S"})  # приводим к общей оси "S" для склейки
+                          .rename(columns={AX_FR2: "Month"})   # приводим к общей оси "Month"
                           .assign(source="FR2 (I)"))
     else:
-        fr2_u = pd.DataFrame(columns=["S","avg_score100","count","source"])
+        fr2_u = pd.DataFrame(columns=["Month","avg_score100","count","source"])
 else:
-    fr2_u = pd.DataFrame(columns=["S","avg_score100","count","source"])
+    fr2_u = pd.DataFrame(columns=["Month","avg_score100","count","source"])
 
 unified = pd.concat([fr1_u, fr2_u], ignore_index=True)
 
 if unified.empty:
     st.info("Нет данных для объединённой шкалы (перцентиль 0–100) при текущих фильтрах.")
 else:
-    # аккуратный диапазон Y
     ymin = float(unified["avg_score100"].min())
     ymax = float(unified["avg_score100"].max())
     pad = (ymax - ymin) * 0.1 if ymax > ymin else 2.5
@@ -769,11 +777,11 @@ else:
         alt.Chart(unified)
           .mark_line(point=True)
           .encode(
-              x=alt.X("S:Q", title="Lesson (S/R)"),
+              x=alt.X("Month:Q", title="Month"),  # <-- новая ось
               y=alt.Y("avg_score100:Q", title="Percentile score (0–100)", scale=y_scale_u),
               color=alt.Color("source:N", title="Source"),
               tooltip=[
-                  alt.Tooltip("S:Q", title="Lesson"),
+                  alt.Tooltip("Month:Q", title="Month"),
                   alt.Tooltip("source:N", title="Source"),
                   alt.Tooltip("avg_score100:Q", title="Avg percentile", format=".1f"),
                   alt.Tooltip("count:Q", title="N"),
@@ -786,7 +794,7 @@ else:
 col1, col2 = st.columns([1, 1])
 
 with col1:
-    st.subheader("Form Responses 1 — Average by S")
+    st.subheader("Form Responses 1 — Average by month (R)")
     if agg1.empty:
         st.info("Нет данных для выбранных фильтров.")
     else:
@@ -798,10 +806,10 @@ with col1:
         chart1 = (
             alt.Chart(agg1).mark_line(point=True)
               .encode(
-                  x=alt.X("S:Q", title="S"),
+                  x=alt.X(f"{AX_FR1}:Q", title="Month (R)"),
                   y=alt.Y("avg_y:Q", title="Average G", scale=y_scale),
                   tooltip=[
-                      alt.Tooltip("S:Q", title="S"),
+                      alt.Tooltip(f"{AX_FR1}:Q", title="Month (R)"),
                       alt.Tooltip("avg_y:Q", title="Average G", format=".2f"),
                       alt.Tooltip("count:Q", title="Кол-во ответов")
                   ])
@@ -810,7 +818,7 @@ with col1:
         st.altair_chart(chart1, use_container_width=True, theme=None)
 
 with col2:
-    st.subheader("Form Responses 2 — Average by R")
+    st.subheader("Form Responses 2 — Average by month (Q)")
     if agg2.empty:
         st.info("Нет данных для выбранных фильтров.")
     else:
@@ -822,10 +830,10 @@ with col2:
         chart2 = (
             alt.Chart(agg2).mark_line(point=True)
               .encode(
-                  x=alt.X("R:Q", title="R"),
+                  x=alt.X(f"{AX_FR2}:Q", title="Month (Q)"),
                   y=alt.Y("avg_y:Q", title="Average I", scale=y_scale2),
                   tooltip=[
-                      alt.Tooltip("R:Q", title="R"),
+                      alt.Tooltip(f"{AX_FR2}:Q", title="Month (Q)"),
                       alt.Tooltip("avg_y:Q", title="Average I", format=".2f"),
                       alt.Tooltip("count:Q", title="Кол-во ответов")
                   ])
@@ -884,7 +892,9 @@ with col4:
 
 # ---------- РАСПРЕДЕЛЕНИЕ ПО УРОКАМ (в %) ДЛЯ ТЕХ ЖЕ ШКАЛ ----------
 st.markdown("---")
-st.subheader("Распределение по урокам (в %) — те же шкалы G (FR1) и I (FR2)")
+st.subheader("Распределение по месяцам (в %) — те же шкалы G (FR1) и I (FR2)")
+AX_FR1 = "R"  # месяц в FR1
+AX_FR2 = "Q"  # месяц в FR2
 
 def _build_numeric_counts_by_axis(df_src: pd.DataFrame, axis_col: str, val_col: str, allowed_vals: list[int] | None):
     """
@@ -919,8 +929,8 @@ def _build_numeric_counts_by_axis(df_src: pd.DataFrame, axis_col: str, val_col: 
 
 def _make_percent_stack_by_axis(out_df: pd.DataFrame, axis_col: str, legend_title: str):
     """
-    Рисует нормированный стек 0–100% по оси axis_col (S/R).
-    Верхние слои — бОльшие значения шкалы (10 сверху, 1 снизу и т.п.).
+    Рисует нормированный стек 0–100% по оси axis_col (месяц: R или Q).
+    Верхние слои — бОльшие значения шкалы.
     """
     if out_df.empty:
         return None
@@ -932,15 +942,13 @@ def _make_percent_stack_by_axis(out_df: pd.DataFrame, axis_col: str, legend_titl
     chart = (
         base.mark_bar(size=28, stroke=None, strokeWidth=0)
             .encode(
-                x=alt.X(f"{axis_col}:O", title=axis_col, sort=axis_order),
+                x=alt.X(f"{axis_col}:O", title="Месяц", sort=axis_order),
                 y=alt.Y(
                     "count:Q",
                     stack="normalize",
                     axis=alt.Axis(format="%", title="% от ответов"),
                     scale=alt.Scale(domain=[0, 1], nice=False, clamp=True),
                 ),
-                # ⬇️ сортировка легенды/цвета по ЧИСЛОВОМУ полю val (по убыванию),
-                # даже если цвет рисуется по val_str
                 color=alt.Color(
                     "val_str:N",
                     title=legend_title,
@@ -954,14 +962,13 @@ def _make_percent_stack_by_axis(out_df: pd.DataFrame, axis_col: str, legend_titl
                         symbolType="square",
                     ),
                 ),
-                # ⬇️ ключ: порядок слоёв стека — по убыванию val
                 order=alt.Order("val:Q", sort="ascending"),
                 tooltip=[
-                    alt.Tooltip(f"{axis_col}:O", title=("Урок (R)" if axis_col=="R" else "Урок (S)")),
+                    alt.Tooltip(f"{axis_col}:O", title="Месяц"),
                     alt.Tooltip("val_str:N", title=legend_title),
                     alt.Tooltip("count:Q",  title="Кол-во"),
                     alt.Tooltip("pct:Q",    title="Доля", format=".0%"),
-                    alt.Tooltip("total:Q",  title="Всего по уроку"),
+                    alt.Tooltip("total:Q",  title="Всего по месяцу"),
                 ],
             )
     ).configure_legend(labelLimit=1000, titleLimit=1000)
@@ -970,37 +977,41 @@ def _make_percent_stack_by_axis(out_df: pd.DataFrame, axis_col: str, legend_titl
 
 
 # Источники с учётом текущих фильтров курсов/дат/уроков
-# ЛЕВЫЙ: FR2 (I по R)
-df2_lessons_I = df2_base.copy()
-if not df2_lessons_I.empty and selected_lessons:
-    df2_lessons_I["R_num"] = pd.to_numeric(df2_lessons_I["R"], errors="coerce")
-    df2_lessons_I = df2_lessons_I[df2_lessons_I["R_num"].isin(selected_lessons)]
+# ЛЕВЫЙ: FR1 — G по месяцам (R)
+df1_months_G = df1_base.copy()
+if not df1_months_G.empty and selected_months:
+    df1_months_G[AX_FR1 + "_num"] = pd.to_numeric(df1_months_G[AX_FR1], errors="coerce")  # R
+    df1_months_G = df1_months_G[df1_months_G[AX_FR1 + "_num"].isin(selected_months)]
 
-# ПРАВЫЙ: FR1 (G по S)
-df1_lessons_G = df1_base.copy()
-if not df1_lessons_G.empty and selected_lessons:
-    df1_lessons_G["S_num"] = pd.to_numeric(df1_lessons_G["S"], errors="coerce")
-    df1_lessons_G = df1_lessons_G[df1_lessons_G["S_num"].isin(selected_lessons)]
+# ПРАВЫЙ: FR2 — I по месяцам (Q)
+df2_months_I = df2_base.copy()
+if not df2_months_I.empty and selected_months:
+    df2_months_I[AX_FR2 + "_num"] = pd.to_numeric(df2_months_I[AX_FR2], errors="coerce")  # Q
+    df2_months_I = df2_months_I[df2_months_I[AX_FR2 + "_num"].isin(selected_months)]
 
 left_col, right_col = st.columns(2)
 
 with left_col:
-    st.markdown("**FR1 — по урокам (S) — G (в %)**")
-    out_G_S = _build_numeric_counts_by_axis(df1_lessons_G, axis_col="S", val_col="G", allowed_vals=[1,2,3,4,5])
-    if out_G_S.empty:
+    st.markdown("**FR1 — по месяцам (R) — G (в %)**")
+    out_G_M = _build_numeric_counts_by_axis(
+        df1_months_G, axis_col=AX_FR1, val_col="G", allowed_vals=[1,2,3,4,5]
+    )
+    if out_G_M.empty:
         st.info("Нет данных по G (FR1) для выбранных фильтров.")
     else:
-        ch_G_S = _make_percent_stack_by_axis(out_G_S, axis_col="S", legend_title="G")
-        st.altair_chart(ch_G_S.properties(height=460), use_container_width=True, theme=None)
+        ch_G_M = _make_percent_stack_by_axis(out_G_M, axis_col=AX_FR1, legend_title="G")
+        st.altair_chart(ch_G_M.properties(height=460), use_container_width=True, theme=None)
 
 with right_col:
-    st.markdown("**FR2 — по урокам (R) — I (в %)**")
-    out_I_R = _build_numeric_counts_by_axis(df2_lessons_I, axis_col="R", val_col="I", allowed_vals=list(range(1, 11)))
-    if out_I_R.empty:
+    st.markdown("**FR2 — по месяцам (Q) — I (в %)**")
+    out_I_M = _build_numeric_counts_by_axis(
+        df2_months_I, axis_col=AX_FR2, val_col="I", allowed_vals=list(range(1, 11))
+    )
+    if out_I_M.empty:
         st.info("Нет данных по I (FR2) для выбранных фильтров.")
     else:
-        ch_I_R = _make_percent_stack_by_axis(out_I_R, axis_col="R", legend_title="I")
-        st.altair_chart(ch_I_R.properties(height=460), use_container_width=True, theme=None)
+        ch_I_M = _make_percent_stack_by_axis(out_I_M, axis_col=AX_FR2, legend_title="I")
+        st.altair_chart(ch_I_M.properties(height=460), use_container_width=True, theme=None)
 
 # --------- ЕДИНАЯ ТАБЛИЦА ПО УРОКАМ: I–J + Aspects+Unknown, Dislike+Unknown, Additional comments ---------
 st.markdown("---")
@@ -1555,7 +1566,17 @@ def _apply_r_filter(df_src: pd.DataFrame) -> pd.DataFrame:
         return d
     return df_src
 
-df2_text_src = _apply_r_filter(df2_base)
+def _apply_q_filter(df_src: pd.DataFrame) -> pd.DataFrame:
+    if df_src.empty or "Q" not in df_src.columns:
+        return df_src
+    if selected_months:
+        d = df_src.copy()
+        d["Q_num"] = pd.to_numeric(d["Q"], errors="coerce")
+        d = d[d["Q_num"].isin(selected_months)]
+        return d
+    return df_src
+
+df2_text_src = _apply_q_filter(df2_base)
 
 colD, colE = st.columns(2)
 
@@ -1649,101 +1670,122 @@ with colE:
 
 # --------- FR2: по урокам (ось X — R) — графики в % по D и E ---------
 st.markdown("---")
-st.subheader("FR2 — распределение по урокам (ось X — R) — графики (в %)")
+st.subheader("FR2 — распределение по месяцам (ось X — Q) — графики (в %)")
 
-# Источник — df2_base + фильтр по выбранным урокам (R)
-df2_lessons = df2_base.copy()
-if not df2_lessons.empty and selected_lessons:
-    df2_lessons["R_num"] = pd.to_numeric(df2_lessons["R"], errors="coerce")
-    df2_lessons = df2_lessons[df2_lessons["R_num"].isin(selected_lessons)]
+# Источник — df2_base + фильтр по выбранным месяцам (Q)
+df2_months = df2_base.copy()
+if not df2_months.empty and selected_months:
+    df2_months["Q_num"] = pd.to_numeric(df2_months["Q"], errors="coerce")
+    df2_months = df2_months[df2_months["Q_num"].isin(selected_months)]
 
 col_left, col_right = st.columns(2)
 
 with col_left:
-    st.markdown("**FR2 — по D (шаблоны), % внутри R**")
-    cnt_by_r_D = build_template_counts_by_R(df2_lessons, text_col="D", templates_es_en=FR2_D_TEMPL_ES_EN)
-    if cnt_by_r_D.empty:
+    st.markdown("**FR2 — по D (шаблоны), % внутри месяца (Q)**")
+    if df2_months.empty:
         st.info("Нет данных для графика по D.")
     else:
-        legend_domain_D = [en for _, en in FR2_D_TEMPL_ES_EN]
-        base_D = (
-            alt.Chart(cnt_by_r_D)
-              .transform_aggregate(count='sum(count)', groupby=['R', 'templ_en'])
-              .transform_joinaggregate(total='sum(count)', groupby=['R'])
-              .transform_calculate(pct='datum.count / datum.total')
-        )
-        bars_D = (
-            base_D.mark_bar(size=28, stroke=None, strokeWidth=0)
-              .encode(
-                  x=alt.X("R:O", title="R", sort="ascending"),
-                  y=alt.Y("count:Q",
-                          stack="normalize",
-                          axis=alt.Axis(format="%", title="% от упоминаний"),
-                          scale=alt.Scale(domain=[0, 1], nice=False, clamp=True)),
-                  color=alt.Color(
-                      "templ_en:N",
-                      title="Template (EN)",
-                      scale=alt.Scale(domain=legend_domain_D),
-                      legend=alt.Legend(
-                          orient="bottom", direction="horizontal", columns=2,
-                          labelLimit=1000, titleLimit=1000, symbolType="square"
+        dfD = df2_months.copy()
+        dfD["R"] = pd.to_numeric(dfD["Q"], errors="coerce")  # временно переименовали ось
+        cnt_by_m_D = build_template_counts_by_R(dfD, text_col="D", templates_es_en=FR2_D_TEMPL_ES_EN)
+        if cnt_by_m_D.empty:
+            st.info("Нет данных для графика по D.")
+        else:
+            legend_domain_D = [en for _, en in FR2_D_TEMPL_ES_EN]
+            base_D = (
+                alt.Chart(cnt_by_m_D)
+                  .transform_aggregate(count='sum(count)', groupby=['R', 'templ_en'])
+                  .transform_joinaggregate(total='sum(count)', groupby=['R'])
+                  .transform_calculate(pct='datum.count / datum.total')
+            )
+            bars_D = (
+                base_D.mark_bar(size=28, stroke=None, strokeWidth=0)
+                  .encode(
+                      x=alt.X("R:O", title="Месяц", sort="ascending"),
+                      y=alt.Y("count:Q",
+                              stack="normalize",
+                              axis=alt.Axis(format="%", title="% от упоминаний"),
+                              scale=alt.Scale(domain=[0, 1], nice=False, clamp=True)),
+                      color=alt.Color(
+                          "templ_en:N",
+                          title="Template (EN)",
+                          scale=alt.Scale(domain=legend_domain_D),
+                          legend=alt.Legend(
+                              orient="bottom", direction="horizontal", columns=2,
+                              labelLimit=1000, titleLimit=1000, symbolType="square"
+                          ),
                       ),
-                  ),
-                  tooltip=[
-                      alt.Tooltip("R:O", title="Урок"),
-                      alt.Tooltip("templ_en:N", title="Шаблон"),
-                      alt.Tooltip("count:Q", title="Кол-во"),
-                      alt.Tooltip("pct:Q", title="Доля", format=".0%"),
-                      alt.Tooltip("total:Q", title="Всего по уроку"),
-                  ],
-              )
-        ).configure_legend(labelLimit=1000, titleLimit=1000)
-        st.altair_chart(bars_D.properties(height=420), use_container_width=True, theme=None)
+                      tooltip=[
+                          alt.Tooltip("R:O", title="Месяц"),
+                          alt.Tooltip("templ_en:N", title="Шаблон"),
+                          alt.Tooltip("count:Q", title="Кол-во"),
+                          alt.Tooltip("pct:Q", title="Доля", format=".0%"),
+                          alt.Tooltip("total:Q", title="Всего по месяцу"),
+                      ],
+                  )
+            ).configure_legend(labelLimit=1000, titleLimit=1000)
+            st.altair_chart(bars_D.properties(height=420), use_container_width=True, theme=None)
 
 with col_right:
-    st.markdown("**FR2 — по E (шаблоны), % внутри R**")
-    cnt_by_r_E = build_template_counts_by_R(df2_lessons, text_col="E", templates_es_en=FR2_E_TEMPL_ES_EN)
-    if cnt_by_r_E.empty:
+    st.markdown("**FR2 — по E (шаблоны), % внутри месяца (Q)**")
+    if df2_months.empty:
         st.info("Нет данных для графика по E.")
     else:
-        legend_domain_E = [en for _, en in FR2_E_TEMPL_ES_EN]
-        base_E = (
-            alt.Chart(cnt_by_r_E)
-              .transform_aggregate(count='sum(count)', groupby=['R', 'templ_en'])
-              .transform_joinaggregate(total='sum(count)', groupby=['R'])
-              .transform_calculate(pct='datum.count / datum.total')
-        )
-        bars_E = (
-            base_E.mark_bar(size=28, stroke=None, strokeWidth=0)
-              .encode(
-                  x=alt.X("R:O", title="R", sort="ascending"),
-                  y=alt.Y("count:Q",
-                          stack="normalize",
-                          axis=alt.Axis(format="%", title="% от упоминаний"),
-                          scale=alt.Scale(domain=[0, 1], nice=False, clamp=True)),
-                  color=alt.Color(
-                      "templ_en:N",
-                      title="Template (EN)",
-                      scale=alt.Scale(domain=legend_domain_E),
-                      legend=alt.Legend(
-                          orient="bottom", direction="horizontal", columns=2,
-                          labelLimit=1000, titleLimit=1000, symbolType="square"
+        dfE = df2_months.copy()
+        dfE["R"] = pd.to_numeric(dfE["Q"], errors="coerce")  # временно переименовали ось
+        cnt_by_m_E = build_template_counts_by_R(dfE, text_col="E", templates_es_en=FR2_E_TEMPL_ES_EN)
+        if cnt_by_m_E.empty:
+            st.info("Нет данных для графика по E.")
+        else:
+            legend_domain_E = [en for _, en in FR2_E_TEMPL_ES_EN]
+            base_E = (
+                alt.Chart(cnt_by_m_E)
+                  .transform_aggregate(count='sum(count)', groupby=['R', 'templ_en'])
+                  .transform_joinaggregate(total='sum(count)', groupby=['R'])
+                  .transform_calculate(pct='datum.count / datum.total')
+            )
+            bars_E = (
+                base_E.mark_bar(size=28, stroke=None, strokeWidth=0)
+                  .encode(
+                      x=alt.X("R:O", title="Месяц", sort="ascending"),
+                      y=alt.Y("count:Q",
+                              stack="normalize",
+                              axis=alt.Axis(format="%", title="% от упоминаний"),
+                              scale=alt.Scale(domain=[0, 1], nice=False, clamp=True)),
+                      color=alt.Color(
+                          "templ_en:N",
+                          title="Template (EN)",
+                          scale=alt.Scale(domain=legend_domain_E),
+                          legend=alt.Legend(
+                              orient="bottom", direction="horizontal", columns=2,
+                              labelLimit=1000, titleLimit=1000, symbolType="square"
+                          ),
                       ),
-                  ),
-                  tooltip=[
-                      alt.Tooltip("R:O", title="Урок"),
-                      alt.Tooltip("templ_en:N", title="Шаблон"),
-                      alt.Tooltip("count:Q", title="Кол-во"),
-                      alt.Tooltip("pct:Q", title="Доля", format=".0%"),
-                      alt.Tooltip("total:Q", title="Всего по уроку"),
-                  ],
-              )
-        ).configure_legend(labelLimit=1000, titleLimit=1000)
-        st.altair_chart(bars_E.properties(height=420), use_container_width=True, theme=None)
+                      tooltip=[
+                          alt.Tooltip("R:O", title="Месяц"),
+                          alt.Tooltip("templ_en:N", title="Шаблон"),
+                          alt.Tooltip("count:Q", title="Кол-во"),
+                          alt.Tooltip("pct:Q", title="Доля", format=".0%"),
+                          alt.Tooltip("total:Q", title="Всего по месяцу"),
+                      ],
+                  )
+            ).configure_legend(labelLimit=1000, titleLimit=1000)
+            st.altair_chart(bars_E.properties(height=420), use_container_width=True, theme=None)
 
 # --------- FR2: три графика "Average by R" по колонкам F, G, H ---------
 st.markdown("---")
-st.subheader("Form Responses 2 — Averages by R (F, G, H)")
+st.subheader("Form Responses 2 — Averages by month (Q): F, G, H")
+
+# Источник — df2_base + фильтр по выбранным месяцам (Q)
+df2_months_avg = df2_base.copy()
+if not df2_months_avg.empty and selected_months:
+    df2_months_avg["Q_num"] = pd.to_numeric(df2_months_avg["Q"], errors="coerce")
+    df2_months_avg = df2_months_avg[df2_months_avg["Q_num"].isin(selected_months)]
+
+# временно создаём ось R из Q, чтобы переиспользовать _avg_by_r
+df2_avg_src = df2_months_avg.copy()
+if not df2_avg_src.empty:
+    df2_avg_src["R"] = pd.to_numeric(df2_avg_src["Q"], errors="coerce")
 
 def _avg_by_r(df_src: pd.DataFrame, y_col: str) -> pd.DataFrame:
     """Агрегация среднего по колонке y_col с учётом выбранных курсов/дат/уроков (R)."""
@@ -1765,9 +1807,9 @@ def _avg_by_r(df_src: pd.DataFrame, y_col: str) -> pd.DataFrame:
     out["R"] = out["R"].astype(int)
     return out
 
-aggF = _avg_by_r(df2_base, "F") if "F" in df2.columns else pd.DataFrame()
-aggG_2 = _avg_by_r(df2_base, "G") if "G" in df2.columns else pd.DataFrame()
-aggH = _avg_by_r(df2_base, "H") if "H" in df2.columns else pd.DataFrame()
+aggF  = _avg_by_r(df2_avg_src, "F") if ("F" in df2.columns and not df2_avg_src.empty) else pd.DataFrame()
+aggG_2 = _avg_by_r(df2_avg_src, "G") if ("G" in df2.columns and not df2_avg_src.empty) else pd.DataFrame()
+aggH  = _avg_by_r(df2_avg_src, "H") if ("H" in df2.columns and not df2_avg_src.empty) else pd.DataFrame()
 
 colF, colG2, colH = st.columns(3)
 
@@ -1782,7 +1824,7 @@ def _make_avg_chart(df_avg: pd.DataFrame, title_y: str):
         alt.Chart(df_avg)
           .mark_line(point=True)
           .encode(
-              x=alt.X("R:Q", title="R"),
+              x=alt.X("R:Q", title="Month (Q)"),
               y=alt.Y("avg_y:Q", title=title_y, scale=y_scale),
               tooltip=[
                   alt.Tooltip("R:Q", title="R"),
@@ -1795,15 +1837,15 @@ def _make_avg_chart(df_avg: pd.DataFrame, title_y: str):
     st.altair_chart(chart, use_container_width=True, theme=None)
 
 with colF:
-    st.markdown("**FR2 — Average F by R**")
+    st.markdown("**FR2 — Average F by month**")
     _make_avg_chart(aggF, "Average F")
 
 with colG2:
-    st.markdown("**FR2 — Average G by R**")
+    st.markdown("**FR2 — Average G by month**")
     _make_avg_chart(aggG_2, "Average G")
 
 with colH:
-    st.markdown("**FR2 — Average H by R**")
+    st.markdown("**FR2 — Average H by month**")
     _make_avg_chart(aggH, "Average H")
 
 # ---------- FR2: распределения по F / G / H (по типу "Распределение значений") ----------
@@ -1838,8 +1880,8 @@ def _prep_df2_numeric_dist(df_src: pd.DataFrame, value_col: str, granularity: st
     out, bucket_order, val_order, title = prep_distribution(d, value_col, allowed_values, value_col)
     return out, bucket_order, val_order, title
 
-# источник с учётом фильтра по урокам (R)
-df2_numeric_src = _apply_r_filter(df2_base)
+# источник с учётом фильтра по месяцам (Q)
+df2_numeric_src = _apply_q_filter(df2_base)
 
 cF, cG, cH = st.columns(3)
 
@@ -1917,7 +1959,66 @@ with cH:
 
 # ---------- FR2: по урокам (ось X — R) — графики (в %) для F / G / H ----------
 st.markdown("---")
-st.subheader("Form Responses 2 — по урокам (ось X — R) — графики (в %)")
+st.subheader("Form Responses 2 — по месяцам (ось X — Q) — графики (в %)")
+
+def _build_numeric_counts_by_Q(df_src: pd.DataFrame, value_col: str) -> pd.DataFrame:
+    """
+    Считает частоты целых значений шкалы в колонке value_col
+    внутри каждого месяца Q. Возвращает: Q, val, val_str, count, total.
+    """
+    if df_src.empty or value_col not in df_src.columns or "Q" not in df_src.columns:
+        return pd.DataFrame(columns=["Q","val","val_str","count","total"])
+
+    d = df_src.copy()
+    d["Q"] = pd.to_numeric(d["Q"], errors="coerce")
+    d[value_col] = pd.to_numeric(d[value_col], errors="coerce")
+    d = d.dropna(subset=["Q", value_col])
+    if d.empty:
+        return pd.DataFrame(columns=["Q","val","val_str","count","total"])
+
+    d["Q"] = d["Q"].astype(int)
+    d["val"] = d[value_col].astype(int)
+    d["val_str"] = d["val"].astype(str)
+
+    grp = (d.groupby(["Q","val","val_str"], as_index=False)
+             .size().rename(columns={"size":"count"}))
+    totals = (grp.groupby("Q", as_index=False)["count"]
+                .sum().rename(columns={"count":"total"}))
+    out = grp.merge(totals, on="Q", how="left")
+    return out
+
+def _make_percent_stack_by_Q(out_df: pd.DataFrame, legend_title: str):
+    """Нормированный стек 0–100% по Q (месяцы), верх = большие значения шкалы."""
+    if out_df.empty:
+        return None
+    q_order = sorted(out_df["Q"].unique().tolist())
+    base = alt.Chart(out_df).transform_calculate(pct='datum.count / datum.total')
+    chart = (
+        base.mark_bar(size=28, stroke=None, strokeWidth=0)
+            .encode(
+                x=alt.X("Q:O", title="Q (month #)", sort=q_order),
+                y=alt.Y("count:Q",
+                        stack="normalize",
+                        axis=alt.Axis(format="%", title="% от ответов"),
+                        scale=alt.Scale(domain=[0, 1], nice=False, clamp=True)),
+                color=alt.Color(
+                    "val_str:N",
+                    title=legend_title,
+                    sort=alt.SortField(field="val", order="ascending"),
+                    legend=alt.Legend(
+                        orient="bottom", direction="horizontal",
+                        columns=3, labelLimit=1000, titleLimit=1000, symbolType="square")),
+                order=alt.Order("val:Q", sort="ascending"),
+                tooltip=[
+                    alt.Tooltip("Q:O", title="Месяц (Q)"),
+                    alt.Tooltip("val_str:N", title=legend_title),
+                    alt.Tooltip("count:Q", title="Кол-во"),
+                    alt.Tooltip("pct:Q", title="Доля", format=".0%"),
+                    alt.Tooltip("total:Q", title="Всего по месяцу"),
+                ],
+            )
+    ).configure_legend(labelLimit=1000, titleLimit=1000)
+    return chart
 
 def _build_numeric_counts_by_R(df_src: pd.DataFrame, value_col: str) -> pd.DataFrame:
     """
@@ -1994,35 +2095,35 @@ def _make_percent_stack_by_R(out_df: pd.DataFrame, legend_title: str):
 
     return chart
 
-# источник с учётом фильтра по урокам (R)
-df2_lessons_src = _apply_r_filter(df2_base)
+# источник с учётом фильтра по месяцам (Q)
+df2_lessons_src = _apply_q_filter(df2_base)  # функция из п.9.1
 
 cF2, cG2, cH2 = st.columns(3)
 
 with cF2:
-    st.markdown("**FR2 — по урокам (R) — F (в %)**")
-    outF_R = _build_numeric_counts_by_R(df2_lessons_src, "F")
-    if outF_R.empty:
+    st.markdown("**FR2 — по месяцам (Q) — F (в %)**")
+    outF_Q = _build_numeric_counts_by_Q(df2_lessons_src, "F")
+    if outF_Q.empty:
         st.info("Нет данных по F для выбранных фильтров.")
     else:
-        chF_R = _make_percent_stack_by_R(outF_R, "F")
-        st.altair_chart(chF_R.properties(height=460), use_container_width=True, theme=None)
+        chF_Q = _make_percent_stack_by_Q(outF_Q, "F")
+        st.altair_chart(chF_Q.properties(height=460), use_container_width=True, theme=None)
 
 with cG2:
-    st.markdown("**FR2 — по урокам (R) — G (в %)**")
-    outG_R = _build_numeric_counts_by_R(df2_lessons_src, "G")
-    if outG_R.empty:
+    st.markdown("**FR2 — по месяцам (Q) — G (в %)**")
+    outG_Q = _build_numeric_counts_by_Q(df2_lessons_src, "G")
+    if outG_Q.empty:
         st.info("Нет данных по G для выбранных фильтров.")
     else:
-        chG_R = _make_percent_stack_by_R(outG_R, "G")
-        st.altair_chart(chG_R.properties(height=460), use_container_width=True, theme=None)
+        chG_Q = _make_percent_stack_by_Q(outG_Q, "G")
+        st.altair_chart(chG_Q.properties(height=460), use_container_width=True, theme=None)
 
 with cH2:
-    st.markdown("**FR2 — по урокам (R) — H (в %)**")
-    outH_R = _build_numeric_counts_by_R(df2_lessons_src, "H")
-    if outH_R.empty:
+    st.markdown("**FR2 — по месяцам (Q) — H (в %)**")
+    outH_Q = _build_numeric_counts_by_Q(df2_lessons_src, "H")
+    if outH_Q.empty:
         st.info("Нет данных по H для выбранных фильтров.")
     else:
-        chH_R = _make_percent_stack_by_R(outH_R, "H")
-        st.altair_chart(chH_R.properties(height=460), use_container_width=True, theme=None)
+        chH_Q = _make_percent_stack_by_Q(outH_Q, "H")
+        st.altair_chart(chH_Q.properties(height=460), use_container_width=True, theme=None)
 
