@@ -882,9 +882,9 @@ with col2:
         )
         st.altair_chart(chart2, use_container_width=True, theme=None)
 
-# ---------- РАСПРЕДЕЛЕНИЕ ПО УРОКАМ (в %) ДЛЯ ТЕХ ЖЕ ШКАЛ ----------
+# ---------- РАСПРЕДЕЛЕНИЕ ПО месяцам (в %) ДЛЯ ТЕХ ЖЕ ШКАЛ ----------
 st.markdown("---")
-st.subheader("Распределение по месяцам (в %) — те же шкалы G (FR1) и I (FR2)")
+st.subheader("Average score throughout the course (distribution)")
 AX_FR1 = "R"  # месяц в FR1
 AX_FR2 = "Q"  # месяц в FR2
 
@@ -934,11 +934,11 @@ def _make_percent_stack_by_axis(out_df: pd.DataFrame, axis_col: str, legend_titl
     chart = (
         base.mark_bar(size=28, stroke=None, strokeWidth=0)
             .encode(
-                x=alt.X(f"{axis_col}:O", title="Месяц", sort=axis_order),
+                x=alt.X(f"{axis_col}:O", title="Month", sort=axis_order),
                 y=alt.Y(
                     "count:Q",
                     stack="normalize",
-                    axis=alt.Axis(format="%", title="% от ответов"),
+                    axis=alt.Axis(format="%", title="% of answers"),
                     scale=alt.Scale(domain=[0, 1], nice=False, clamp=True),
                 ),
                 color=alt.Color(
@@ -956,11 +956,11 @@ def _make_percent_stack_by_axis(out_df: pd.DataFrame, axis_col: str, legend_titl
                 ),
                 order=alt.Order("val:Q", sort="ascending"),
                 tooltip=[
-                    alt.Tooltip(f"{axis_col}:O", title="Месяц"),
+                    alt.Tooltip(f"{axis_col}:O", title="Month"),
                     alt.Tooltip("val_str:N", title=legend_title),
-                    alt.Tooltip("count:Q",  title="Кол-во"),
-                    alt.Tooltip("pct:Q",    title="Доля", format=".0%"),
-                    alt.Tooltip("total:Q",  title="Всего по месяцу"),
+                    alt.Tooltip("count:Q",  title="Number"),
+                    alt.Tooltip("pct:Q",    title="% of answers", format=".0%"),
+                    alt.Tooltip("total:Q",  title="All answers"),
                 ],
             )
     ).configure_legend(labelLimit=1000, titleLimit=1000)
@@ -984,23 +984,23 @@ if not df2_months_I.empty and selected_months:
 left_col, right_col = st.columns(2)
 
 with left_col:
-    st.markdown("**FR1 — по месяцам (R) — G (в %)**")
+    st.markdown("**Monthly feedback**")
     out_G_M = _build_numeric_counts_by_axis(
         df1_months_G, axis_col=AX_FR1, val_col="G", allowed_vals=[1,2,3,4,5]
     )
     if out_G_M.empty:
-        st.info("Нет данных по G (FR1) для выбранных фильтров.")
+        st.info("No data")
     else:
         ch_G_M = _make_percent_stack_by_axis(out_G_M, axis_col=AX_FR1, legend_title="G")
         st.altair_chart(ch_G_M.properties(height=460), use_container_width=True, theme=None)
 
 with right_col:
-    st.markdown("**FR2 — по месяцам (Q) — I (в %)**")
+    st.markdown("**Lesson feedback**")
     out_I_M = _build_numeric_counts_by_axis(
         df2_months_I, axis_col=AX_FR2, val_col="I", allowed_vals=list(range(1, 11))
     )
     if out_I_M.empty:
-        st.info("Нет данных по I (FR2) для выбранных фильтров.")
+        st.info("No data")
     else:
         ch_I_M = _make_percent_stack_by_axis(out_I_M, axis_col=AX_FR2, legend_title="I")
         st.altair_chart(ch_I_M.properties(height=460), use_container_width=True, theme=None)
