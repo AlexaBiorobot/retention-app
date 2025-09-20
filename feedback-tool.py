@@ -65,7 +65,11 @@ def filter_df(df: pd.DataFrame, course_col: str, date_col: str,
 def apply_filters_and_aggregate(df: pd.DataFrame, course_col: str, date_col: str,
                                 x_col: str, y_col: str,
                                 selected_courses=None, date_range=None):
+    if df.empty or not {course_col, date_col, x_col, y_col}.issubset(df.columns):
+        return pd.DataFrame(columns=[x_col, "avg_y", "count"])
     dff = filter_df(df, course_col, date_col, selected_courses, date_range)
+    if dff.empty or not {x_col, y_col}.issubset(dff.columns):
+        return pd.DataFrame(columns=[x_col, "avg_y", "count"])
     grp = dff.dropna(subset=[x_col, y_col])
     if grp.empty:
         return pd.DataFrame(columns=[x_col, "avg_y", "count"])
@@ -74,7 +78,7 @@ def apply_filters_and_aggregate(df: pd.DataFrame, course_col: str, date_col: str
                   count=(y_col, "size"))
              .sort_values(x_col))
     return agg
-
+                                    
 def add_bucket(dff: pd.DataFrame, date_col: str, granularity: str) -> pd.DataFrame:
     out = dff.copy()
     if out.empty:
@@ -565,25 +569,40 @@ def translate_es_to_en_safe(text: str) -> str:
     except Exception:
         return s
 
+def ensure_columns(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
+    """Гарантирует наличие перечисленных колонок; если нет — создаёт пустые."""
+    if df.empty:
+        # создаём пустой df с нужными колонками
+        return pd.DataFrame({c: pd.Series(dtype="object") for c in cols})
+    for c in cols:
+        if c not in df.columns:
+            df[c] = pd.NA
+    return df
+
 # ==================== ДАННЫЕ ====================
 
-df1 = load_sheet_as_letter_df("Form Responses 1")   # A=date, N=course, S=x, G=y, E=aspects, F=dislike, H=comments
-df2 = load_sheet_as_letter_df("Form Responses 2")   # A=date, M=course, R=x, I=y
+df1 = load_sheet_as_letter_df("Form Responses 1")   # A=date, N=course, S=score(1–5), G=y, E=aspects, F=dislike, H=comments, R=month?
+df2 = load_sheet_as_letter_df("Form Responses 2")   # A=date, M=course, R=lesson?, I=y (1–10), Q=month, D/E/J/K texts, F/G/H numeric
 
-# Приведение типов
-for df, date_col, x_col, y_col in [
-    (df1, "A", "S", "G"),
-    (df2, "A", "R", "I"),
-]:
-    if df.empty:
-        continue
-    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
-    df[x_col] = pd.to_numeric(df[x_col], errors="coerce")
-    df[y_col] = pd.to_numeric(df[y_col], errors="coerce")
+# Гарантируем наличие всех колонок, которые используются в коде ниже
+req_fr1 = ["A", "N", "S", "G", "E", "F", "H", "R"]
+req_fr2 = ["A", "M", "R", "I", "Q", "D", "E", "F", "G", "H", "J", "K"]
+df1 = ensure_columns(df1, req_fr1)
+df2 = ensure_columns(df2, req_fr2)
 
-# ДОПОЛНИТЕЛЬНО: FR2 — привести F, G, H к числу (если они шкальные)
+# Приведение типов — только для реально существующих колонок
+if not df1.empty:
+    if "A" in df1.columns:
+        df1["A"] = pd.to_datetime(df1["A"], errors="coerce")
+    for col in ["S", "G", "R"]:
+        if col in df1.columns:
+            df1[col] = pd.to_numeric(df1[col], errors="coerce")
+
 if not df2.empty:
-    for col in ["F", "G", "H"]:
+    if "A" in df2.columns:
+        df2["A"] = pd.to_datetime(df2["A"], errors="coerce")
+    # числовые оси/оценки
+    for col in ["R", "Q", "I", "F", "G", "H"]:
         if col in df2.columns:
             df2[col] = pd.to_numeric(df2[col], errors="coerce")
 
