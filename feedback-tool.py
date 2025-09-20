@@ -991,7 +991,7 @@ with left_col:
     if out_G_M.empty:
         st.info("No data")
     else:
-        ch_G_M = _make_percent_stack_by_axis(out_G_M, axis_col=AX_FR1, legend_title="G")
+        ch_G_M = _make_percent_stack_by_axis(out_G_M, axis_col=AX_FR1, legend_title="Score")
         st.altair_chart(ch_G_M.properties(height=460), use_container_width=True, theme=None)
 
 with right_col:
@@ -1002,7 +1002,7 @@ with right_col:
     if out_I_M.empty:
         st.info("No data")
     else:
-        ch_I_M = _make_percent_stack_by_axis(out_I_M, axis_col=AX_FR2, legend_title="I")
+        ch_I_M = _make_percent_stack_by_axis(out_I_M, axis_col=AX_FR2, legend_title="Score")
         st.altair_chart(ch_I_M.properties(height=460), use_container_width=True, theme=None)
 
 st.markdown("---")
