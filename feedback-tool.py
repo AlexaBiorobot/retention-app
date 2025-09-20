@@ -817,7 +817,6 @@ else:
               y=alt.Y("avg_score100:Q", title="Percentile score (0–100)", scale=y_scale_u),
               color=alt.Color("source:N", title="Source"),
               tooltip=[
-                  alt.Tooltip("Month:O", title="Month"),
                   alt.Tooltip("source:N", title="Source"),
                   alt.Tooltip("avg_score100:Q", title="Avg percentile", format=".1f"),
                   alt.Tooltip("count:Q", title="Answers"),
@@ -849,7 +848,6 @@ with col1:
                   x=alt.X(f"{AX_FR1}:O", title="Month", sort="ascending"),
                   y=alt.Y("avg_y:Q", title="Average score", scale=y_scale),
                   tooltip=[
-                      alt.Tooltip(f"{AX_FR1}:O", title="Month"),
                       alt.Tooltip("avg_y:Q", title="Average score", format=".2f"),
                       alt.Tooltip("count:Q", title="Answers"),
                   ],
@@ -874,7 +872,6 @@ with col2:
                   x=alt.X(f"{AX_FR2}:O", title="Month", sort="ascending"),
                   y=alt.Y("avg_y:Q", title="Average score", scale=y_scale2),
                   tooltip=[
-                      alt.Tooltip(f"{AX_FR2}:O", title="Month"),
                       alt.Tooltip("avg_y:Q", title="Average score", format=".2f"),
                       alt.Tooltip("count:Q", title="Answers")
                   ])
