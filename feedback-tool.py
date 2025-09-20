@@ -736,7 +736,19 @@ st.title("40 week courses")
 
 # ---------- ЕДИНАЯ «РЕАЛИСТИЧНАЯ» ШКАЛА (перцентиль 0–100) ПО УРОКАМ ----------
 st.markdown("---")
-st.subheader("Unified score (percentile 0–100)")
+st.subheader("Lesson scores (percentile 0–100)")
+
+st.markdown(
+    """
+**What does the percentile mean?**  
+- For every response, we convert the raw score to a **percentile (0–100)** *within the currently filtered data only* (average-ties method).  
+- Then we **average those percentiles per month (module)** — separately for **Monthly feedback** and **Lesson feedback**. Each line shows that monthly average.  
+- A higher percentile means a response is **relatively higher** than others *in the same filtered scope*.  
+- Because percentiles are relative, **changing filters (courses, date range, months)** changes the baseline and therefore the plotted values.  
+- The X-axis is the **month (module) number (integer)**; the Y-axis is the **average percentile (0–100)**.
+*Tip: hover a point to see month (module), source and the average percentile with number of answers.*
+"""
+)
 
 # Источники под текущие фильтры и по выбранным урокам
 # FR1: берём месяц (AX_FR1="R") и оценку G
@@ -755,7 +767,7 @@ if not df1_pct.empty:
                           .agg(avg_score100=("score100","mean"),
                                count=("score100","size"))
                           .rename(columns={AX_FR1: "Month"})   # ключевой момент: ось назовём "Month"
-                          .assign(source="FR1 (G)"))
+                          .assign(source="Monthly feedback"))
     else:
         fr1_u = pd.DataFrame(columns=["Month","avg_score100","count","source"])
 else:
@@ -776,7 +788,7 @@ if not df2_pct.empty:
                           .agg(avg_score100=("score100","mean"),
                                count=("score100","size"))
                           .rename(columns={AX_FR2: "Month"})   # приводим к общей оси "Month"
-                          .assign(source="FR2 (I)"))
+                          .assign(source="Lesson fedback"))
     else:
         fr2_u = pd.DataFrame(columns=["Month","avg_score100","count","source"])
 else:
@@ -808,7 +820,7 @@ else:
                   alt.Tooltip("Month:O", title="Month"),
                   alt.Tooltip("source:N", title="Source"),
                   alt.Tooltip("avg_score100:Q", title="Avg percentile", format=".1f"),
-                  alt.Tooltip("count:Q", title="N"),
+                  alt.Tooltip("count:Q", title="Answers"),
               ],
           )
           .properties(height=380)
