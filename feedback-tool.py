@@ -741,9 +741,8 @@ st.subheader("Lesson scores (percentile 0–100)")
 st.markdown(
     """
 **How to read this chart (percentile 0–100):**
-- **What the lines show.** For each response we convert the raw score to a **percentile (0–100)** *within the currently filtered data* (average-ties). Then we **average those percentiles per month (module)** — separately for **Monthly feedback** and **Lesson feedback**. Each line is that monthly average.
-- **X-axis (Month/Module).** Integer month (module) number.  
-  **Y-axis (Average percentile).** 0–100, where **50 ≈ typical/median** for the current filters; **above 50 = relatively better**, **below 50 = relatively worse** than others in the same filtered scope.
+- **What the lines show.** For each response we convert the raw score to a **percentile (0–100)** *within the currently filtered data* (average-ties). 
+Then we **average those percentiles per month (module)** — separately for **Monthly feedback** and **Lesson feedback**. Each line is that monthly average.
 - **Comparing lines.** At the same month, the line that is **higher** had relatively stronger feedback **that month** (given the current filters).
 - **Reading trends.** A line **rising over months** suggests improving relative feedback; **falling** suggests weakening relative feedback.
 - **Hover for details.** Move the cursor over a point to see the **month (module)**, **source** (Monthly vs Lesson), **average percentile**, and **N** (number of answers).
