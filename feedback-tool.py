@@ -840,7 +840,7 @@ with col1:
         y_scale = alt.Scale(domain=[y_min - pad, y_max + pad], nice=False, clamp=True)
 
         chart1 = (
-            alt.Chart(agg1).mark_line(point=True)
+            alt.Chart(agg1).mark_line(point=True, color="#f59e0b")
               .encode(
                   x=alt.X(f"{AX_FR1}:O", title="Month", sort="ascending"),
                   y=alt.Y("avg_y:Q", title="Average score", scale=y_scale),
