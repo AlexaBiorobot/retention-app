@@ -840,19 +840,23 @@ with col1:
         y_scale = alt.Scale(domain=[y_min - pad, y_max + pad], nice=False, clamp=True)
 
         chart1 = (
-            alt.Chart(agg1).mark_line(point=True, color="#f59e0b")
+            alt.Chart(agg1)
+              .mark_line(
+                  color="#f59e0b",
+                  point=alt.OverlayMarkDef(color="#f59e0b", filled=True)
+              )
               .encode(
                   x=alt.X(f"{AX_FR1}:O", title="Month", sort="ascending"),
                   y=alt.Y("avg_y:Q", title="Average score", scale=y_scale),
                   tooltip=[
                       alt.Tooltip(f"{AX_FR1}:O", title="Month"),
                       alt.Tooltip("avg_y:Q", title="Average score", format=".2f"),
-                      alt.Tooltip("count:Q", title="Answers")
-                  ])
+                      alt.Tooltip("count:Q", title="Answers"),
+                  ],
+              )
               .properties(height=380)
         )
         st.altair_chart(chart1, use_container_width=True, theme=None)
-
 
 with col2:
     st.subheader("Average score per lessons (source - Lesson feedback)")
