@@ -1553,37 +1553,30 @@ else:
           )
     )
 
-    # --- быстрый «общий тултип» ---
+    # ---------- быстрый «общий тултип» ----------
     wide = (
         asp_counts
         .pivot_table(index=["bucket","bucket_label"], columns="aspect_en",
                      values="count", aggfunc="sum", fill_value=0)
     )
     
+    # сорт аспектов по сумме за всё время
     col_order = list(wide.sum(axis=0).sort_values(ascending=False).index)
+    TOP_K = 6
+    top_names = col_order[:TOP_K]  # фиксированный список имён для заголовков строк
     
-    TOP_K = 6  # сколько пунктов показывать
-    
-    def _pack_row_multiline(r, top_k=TOP_K):
-        total = int(r[col_order].sum())
-        if total == 0:
-            # вернём пустые строки, чтобы тултип был аккуратным
-            out = {"total": 0}
-            for i in range(1, top_k + 1):
-                out[f"t{i}"] = ""
-            return pd.Series(out)
-    
-        pairs = [(name, int(r[name])) for name in col_order if r[name] > 0]
-        pairs.sort(key=lambda x: x[1], reverse=True)
-        pairs = pairs[:top_k]
-    
-        lines = [f"{name} — {c} ({c/total:.0%})" for name, c in pairs]
+    def _pack_row_named(r, names=top_names):
+        total = int(r.sum())  # сумма по ВСЕМ аспектам, чтобы проценты были корректны
         out = {"total": total}
-        for i in range(1, top_k + 1):
-            out[f"t{i}"] = lines[i-1] if i-1 < len(lines) else ""
+        for i, name in enumerate(names, start=1):
+            c = int(r.get(name, 0))
+            if total > 0 and c > 0:
+                out[f"t{i}"] = f"{name} — {c} ({c/total:.0%})"
+            else:
+                out[f"t{i}"] = ""
         return pd.Series(out)
     
-    packed = wide.apply(_pack_row_multiline, axis=1).reset_index()
+    packed = wide.apply(_pack_row_named, axis=1).reset_index()
     
     bubble = (
         alt.Chart(packed)
@@ -1592,17 +1585,14 @@ else:
               x=alt.X("bucket_label:N", sort=bucket_order),
               y=alt.Y("total:Q", scale=y_scale_bar),
               tooltip=[
-                  alt.Tooltip("total:Q", title="Всего упоминаний"),
-                  alt.Tooltip("t1:N",   title="Liked"),
-                  alt.Tooltip("t2:N",   title=""),
-                  alt.Tooltip("t3:N",   title=""),
-                  alt.Tooltip("t4:N",   title=""),
-                  alt.Tooltip("t5:N",   title=""),
-                  alt.Tooltip("t6:N",   title=""),
+                  # вместо "Период" и "Всего упоминаний"
+                  alt.Tooltip("t1:N", title="Liked"),
+                  # дальше строки с названиями аспектов
+                  *[alt.Tooltip(f"t{i}:N", title=top_names[i-1]) for i in range(2, TOP_K+1)],
               ],
           )
     )
-    
+
     st.altair_chart((bars + bubble).properties(height=460),
                     theme=None, use_container_width=True)
 
