@@ -785,7 +785,7 @@ fr2_out, fr2_bucket_order, fr2_val_order, fr2_title = prep_distribution(df2_f, "
 
 # ==================== ОТРИСОВКА ====================
 
-st.title("40 week courses")
+st.title("Parents + Students feedback: Latam")
 
 # ---------- ЕДИНАЯ «РЕАЛИСТИЧНАЯ» ШКАЛА (перцентиль 0–100) ПО УРОКАМ ----------
 st.markdown("---")
