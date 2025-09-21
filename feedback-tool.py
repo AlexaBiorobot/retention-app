@@ -515,6 +515,35 @@ def build_aspects_counts_by_S(df: pd.DataFrame) -> pd.DataFrame:
     out = out.groupby(["S","aspect_en"], as_index=False)["count"].sum()
     return out
 
+def build_aspects_counts_by_month(df: pd.DataFrame) -> pd.DataFrame:
+    """Счётчики аспектов по месяцам R (EN-лейблы). Возвращает [R, aspect_en, count]."""
+    if df.empty or not {"R","E"}.issubset(df.columns):
+        return pd.DataFrame(columns=["R","aspect_en","count"])
+    d = df[["R","E"]].copy()
+    d["R"] = pd.to_numeric(d["R"], errors="coerce")
+    d = d.dropna(subset=["R"])
+    d["R"] = d["R"].astype(int)
+
+    rows = []
+    for _, r in d.iterrows():
+        txt = str(r["E"] or "").strip()
+        if not txt:
+            continue
+        parts = re.split(r"[;,/\n|]+", txt) if re.search(r"[;,/\n|]", txt) else [txt]
+        for p in parts:
+            t = _norm(p.strip())
+            if not t:
+                continue
+            for es_norm, es, en in _ASPECTS_NORM:
+                if t == es_norm or es_norm in t:
+                    rows.append((int(r["R"]), en, 1))
+                    break
+
+    if not rows:
+        return pd.DataFrame(columns=["R","aspect_en","count"])
+    out = pd.DataFrame(rows, columns=["R","aspect_en","count"])
+    return out.groupby(["R","aspect_en"], as_index=False)["count"].sum()
+
 def aspect_to_en_label(s: str) -> str:
     """Из 'ES (EN: EN)' достаём 'EN'."""
     m = re.search(r"\(EN:\s*(.*?)\)\s*$", str(s))
@@ -1612,27 +1641,34 @@ else:
     st.altair_chart((bars + bubble).properties(height=460),
                     theme=None, use_container_width=True)
 
-# --------- ГРАФИК «Распределение по урокам (ось X — S)» В % ---------
+# --------- ГРАФИК «Распределение по месяцам (ось X — R)» В % ---------
 st.markdown("---")
-st.subheader("Распределение по урокам (ось X — S) — график (в %)")
+st.subheader("Распределение по месяцам (ось X — R) — график (в %)")
 
-cnt_by_s_all = build_aspects_counts_by_S(df_aspects)
-if cnt_by_s_all.empty:
-    st.info("Нет данных для графика по урокам.")
+# источник: FR1 (df1_base) + (опционально) фильтр выбранных месяцев
+df_aspects_m = df1_base.copy()
+if not df_aspects_m.empty and selected_months:
+    df_aspects_m["R_num"] = pd.to_numeric(df_aspects_m["R"], errors="coerce")
+    df_aspects_m = df_aspects_m[df_aspects_m["R_num"].isin(selected_months)]
+
+cnt_by_m_all = build_aspects_counts_by_month(df_aspects_m)
+
+if cnt_by_m_all.empty:
+    st.info("Нет данных для графика по месяцам.")
 else:
     base = (
-        alt.Chart(cnt_by_s_all)
-          .transform_aggregate(count='sum(count)', groupby=['S', 'aspect_en'])
-          .transform_joinaggregate(total='sum(count)', groupby=['S'])
+        alt.Chart(cnt_by_m_all)
+          .transform_aggregate(count='sum(count)', groupby=['R', 'aspect_en'])
+          .transform_joinaggregate(total='sum(count)', groupby=['R'])
           .transform_calculate(pct='datum.count / datum.total')
     )
 
     legend_domain_en = [en for _, en in ASPECTS_ES_EN]
-    
-    bars_s = (
+
+    bars_r = (
         base.mark_bar(size=28, stroke=None, strokeWidth=0)
             .encode(
-                x=alt.X("S:O", title="S", sort="ascending"),
+                x=alt.X("R:O", title="Month (R)", sort="ascending"),
                 y=alt.Y(
                     "count:Q",
                     stack="normalize",
@@ -1644,25 +1680,21 @@ else:
                     title="Аспект (EN)",
                     scale=alt.Scale(domain=legend_domain_en),
                     legend=alt.Legend(
-                        orient="bottom",
-                        direction="horizontal",
-                        columns=2,
-                        labelLimit=1000,
-                        titleLimit=1000,
-                        symbolType="square",
+                        orient="bottom", direction="horizontal",
+                        columns=2, labelLimit=1000, titleLimit=1000, symbolType="square",
                     ),
                 ),
                 tooltip=[
-                    alt.Tooltip("S:O", title="Урок"),
+                    alt.Tooltip("R:O", title="Месяц (R)"),
                     alt.Tooltip("aspect_en:N", title="Аспект"),
                     alt.Tooltip("count:Q", title="Кол-во"),
                     alt.Tooltip("pct:Q", title="Доля", format=".0%"),
-                    alt.Tooltip("total:Q", title="Всего по уроку"),
+                    alt.Tooltip("total:Q", title="Всего по месяцу"),
                 ],
             )
     ).configure_legend(labelLimit=1000, titleLimit=1000)
-    
-    st.altair_chart(bars_s.properties(height=460), use_container_width=True, theme=None)
+
+    st.altair_chart(bars_r.properties(height=460), use_container_width=True, theme=None)
 
 # Подсказка, если онлайн-переводчик недоступен
 if _gt is None:
