@@ -956,44 +956,90 @@ def _pack_full_tooltip(out_df: pd.DataFrame, x_col: str, legend_title: str):
 
 def _make_percent_stack_by_axis(out_df: pd.DataFrame, axis_col: str, legend_title: str):
     """
-    Нормированный стек 0–100% по axis_col + прозрачный оверлей
-    с ЕДИНЫМ тултипом на весь столбец (каждая категория на своей строке).
+    Нормированный стек 0–100% по оси axis_col (месяц),
+    + прозрачный оверлей с ЕДИНЫМ тултипом на весь столбик:
+      1 — N (p%)
+      2 — N (p%)
+      ...
+      All answers — T
     """
     if out_df.empty:
         return None
 
+    # порядок по оси
     axis_order = sorted(out_df[axis_col].unique().tolist())
-    base = alt.Chart(out_df).transform_calculate(pct='datum.count / datum.total')
 
+    # основной стек
+    base = alt.Chart(out_df).transform_calculate(pct='datum.count / datum.total')
     bars = (
         base.mark_bar(size=28, stroke=None, strokeWidth=0)
             .encode(
                 x=alt.X(f"{axis_col}:O", title="Month", sort=axis_order),
-                y=alt.Y("count:Q",
-                        stack="normalize",
-                        axis=alt.Axis(format="%", title="% of answers"),
-                        scale=alt.Scale(domain=[0, 1], nice=False, clamp=True)),
+                y=alt.Y(
+                    "count:Q",
+                    stack="normalize",
+                    axis=alt.Axis(format="%", title="% of answers"),
+                    scale=alt.Scale(domain=[0, 1], nice=False, clamp=True),
+                ),
                 color=alt.Color(
                     "val_str:N",
                     title=legend_title,
                     sort=alt.SortField(field="val", order="ascending"),
-                    legend=alt.Legend(orient="bottom", direction="horizontal",
-                                      columns=5, labelLimit=1000, titleLimit=1000,
-                                      symbolType="square")),
+                    legend=alt.Legend(
+                        orient="bottom",
+                        direction="horizontal",
+                        columns=5,
+                        labelLimit=1000,
+                        titleLimit=1000,
+                        symbolType="square",
+                    ),
+                ),
                 order=alt.Order("val:Q", sort="ascending"),
             )
     )
 
-    # ⬇️ прозрачный оверлей с построчным тултипом
-    packed, tip_cols = _pack_full_tooltip(out_df, x_col=axis_col, legend_title=legend_title)
+    # ---------- ПРОЗРАЧНЫЙ ОВЕРЛЕЙ ДЛЯ ЕДИНОГО ТУЛТИПА ----------
+    # wide = по оси -> столбцы по val (1,2,3,...), значения = count
+    tmp = out_df.copy()
+    tmp["val"] = pd.to_numeric(tmp.get("val", tmp["val_str"]), errors="coerce").astype("Int64")
+    vals = sorted([int(v) for v in tmp["val"].dropna().unique().tolist()])
+
+    wide = (
+        tmp.pivot_table(index=axis_col, columns="val", values="count",
+                        aggfunc="sum", fill_value=0)
+            .reset_index()
+    )
+
+    # total по столбику
+    wide["total"] = wide[[v for v in vals]].sum(axis=1).astype(int)
+
+    # форматируем колонки как строки "N (p%)" или "" при нуле
+    for v in vals:
+        c = wide[v].astype(int)
+        t = wide["total"].replace(0, pd.NA)
+        pct = (c / t).round(3)
+        # строковое отображение
+        wide[str(v)] = np.where(
+            (wide["total"] > 0) & (c > 0),
+            c.astype(str) + " (" + (pct.fillna(0).map(lambda x: f"{x:.0%}")) + ")",
+            ""
+        )
+
+    # убедимся, что строковый тип (иначе в тултипе будет undefined)
+    tooltip_cols = [str(v) for v in vals]
+    wide[tooltip_cols] = wide[tooltip_cols].fillna("").astype(str)
+
+    # прозрачный слой + тултип на весь бар
     overlay = (
-        alt.Chart(packed).mark_bar(size=28, opacity=0.001)
+        alt.Chart(wide)
+          .mark_bar(size=28, opacity=0.001)
           .encode(
               x=alt.X(f"{axis_col}:O", sort=axis_order),
-              y=alt.Y("total:Q", title=None),
+              y=alt.Y("total:Q"),
               tooltip=[
-                  alt.Tooltip("total:Q",       title="All answers"),
-                  *[alt.Tooltip(f"{c}:N", title="") for c in tip_cols],  # каждая строка отдельно
+                  alt.Tooltip("total:Q", title="All answers"),
+                  # Каждую строку показываем с заголовком = значение шкалы
+                  *[alt.Tooltip(f"{col}:N", title=col) for col in tooltip_cols],
               ]
           )
     )
