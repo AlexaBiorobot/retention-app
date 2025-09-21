@@ -1504,10 +1504,10 @@ else:
     st.dataframe(
         unified_table[
             [KEY_LABEL,
-             "I — J (EN)", "Total I–J pairs",
-             "Aspects + Unknown (EN)", "Total aspects",
-             "Dislike + Unknown (EN)", "Total dislike",
-             "Comments (EN)", "Total comments",
+             "Score with argumentation", "Total scores",
+             "What liked", "Total liked",
+             "What disliked", "Total disliked",
+             "Other comments", "Total comments",
              "Total mentions (all)"]
         ],
         use_container_width=True,
