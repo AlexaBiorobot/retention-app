@@ -650,7 +650,11 @@ else:
     date_range = st.sidebar.date_input("Дата фидбека (A)", [glob_min.date(), glob_max.date()])
 
 # Гранулярность
-granularity = st.sidebar.selectbox("Гранулярность для распределения", ["День", "Неделя", "Месяц", "Год"])
+granularity = st.sidebar.selectbox(
+    "Гранулярность для распределения",
+    ["День", "Неделя", "Месяц", "Год"],
+    index=1  # по умолчанию Неделя
+)
 BAR_SIZE = {"День": 18, "Неделя": 44, "Месяц": 56, "Год": 64}
 bar_size = BAR_SIZE.get(granularity, 36)
 
@@ -1001,50 +1005,52 @@ with right_col:
         ch_I_M = _make_percent_stack_by_axis(out_I_M, axis_col=AX_FR2, legend_title="Score")
         st.altair_chart(ch_I_M.properties(height=460), use_container_width=True, theme=None)
 
+# ---------- РАСПРЕДЕЛЕНИЕ ЗНАЧЕНИЙ ПО месяцам (в %) ДЛЯ ТЕХ ЖЕ ШКАЛ ----------
+
 st.markdown("---")
 st.subheader(f"Распределение значений (гранулярность: {granularity.lower()})")
 
 col3, col4 = st.columns([1, 1])
 
 with col3:
-    st.markdown("**Form Responses 1 — распределение G (1–5)**")
+    st.markdown("**Scores in time (distribution, source: Monthly feedback)**")
     if fr1_out.empty:
         st.info("Нет данных (FR1).")
     else:
         bars1 = (
             alt.Chart(fr1_out).mark_bar(size=BAR_SIZE.get(granularity, 36))
               .encode(
-                  x=alt.X("bucket_label:N", title="Период", sort=fr1_bucket_order),
-                  y=alt.Y("sum(count):Q", title="Кол-во ответов"),
+                  x=alt.X("bucket_label:N", title="Period", sort=fr1_bucket_order),
+                  y=alt.Y("sum(count):Q", title="Answers"),
                   color=alt.Color("val_str:N", title=fr1_title, sort=fr1_val_order),
                   order=alt.Order("val:Q", sort="ascending"),
                   tooltip=[
-                      alt.Tooltip("bucket_label:N", title="Период"),
+                      alt.Tooltip("bucket_label:N", title="Period"),
                       alt.Tooltip("val_str:N", title=fr1_title),
-                      alt.Tooltip("count:Q", title="Кол-во"),
-                      alt.Tooltip("pct:Q", title="% внутри периода", format=".0%")
+                      alt.Tooltip("count:Q", title="Answers"),
+                      alt.Tooltip("pct:Q", title="% of all answers", format=".0%")
                   ])
               .properties(height=420)
         )
         st.altair_chart(bars1, use_container_width=True, theme=None)
 
 with col4:
-    st.markdown("**Form Responses 2 — распределение I (1–10)**")
+    st.markdown("**Scores in time (distribution, source: Lesson feedback)**")
     if fr2_out.empty:
         st.info("Нет данных (FR2).")
     else:
         bars2 = (
             alt.Chart(fr2_out).mark_bar(size=BAR_SIZE.get(granularity, 36))
               .encode(
-                  x=alt.X("bucket_label:N", title="Период", sort=fr2_bucket_order),
-                  y=alt.Y("sum(count):Q", title="Кол-во ответов"),
+                  x=alt.X("bucket_label:N", title="Period", sort=fr2_bucket_order),
+                  y=alt.Y("sum(count):Q", title="Answers"),
                   color=alt.Color("val_str:N", title=fr2_title, sort=fr2_val_order),
                   order=alt.Order("val:Q", sort="ascending"),
                   tooltip=[
-                      alt.Tooltip("bucket_label:N", title="Период"),
+                      alt.Tooltip("bucket_label:N", title="Period"),
                       alt.Tooltip("val_str:N", title=fr2_title),
-                      alt.Tooltip("count:Q", title="Кол-во"),
-                      alt.Tooltip("pct:Q", title="% внутри периода", format=".0%")
+                      alt.Tooltip("count:Q", title="Answers"),
+                      alt.Tooltip("pct:Q", title="% of all answers", format=".0%")
                   ])
               .properties(height=420)
         )
