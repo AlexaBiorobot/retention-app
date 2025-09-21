@@ -1553,26 +1553,37 @@ else:
           )
     )
 
-    # ---------- быстрый «общий тултип» ----------
+    # --- быстрый «общий тултип» ---
     wide = (
         asp_counts
         .pivot_table(index=["bucket","bucket_label"], columns="aspect_en",
                      values="count", aggfunc="sum", fill_value=0)
     )
-
+    
     col_order = list(wide.sum(axis=0).sort_values(ascending=False).index)
-
-    def _pack_row(r, top_k=6):
+    
+    TOP_K = 6  # сколько пунктов показывать
+    
+    def _pack_row_multiline(r, top_k=TOP_K):
         total = int(r[col_order].sum())
         if total == 0:
-            return pd.Series({"total": 0, "tooltip_text": ""})
+            # вернём пустые строки, чтобы тултип был аккуратным
+            out = {"total": 0}
+            for i in range(1, top_k + 1):
+                out[f"t{i}"] = ""
+            return pd.Series(out)
+    
         pairs = [(name, int(r[name])) for name in col_order if r[name] > 0]
         pairs.sort(key=lambda x: x[1], reverse=True)
         pairs = pairs[:top_k]
+    
         lines = [f"{name} — {c} ({c/total:.0%})" for name, c in pairs]
-        return pd.Series({"total": total, "tooltip_text": "\n".join(lines)})
-
-    packed = wide.apply(_pack_row, axis=1).reset_index()
+        out = {"total": total}
+        for i in range(1, top_k + 1):
+            out[f"t{i}"] = lines[i-1] if i-1 < len(lines) else ""
+        return pd.Series(out)
+    
+    packed = wide.apply(_pack_row_multiline, axis=1).reset_index()
     
     bubble = (
         alt.Chart(packed)
@@ -1581,13 +1592,14 @@ else:
               x=alt.X("bucket_label:N", sort=bucket_order),
               y=alt.Y("total:Q", scale=y_scale_bar),
               tooltip=[
-                  # ⬇️ УБРАЛИ период из тултипа
-                  # alt.Tooltip("bucket_label:N", title="Период"),
-    
                   alt.Tooltip("total:Q", title="Всего упоминаний"),
-                  # ⬇️ Переименовали на "Liked"; \n внутри строки даст переносы
-                  alt.Tooltip("tooltip_text:N", title="Liked"),
-              ]
+                  alt.Tooltip("t1:N",   title="Liked"),
+                  alt.Tooltip("t2:N",   title=""),
+                  alt.Tooltip("t3:N",   title=""),
+                  alt.Tooltip("t4:N",   title=""),
+                  alt.Tooltip("t5:N",   title=""),
+                  alt.Tooltip("t6:N",   title=""),
+              ],
           )
     )
     
