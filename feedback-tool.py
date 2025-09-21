@@ -945,9 +945,9 @@ def _pack_full_tooltip(out_df: pd.DataFrame, x_col: str, legend_title: str):
         row = {x_col: xval, "total": total}
         # сформируем по колонке на каждое значение шкалы
         for v in vals:
-            col_name = f"br_{v}"   # колонка для тултипа
+            col_name = f"{v}"   # колонка для тултипа
             c = int(r.get(str(v), 0))
-            row[col_name] = (f"{v} — {c} ({(c/total):.0%})" if total > 0 and c > 0 else "")
+            row[col_name] = (f"— {c} ({(c/total):.0%})" if total > 0 and c > 0 else "")
         rows.append(row)
 
     df = pd.DataFrame(rows)
@@ -994,7 +994,6 @@ def _make_percent_stack_by_axis(out_df: pd.DataFrame, axis_col: str, legend_titl
               x=alt.X(f"{axis_col}:O", sort=axis_order),
               y=alt.Y("total:Q", title=None),
               tooltip=[
-                  alt.Tooltip(f"{axis_col}:O", title="Month"),
                   alt.Tooltip("total:Q",       title="All answers"),
                   *[alt.Tooltip(f"{c}:N", title="") for c in tip_cols],  # каждая строка отдельно
               ]
