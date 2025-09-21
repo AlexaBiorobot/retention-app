@@ -1250,29 +1250,30 @@ with col4:
         st.altair_chart((bars2 + overlay2).properties(height=420),
                         use_container_width=True, theme=None)
 
-# --------- ЕДИНАЯ ТАБЛИЦА ПО УРОКАМ: I–J + Aspects+Unknown, Dislike+Unknown, Additional comments ---------
+# --------- ЕДИНАЯ ТАБЛИЦА ПО МЕСЯЦАМ (Month) — I–J / Aspects / Dislike / Comments + итоги ---------
 st.markdown("---")
-st.subheader("Сводная таблица по урокам (S) — I–J / Aspects / Dislike / Comments + итоги")
+st.subheader("Сводная таблица по месяцам (Month) — I–J / Aspects / Dislike / Comments + итоги")
 
-# === Подготовка данных ДЛЯ СВОДНОЙ ТАБЛИЦЫ (самодостаточно) ===
+KEY_COL_FR1 = "R"   # FR1: Month #
+KEY_COL_FR2 = "Q"   # FR2: Month #
+KEY_LABEL    = "Month"  # имя колонки в выходной таблице
 
-# 0) FR2 — I–J пары по урокам (R) -> кладём в те же номера S
-ij_pairs_per_s = {}
-if not df2_base.empty and {"R","I","J"}.issubset(df2_base.columns):
+# === Подготовка данных ДЛЯ СВОДНОЙ ТАБЛИЦЫ по МЕСЯЦАМ ===
+
+# 0) FR2 — пары I–J по месяцам (Q)
+ij_pairs_per_m = {}
+if not df2_base.empty and {KEY_COL_FR2, "I", "J"}.issubset(df2_base.columns):
     df2_IJ_src = df2_base.copy()
-    if selected_lessons:
-        df2_IJ_src["R_num"] = pd.to_numeric(df2_IJ_src["R"], errors="coerce")
-        df2_IJ_src = df2_IJ_src[df2_IJ_src["R_num"].isin(selected_lessons)]
-    dIJ = df2_IJ_src[["R","I","J"]].copy()
-    dIJ["R"] = pd.to_numeric(dIJ["R"], errors="coerce")
+    dIJ = df2_IJ_src[[KEY_COL_FR2, "I", "J"]].copy()
+    dIJ[KEY_COL_FR2] = pd.to_numeric(dIJ[KEY_COL_FR2], errors="coerce")
     dIJ["I"] = pd.to_numeric(dIJ["I"], errors="coerce")
-    dIJ = dIJ.dropna(subset=["R","I","J"])
+    dIJ = dIJ.dropna(subset=[KEY_COL_FR2, "I", "J"])
     if not dIJ.empty:
-        dIJ["R"] = dIJ["R"].astype(int)
+        dIJ[KEY_COL_FR2] = dIJ[KEY_COL_FR2].astype(int)
         dIJ["I"] = dIJ["I"].astype(int)
         splitter_ij = re.compile(r"[;\/\n|]+")  # без запятой
         for _, rr in dIJ.iterrows():
-            s = int(rr["R"])  # та же шкала уроков
+            m = int(rr[KEY_COL_FR2])
             score = int(rr["I"])
             raw = str(rr["J"] or "").strip()
             if not raw:
@@ -1283,22 +1284,18 @@ if not df2_base.empty and {"R","I","J"}.issubset(df2_base.columns):
                 if not t:
                     continue
                 key = (score, translate_es_to_en_safe(t))
-                ij_pairs_per_s.setdefault(s, Counter())[key] += 1
+                ij_pairs_per_m.setdefault(m, Counter())[key] += 1
 
-# 1) Aspects + Unknown из FR1:E по S
+# 1) Aspects (FR1:E) по месяцам (R)
 rows_aspects = []
-unknown_per_s = {}
-if not df1_base.empty and {"S","E"}.issubset(df1_base.columns):
-    df_aspects_src = df1_base.copy()
-    if selected_lessons:
-        df_aspects_src["S_num"] = pd.to_numeric(df_aspects_src["S"], errors="coerce")
-        df_aspects_src = df_aspects_src[df_aspects_src["S_num"].isin(selected_lessons)]
-    df_tmp = df_aspects_src[["S","E"]].copy()
-    df_tmp["S"] = pd.to_numeric(df_tmp["S"], errors="coerce")
-    df_tmp = df_tmp.dropna(subset=["S"])
-    df_tmp["S"] = df_tmp["S"].astype(int)
-    for _, rr in df_tmp.iterrows():
-        s_val = int(rr["S"])
+unknown_per_m = {}
+if not df1_base.empty and {KEY_COL_FR1, "E"}.issubset(df1_base.columns):
+    d1 = df1_base[[KEY_COL_FR1, "E"]].copy()
+    d1[KEY_COL_FR1] = pd.to_numeric(d1[KEY_COL_FR1], errors="coerce")
+    d1 = d1.dropna(subset=[KEY_COL_FR1])
+    d1[KEY_COL_FR1] = d1[KEY_COL_FR1].astype(int)
+    for _, rr in d1.iterrows():
+        m_val = int(rr[KEY_COL_FR1])
         txt = str(rr["E"] or "").strip()
         if not txt:
             continue
@@ -1311,29 +1308,26 @@ if not df1_base.empty and {"S","E"}.issubset(df1_base.columns):
             matched = False
             for es_norm, es, en in _ASPECTS_NORM:
                 if t == es_norm or es_norm in t:
-                    rows_aspects.append((s_val, en))
+                    rows_aspects.append((m_val, en))
                     matched = True
                     break
             if not matched:
-                unknown_per_s.setdefault(s_val, Counter())[p_clean] += 1
-df_as = (pd.DataFrame(rows_aspects, columns=["S","aspect_en"])
-         if rows_aspects else pd.DataFrame(columns=["S","aspect_en"]))
+                unknown_per_m.setdefault(m_val, Counter())[p_clean] += 1
+df_as = (pd.DataFrame(rows_aspects, columns=[KEY_LABEL, "aspect_en"])
+         if rows_aspects else pd.DataFrame(columns=[KEY_LABEL, "aspect_en"]))
+df_as.rename(columns={KEY_LABEL: KEY_LABEL}, inplace=True)
 
-# 2) Dislike + Unknown из FR1:F по S
+# 2) Dislike (FR1:F) по месяцам (R)
 rows_dislike = []
-unknown_dislike_per_s = {}
-if not df1_base.empty and {"S","F"}.issubset(df1_base.columns):
-    df_dislike_src = df1_base.copy()
-    if selected_lessons:
-        df_dislike_src["S_num"] = pd.to_numeric(df_dislike_src["S"], errors="coerce")
-        df_dislike_src = df_dislike_src[df_dislike_src["S_num"].isin(selected_lessons)]
-    df_tmp = df_dislike_src[["S","F"]].copy()
-    df_tmp["S"] = pd.to_numeric(df_tmp["S"], errors="coerce")
-    df_tmp = df_tmp.dropna(subset=["S"])
-    df_tmp["S"] = df_tmp["S"].astype(int)
+unknown_dislike_per_m = {}
+if not df1_base.empty and {KEY_COL_FR1, "F"}.issubset(df1_base.columns):
+    d1d = df1_base[[KEY_COL_FR1, "F"]].copy()
+    d1d[KEY_COL_FR1] = pd.to_numeric(d1d[KEY_COL_FR1], errors="coerce")
+    d1d = d1d.dropna(subset=[KEY_COL_FR1])
+    d1d[KEY_COL_FR1] = d1d[KEY_COL_FR1].astype(int)
     dislike_norm = [(_norm_local(es), en) for es, en in DISLIKE_ES_EN]
-    for _, rr in df_tmp.iterrows():
-        s_val = int(rr["S"])
+    for _, rr in d1d.iterrows():
+        m_val = int(rr[KEY_COL_FR1])
         txt = str(rr["F"] or "").strip()
         if not txt:
             continue
@@ -1346,30 +1340,26 @@ if not df1_base.empty and {"S","F"}.issubset(df1_base.columns):
             matched = False
             for es_norm, en in dislike_norm:
                 if t == es_norm or es_norm in t:
-                    rows_dislike.append((s_val, en))
+                    rows_dislike.append((m_val, en))
                     matched = True
                     break
             if not matched:
-                unknown_dislike_per_s.setdefault(s_val, Counter())[p_clean] += 1
-df_dis = (pd.DataFrame(rows_dislike, columns=["S","aspect_en"])
-          if rows_dislike else pd.DataFrame(columns=["S","aspect_en"]))
+                unknown_dislike_per_m.setdefault(m_val, Counter())[p_clean] += 1
+df_dis = (pd.DataFrame(rows_dislike, columns=[KEY_LABEL, "aspect_en"])
+          if rows_dislike else pd.DataFrame(columns=[KEY_LABEL, "aspect_en"]))
 
-# 3) Additional comments — FR1:H по S + FR2:K по R (кладём в те же S)
-comments_per_lesson = {}
+# 3) Comments — FR1:H по R + FR2:K по Q (обе в Month)
+comments_per_month = {}
 splitter = re.compile(r"[;\/\n|]+")  # без запятой
 
-# FR1:H
-if not df1_base.empty and {"S","H"}.issubset(df1_base.columns):
-    df_add_1 = df1_base.copy()
-    if selected_lessons:
-        df_add_1["S_num"] = pd.to_numeric(df_add_1["S"], errors="coerce")
-        df_add_1 = df_add_1[df_add_1["S_num"].isin(selected_lessons)]
-    d1 = df_add_1[["S","H"]].copy()
-    d1["S"] = pd.to_numeric(d1["S"], errors="coerce")
-    d1 = d1.dropna(subset=["S"])
-    d1["S"] = d1["S"].astype(int)
-    for _, rr in d1.iterrows():
-        s = int(rr["S"])
+# FR1:H по R
+if not df1_base.empty and {KEY_COL_FR1, "H"}.issubset(df1_base.columns):
+    d1c = df1_base[[KEY_COL_FR1, "H"]].copy()
+    d1c[KEY_COL_FR1] = pd.to_numeric(d1c[KEY_COL_FR1], errors="coerce")
+    d1c = d1c.dropna(subset=[KEY_COL_FR1])
+    d1c[KEY_COL_FR1] = d1c[KEY_COL_FR1].astype(int)
+    for _, rr in d1c.iterrows():
+        m = int(rr[KEY_COL_FR1])
         raw = str(rr["H"] or "").strip()
         if not raw:
             continue
@@ -1377,20 +1367,16 @@ if not df1_base.empty and {"S","H"}.issubset(df1_base.columns):
         for p in parts:
             t = p.strip()
             if t:
-                comments_per_lesson.setdefault(s, Counter())[t] += 1
+                comments_per_month.setdefault(m, Counter())[t] += 1
 
-# FR2:K по R -> в S с тем же номером
-if not df2_base.empty and {"R","K"}.issubset(df2_base.columns):
-    df_add_2 = df2_base.copy()
-    if selected_lessons:
-        df_add_2["R_num"] = pd.to_numeric(df_add_2["R"], errors="coerce")
-        df_add_2 = df_add_2[df_add_2["R_num"].isin(selected_lessons)]
-    d2 = df_add_2[["R","K"]].copy()
-    d2["R"] = pd.to_numeric(d2["R"], errors="coerce")
-    d2 = d2.dropna(subset=["R"])
-    d2["R"] = d2["R"].astype(int)
-    for _, rr in d2.iterrows():
-        s = int(rr["R"])
+# FR2:K по Q
+if not df2_base.empty and {KEY_COL_FR2, "K"}.issubset(df2_base.columns):
+    d2c = df2_base[[KEY_COL_FR2, "K"]].copy()
+    d2c[KEY_COL_FR2] = pd.to_numeric(d2c[KEY_COL_FR2], errors="coerce")
+    d2c = d2c.dropna(subset=[KEY_COL_FR2])
+    d2c[KEY_COL_FR2] = d2c[KEY_COL_FR2].astype(int)
+    for _, rr in d2c.iterrows():
+        m = int(rr[KEY_COL_FR2])
         raw = str(rr["K"] or "").strip()
         if not raw:
             continue
@@ -1398,29 +1384,27 @@ if not df2_base.empty and {"R","K"}.issubset(df2_base.columns):
         for p in parts:
             t = p.strip()
             if t:
-                comments_per_lesson.setdefault(s, Counter())[t] += 1
-# === Конец подготовки данных ===
+                comments_per_month.setdefault(m, Counter())[t] += 1
 
 # === Формирование сводной таблицы ===
-all_lessons = sorted(set(
-    list(ij_pairs_per_s.keys()) +
-    (df_as["S"].unique().tolist() if not df_as.empty else []) +
-    list(unknown_per_s.keys()) +
-    (df_dis["S"].unique().tolist() if not df_dis.empty else []) +
-    list(unknown_dislike_per_s.keys()) +
-    list(comments_per_lesson.keys())
+all_months = sorted(set(
+    list(ij_pairs_per_m.keys()) +
+    (df_as[KEY_LABEL].unique().tolist() if not df_as.empty else []) +
+    list(unknown_per_m.keys()) +
+    (df_dis[KEY_LABEL].unique().tolist() if not df_dis.empty else []) +
+    list(unknown_dislike_per_m.keys()) +
+    list(comments_per_month.keys())
 ))
 
-if not all_lessons:
+if not all_months:
     st.info("Нет данных для сводной таблицы по выбранным фильтрам.")
 else:
     unified_rows = []
-    for s in all_lessons:
-        # ---------- I — J ----------
-        ij_counter = ij_pairs_per_s.get(s, Counter())
+    for m in all_months:
+        # I—J
+        ij_counter = ij_pairs_per_m.get(m, Counter())
         total_pairs = int(sum(ij_counter.values()))
         if ij_counter:
-            # сортируем: чаще выше; при равенстве — по убыванию оценки, затем по тексту (EN)
             ij_items = sorted(
                 ij_counter.items(),
                 key=lambda kv: (-kv[1], -int(kv[0][0]), _safe_text(kv[0][1]).casefold())
@@ -1433,9 +1417,9 @@ else:
         else:
             ij_text = ""
 
-        # ---------- Aspects + Unknown ----------
-        if not df_as.empty and s in df_as["S"].values:
-            cnt_aspects = (df_as[df_as["S"] == s]["aspect_en"]
+        # Aspects + Unknown
+        if not df_as.empty and m in df_as[KEY_LABEL].values:
+            cnt_aspects = (df_as[df_as[KEY_LABEL] == m]["aspect_en"]
                            .value_counts()
                            .sort_values(ascending=False))
             total_aspects_known = int(cnt_aspects.sum())
@@ -1443,7 +1427,7 @@ else:
             cnt_aspects = pd.Series(dtype=int)
             total_aspects_known = 0
 
-        unk_as = unknown_per_s.get(s, Counter())
+        unk_as = unknown_per_m.get(m, Counter())
         total_aspects_unknown = int(sum(unk_as.values()))
         unk_as_items = sorted(unk_as.items(), key=lambda x: (-x[1], _safe_text(x[0]).casefold()))[:10]
         rest_as_unk = total_aspects_unknown - sum(c for _, c in unk_as_items)
@@ -1461,9 +1445,9 @@ else:
             if rest_as_unk > 0:
                 aspects_bul.append(f"• … (+{rest_as_unk})")
 
-        # ---------- Dislike + Unknown ----------
-        if not df_dis.empty and s in df_dis["S"].values:
-            cnt_dis = (df_dis[df_dis["S"] == s]["aspect_en"]
+        # Dislike + Unknown
+        if not df_dis.empty and m in df_dis[KEY_LABEL].values:
+            cnt_dis = (df_dis[df_dis[KEY_LABEL] == m]["aspect_en"]
                        .value_counts()
                        .sort_values(ascending=False))
             total_dis_known = int(cnt_dis.sum())
@@ -1471,7 +1455,7 @@ else:
             cnt_dis = pd.Series(dtype=int)
             total_dis_known = 0
 
-        unk_dis = unknown_dislike_per_s.get(s, Counter())
+        unk_dis = unknown_dislike_per_m.get(m, Counter())
         total_dis_unknown = int(sum(unk_dis.values()))
         unk_dis_items = sorted(unk_dis.items(), key=lambda x: (-x[1], _safe_text(x[0]).casefold()))[:10]
         rest_dis_unk = total_dis_unknown - sum(c for _, c in unk_dis_items)
@@ -1489,8 +1473,8 @@ else:
             if rest_dis_unk > 0:
                 dis_bul.append(f"• … (+{rest_dis_unk})")
 
-        # ---------- Comments (EN) ----------
-        comm = comments_per_lesson.get(s, Counter())
+        # Comments (EN)
+        comm = comments_per_month.get(m, Counter())
         total_comm = int(sum(comm.values()))
         if comm:
             comm_items = sorted(comm.items(), key=lambda x: (-x[1], _safe_text(x[0]).casefold()))
@@ -1500,11 +1484,10 @@ else:
         else:
             comm_txt = ""
 
-        # ---------- Итоги ----------
         total_all = total_aspects_all + total_dis_all + total_comm
 
         unified_rows.append({
-            "S": int(s),
+            KEY_LABEL: int(m),
             "I — J (EN)": ij_text,
             "Total I–J pairs": total_pairs,
             "Aspects + Unknown (EN)": "\n".join(aspects_bul),
@@ -1516,11 +1499,11 @@ else:
             "Total mentions (all)": total_all,
         })
 
-    unified_table = pd.DataFrame(unified_rows).sort_values("S").reset_index(drop=True)
+    unified_table = pd.DataFrame(unified_rows).sort_values(KEY_LABEL).reset_index(drop=True)
     height = min(1000, 140 + 28 * len(unified_table))
     st.dataframe(
         unified_table[
-            ["S",
+            [KEY_LABEL,
              "I — J (EN)", "Total I–J pairs",
              "Aspects + Unknown (EN)", "Total aspects",
              "Dislike + Unknown (EN)", "Total dislike",
