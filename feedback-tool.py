@@ -1200,8 +1200,15 @@ with col3:
               )
         )
 
-        st.altair_chart((bars1 + overlay1).properties(height=420),
-                        use_container_width=True, theme=None)
+        st.altair_chart(
+            (bars1 + overlay1)
+                .properties(
+                    height=420,
+                    padding={"left": 10, "right": 48, "top": 10, "bottom": 70}  # ← добавили запас
+                )
+                .configure_view(clip=False, stroke=None),  # ← не клипать содержимое, убрать рамку
+            use_container_width=True, theme=None
+        )
 
 with col4:
     st.markdown("**Lesson feedback**")
@@ -1247,8 +1254,15 @@ with col4:
               )
         )
 
-        st.altair_chart((bars2 + overlay2).properties(height=420),
-                        use_container_width=True, theme=None)
+        st.altair_chart(
+            (bars2 + overlay2)
+                .properties(
+                    height=420,
+                    padding={"left": 10, "right": 48, "top": 10, "bottom": 70}
+                )
+                .configure_view(clip=False, stroke=None),
+            use_container_width=True, theme=None
+        )
 
 # --------- ЕДИНАЯ ТАБЛИЦА ПО МЕСЯЦАМ (Month) — I–J / Aspects / Dislike / Comments + итоги ---------
 st.markdown("---")
@@ -1527,7 +1541,6 @@ if not df_aspects.empty and selected_lessons:
 asp_counts, _unknown_all = build_aspects_counts(df_aspects, text_col="E", date_col="A", granularity=granularity)
 
 # ---- График: «Аспекты по датам (ось X — A)» с быстрым общим тултипом ----
-st.markdown("**in time**")
 if asp_counts.empty:
     st.info("Не нашёл упоминаний аспектов (лист 'Form Responses 1', колонка E).")
 else:
