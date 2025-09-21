@@ -731,8 +731,8 @@ if not df2_f.empty:
     df2_f = add_bucket(df2_f, "A", granularity)
     df2_f = ensure_bucket_and_label(df2_f, "A", granularity)
 
-fr1_out, fr1_bucket_order, fr1_val_order, fr1_title = prep_distribution(df1_f, "G", [1,2,3,4,5], "G")
-fr2_out, fr2_bucket_order, fr2_val_order, fr2_title = prep_distribution(df2_f, "I", list(range(1,11)), "I")
+fr1_out, fr1_bucket_order, fr1_val_order, fr1_title = prep_distribution(df1_f, "G", [1,2,3,4,5], "Score")
+fr2_out, fr2_bucket_order, fr2_val_order, fr2_title = prep_distribution(df2_f, "I", list(range(1,11)), "Score")
 
 # ==================== ОТРИСОВКА ====================
 
@@ -1008,12 +1008,12 @@ with right_col:
 # ---------- РАСПРЕДЕЛЕНИЕ ЗНАЧЕНИЙ ПО месяцам (в %) ДЛЯ ТЕХ ЖЕ ШКАЛ ----------
 
 st.markdown("---")
-st.subheader(f"Распределение значений (гранулярность: {granularity.lower()})")
+st.subheader(f"Scores - distribution in time")
 
 col3, col4 = st.columns([1, 1])
 
 with col3:
-    st.markdown("**Scores in time (distribution, source: Monthly feedback)**")
+    st.markdown("**Monthly feedback**")
     if fr1_out.empty:
         st.info("Нет данных (FR1).")
     else:
@@ -1035,7 +1035,7 @@ with col3:
         st.altair_chart(bars1, use_container_width=True, theme=None)
 
 with col4:
-    st.markdown("**Scores in time (distribution, source: Lesson feedback)**")
+    st.markdown("**Lesson feedback**")
     if fr2_out.empty:
         st.info("Нет данных (FR2).")
     else:
