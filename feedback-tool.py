@@ -1168,7 +1168,6 @@ with col3:
                   color=alt.Color("val_str:N", title="Score", sort=fr1_val_order),
                   order=alt.Order("val:Q", sort="ascending"),
                   tooltip=[
-                      alt.Tooltip("bucket_label:N", title="Period"),
                       alt.Tooltip("val_str:N", title="Score"),
                       alt.Tooltip("count:Q", title="Answers"),
                       alt.Tooltip("pct:Q", title="% of all answers", format=".0%")
