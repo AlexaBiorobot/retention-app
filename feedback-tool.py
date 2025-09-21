@@ -2476,4 +2476,95 @@ with refunds_tab:
             )
             st.altair_chart(bar, use_container_width=True, theme=None)
 
+# --- Refunds: source data (Google Sheet) ---
+REFUNDS_SHEET_ID = "1ITOBSlVk4trLSKAkc5vobQrdTz6ve1Z5ljf1CnQfDJo"
+ws_ref = client.open_by_key(REFUNDS_SHEET_ID).worksheet("Refunds - LatAm")
+df_refunds = pd.DataFrame(ws_ref.get_all_records())  # uses header row
+
+# keep only AU == TRUE
+df_refunds["AU"] = (
+    df_refunds["AU"].astype(str).str.strip().str.lower().isin(["true", "1", "yes"])
+)
+df_refunds = df_refunds[df_refunds["AU"]]
+
+# month from AS
+df_refunds["AS"] = pd.to_datetime(df_refunds["AS"], errors="coerce")
+df_refunds = df_refunds.dropna(subset=["AS"])
+df_refunds["Month"] = df_refunds["AS"].dt.to_period("M").astype(str)
+
+# reason column (K). Replace blanks/NaN with "Unspecified"
+df_refunds["K"] = df_refunds["K"].astype(str).str.strip()
+df_refunds.loc[df_refunds["K"].eq("") | df_refunds["K"].str.lower().eq("nan"), "K"] = "Unspecified"
+
+tab1, tab2 = st.tabs(["Refunds — by month", "Refund reasons — share by month"])
+
+# ---------- TAB 1: simple count by month ----------
+with tab1:
+    st.markdown("**Count of refunds per month (AU = TRUE)**")
+    if df_refunds.empty:
+        st.info("No data after filtering by AU = TRUE.")
+    else:
+        by_month = (
+            df_refunds.groupby("Month", as_index=False)
+                      .size()
+                      .rename(columns={"size": "count"})
+                      .sort_values("Month")
+        )
+        ch_counts = (
+            alt.Chart(by_month)
+               .mark_bar()
+               .encode(
+                   x=alt.X("Month:N", sort="ascending", title="Month"),
+                   y=alt.Y("count:Q", title="Refunds (count)"),
+                   tooltip=[
+                       alt.Tooltip("Month:N", title="Month"),
+                       alt.Tooltip("count:Q", title="Refunds"),
+                   ],
+               )
+               .properties(height=420)
+        )
+        st.altair_chart(ch_counts, use_container_width=True, theme=None)
+
+# ---------- TAB 2: 100% stacked by reason (K) per month ----------
+with tab2:
+    st.markdown("**Refund reasons share by month (AU = TRUE)**")
+    if df_refunds.empty:
+        st.info("No data after filtering by AU = TRUE.")
+    else:
+        # counts per Month & Reason
+        grp = (
+            df_refunds.groupby(["Month", "K"], as_index=False)
+                      .size()
+                      .rename(columns={"size": "count"})
+        )
+        totals = grp.groupby("Month", as_index=False)["count"].sum().rename(columns={"count": "total"})
+        out = grp.merge(totals, on="Month", how="left")
+        # order months
+        month_order = sorted(out["Month"].unique().tolist())
+
+        base = alt.Chart(out).transform_calculate(pct="datum.count / datum.total")
+
+        ch_stack = (
+            base.mark_bar()
+                .encode(
+                    x=alt.X("Month:N", sort=month_order, title="Month"),
+                    y=alt.Y(
+                        "count:Q",
+                        stack="normalize",
+                        axis=alt.Axis(format="%", title="Share of refunds (100%)"),
+                        scale=alt.Scale(domain=[0, 1], nice=False, clamp=True),
+                    ),
+                    color=alt.Color("K:N", title="Refund reason"),
+                    order=alt.Order("count:Q", sort="ascending"),
+                    tooltip=[
+                        alt.Tooltip("Month:N", title="Month"),
+                        alt.Tooltip("K:N", title="Reason"),
+                        alt.Tooltip("count:Q", title="Count"),
+                        alt.Tooltip("pct:Q", title="Share", format=".0%"),
+                        alt.Tooltip("total:Q", title="Total in month"),
+                    ],
+                )
+                .properties(height=420)
+        )
+        st.altair_chart(ch_stack, use_container_width=True, theme=None)
 
