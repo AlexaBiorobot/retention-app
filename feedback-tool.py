@@ -224,29 +224,30 @@ def _pack_full_tooltip(df_src: pd.DataFrame, x_col: str, legend_title: str):
     d["val"] = pd.to_numeric(d["val"], errors="coerce")
     d["count"] = pd.to_numeric(d["count"], errors="coerce").fillna(0).astype(int)
     d = d.dropna(subset=["val"])
-
     if d.empty:
         return pd.DataFrame(columns=[x_col, "total"]), []
 
     d["val"] = d["val"].astype(int)
 
-    # wide: по периодам x_col, по колонкам — числовые значения шкалы (1,2,3,...)
+    # wide: индексы — период (x_col); колонки — числовые значения шкалы (1..)
     g = d.groupby([x_col, "val"], as_index=False)["count"].sum()
-    wide = (g.pivot(index=x_col, columns="val", values="count")
-              .fillna(0).astype(int)
-              .reset_index())
+    wide = (
+        g.pivot(index=x_col, columns="val", values="count")
+         .fillna(0).astype(int)
+         .reset_index()
+    )
 
-    # список значений шкалы в порядке возрастания
+    # список значений шкалы по возрастанию
     val_cols = sorted([c for c in wide.columns if c != x_col])
 
     # total по периоду
     wide["total"] = wide[val_cols].sum(axis=1).astype(int)
 
-    # превращаем каждую числовую колонку в строку вида "1 — 12 (18%)"
+    # в тултипе хотим строки: "1 — 12 (18%)", "2 — 3 (5%)", ...
     tip_cols = []
     for v in val_cols:
-        col_out = str(v)          # чтобы в тултипе заголовок строки был "1","2",...
-        tip_cols.append(col_out)
+        out_col = str(v)   # имя столбца для тултипа
+        tip_cols.append(out_col)
 
         def _fmt_row(r):
             c = int(r.get(v, 0))
@@ -254,7 +255,7 @@ def _pack_full_tooltip(df_src: pd.DataFrame, x_col: str, legend_title: str):
             pct = (c / t) if t > 0 else 0.0
             return f"{v} — {c} ({pct:.0%})"
 
-        wide[col_out] = wide.apply(_fmt_row, axis=1)
+        wide[out_col] = wide.apply(_fmt_row, axis=1)
 
     return wide[[x_col, "total"] + tip_cols], tip_cols
 
