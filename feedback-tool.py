@@ -841,7 +841,7 @@ if not df2_pct.empty:
                           .agg(avg_score100=("score100","mean"),
                                count=("score100","size"))
                           .rename(columns={AX_FR2: "Month"})   # приводим к общей оси "Month"
-                          .assign(source="Lesson fedback"))
+                          .assign(source="Lesson feedback"))
     else:
         fr2_u = pd.DataFrame(columns=["Month","avg_score100","count","source"])
 else:
@@ -969,7 +969,7 @@ def _build_numeric_counts_by_axis(df_src: pd.DataFrame, axis_col: str, val_col: 
     out = grp.merge(totals, on=axis_col, how="left")
     return out
 
-def _pack_full_tooltip(out_df: pd.DataFrame, x_col: str, legend_title: str):
+def _pack_full_tooltip_axis(out_df: pd.DataFrame, x_col: str, legend_title: str):
     """
     Готовит по одному ряду на x-значение с ПОСТРОЧНОЙ разбивкой.
     Возвращает DataFrame и список имён колонок для тултипа.
@@ -1167,7 +1167,7 @@ with col3:
                                 .sum().rename(columns={"count": "total"}))
         packed1_in = packed1_in.merge(totals1, on="X", how="left")
         
-        packed1, tip_cols1 = _pack_full_tooltip(packed1_in, x_col="X", legend_title="Score")
+        packed1, tip_cols1 = _pack_full_tooltip_axis(packed1_in, x_col="X", legend_title="Score")
 
 
         overlay1 = (
@@ -1213,7 +1213,7 @@ with col4:
                                 .sum().rename(columns={"count": "total"}))
         packed2_in = packed2_in.merge(totals2, on="X", how="left")
         
-        packed2, tip_cols2 = _pack_full_tooltip(packed2_in, x_col="X", legend_title="Score")
+        packed2, tip_cols2 = _pack_full_tooltip_axis(packed2_in, x_col="X", legend_title="Score")
 
 
         overlay2 = (
