@@ -2411,7 +2411,27 @@ with refunds_tab:
     st.subheader("Refunds — LatAm")
 
     # 1) One load, lettered columns (AS, AU, K)
-    df_ref = load_sheet_as_letter_df_by_key(REFUNDS_SHEET_ID, REFUNDS_TAB_NAME)
+    # read the sheet and label columns as A..Z, AA.. etc.
+    ws = client.open_by_key(REFUNDS_SHEET_ID).worksheet(REFUNDS_TAB_NAME)
+    vals = ws.get_all_values()
+    if not vals or len(vals) < 2:
+        df_ref = pd.DataFrame()
+    else:
+        import string as _str
+        n_cols = len(vals[0])
+        # build A..Z, AA..AZ, BA..BZ, ...
+        letters = list(_str.ascii_uppercase)
+        cols = letters[:]  # A..Z
+        for a in letters:
+            for b in letters:
+                cols.append(a + b)
+                if len(cols) >= n_cols:
+                    break
+            if len(cols) >= n_cols:
+                break
+        cols = cols[:n_cols]
+        df_ref = pd.DataFrame(vals[1:], columns=cols)
+
 
     if df_ref.empty or not {"AS", "AU"}.issubset(df_ref.columns):
         st.info("No data (expected columns: AS — month, AU — boolean flag).")
