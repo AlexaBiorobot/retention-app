@@ -213,62 +213,49 @@ def _to_percentile_0_100(df: pd.DataFrame, val_col: str) -> pd.Series:
 
 def _pack_full_tooltip(df_src: pd.DataFrame, x_col: str, legend_title: str):
     """
-    Готовит DataFrame для «общего» тултипа по целому столбику.
-    Ожидает вход с колонками:
-      - x_col (например, 'X' = bucket_label)
-      - 'val' (числовое значение шкалы)
-      - 'count' (кол-во в этой категории)
-      - 'total' (всего по периоду)
-    Возвращает:
-      packed_df, tip_cols — датафрейм для overlay и список колонок для тултипа.
+    Готовит DF для «общего» тултипа по целому столбику.
+    Требуемые колонки на входе: x_col, 'val', 'count'. 'total' можно не передавать.
+    Возвращает: (packed_df, tip_cols) где tip_cols — список строковых столбцов "1","2",...
     """
-    if df_src.empty:
+    if df_src.empty or not {x_col, "val", "count"}.issubset(df_src.columns):
         return pd.DataFrame(columns=[x_col, "total"]), []
 
-    d = df_src.copy()
+    d = df_src[[x_col, "val", "count"]].copy()
+    d["val"] = pd.to_numeric(d["val"], errors="coerce")
+    d["count"] = pd.to_numeric(d["count"], errors="coerce").fillna(0).astype(int)
+    d = d.dropna(subset=["val"])
 
-    # убеждаемся, что есть total; если нет — досчитаем
-    if "total" not in d.columns:
-        tot = (d.groupby(x_col, as_index=False)["count"]
-                 .sum().rename(columns={"count": "total"}))
-        d = d.merge(tot, on=x_col, how="left")
-
-    # берём уникальные значения шкалы по возрастанию
-    vals = sorted(pd.to_numeric(d["val"], errors="coerce").dropna().astype(int).unique().tolist())
-    if not vals:
+    if d.empty:
         return pd.DataFrame(columns=[x_col, "total"]), []
 
-    # сводная: x × val -> count
-    g = (d.groupby([x_col, "val"], as_index=False)["count"].sum())
+    d["val"] = d["val"].astype(int)
+
+    # wide: по периодам x_col, по колонкам — числовые значения шкалы (1,2,3,...)
+    g = d.groupby([x_col, "val"], as_index=False)["count"].sum()
     wide = (g.pivot(index=x_col, columns="val", values="count")
               .fillna(0).astype(int)
               .reset_index())
 
-    # добавляем total
-    totals = (g.groupby(x_col, as_index=False)["count"]
-                .sum().rename(columns={"count": "total"}))
-    wide = wide.merge(totals, on=x_col, how="left")
+    # список значений шкалы в порядке возрастания
+    val_cols = sorted([c for c in wide.columns if c != x_col])
 
-    # для каждого значения шкалы делаем текстовую колонку "1", "2", ...
+    # total по периоду
+    wide["total"] = wide[val_cols].sum(axis=1).astype(int)
+
+    # превращаем каждую числовую колонку в строку вида "1 — 12 (18%)"
     tip_cols = []
-    for v in vals:
-        col_name = str(v)  # чтобы в тултипе были строки "1", "2", ...
-        tip_cols.append(col_name)
+    for v in val_cols:
+        col_out = str(v)          # чтобы в тултипе заголовок строки был "1","2",...
+        tip_cols.append(col_out)
 
-        # число ответов по v
-        cnt_col_exists = v in wide.columns
         def _fmt_row(r):
-            c = int(r[v] if cnt_col_exists else 0)
-            t = int(r["total"] or 0)
-            if t <= 0:
-                return f"{v} — 0 (0%)"
-            # аккуратно считаем проценты
-            pct = (c / t) if c > 0 else 0.0
+            c = int(r.get(v, 0))
+            t = int(r.get("total", 0))
+            pct = (c / t) if t > 0 else 0.0
             return f"{v} — {c} ({pct:.0%})"
 
-        wide[col_name] = wide.apply(_fmt_row, axis=1)
+        wide[col_out] = wide.apply(_fmt_row, axis=1)
 
-    # Переименуем ось обратно в 'X' (опционально): пусть остаётся как есть.
     return wide[[x_col, "total"] + tip_cols], tip_cols
 
 # ===== Аспекты и перевод =====
@@ -1175,12 +1162,12 @@ with col3:
         # общий тултип на весь столбик
         _tmp1 = fr1_out.rename(columns={"bucket_label": "X"})
         packed1_in = _tmp1[["X", "val", "count"]].copy()
-        # добавим total по X
         totals1 = (packed1_in.groupby("X", as_index=False)["count"]
-                              .sum().rename(columns={"count": "total"}))
+                                .sum().rename(columns={"count": "total"}))
         packed1_in = packed1_in.merge(totals1, on="X", how="left")
-
+        
         packed1, tip_cols1 = _pack_full_tooltip(packed1_in, x_col="X", legend_title="Score")
+
 
         overlay1 = (
             alt.Chart(packed1).mark_bar(size=BAR_SIZE.get(granularity, 36), opacity=0.001)
@@ -1222,10 +1209,11 @@ with col4:
         _tmp2 = fr2_out.rename(columns={"bucket_label": "X"})
         packed2_in = _tmp2[["X", "val", "count"]].copy()
         totals2 = (packed2_in.groupby("X", as_index=False)["count"]
-                              .sum().rename(columns={"count": "total"}))
+                                .sum().rename(columns={"count": "total"}))
         packed2_in = packed2_in.merge(totals2, on="X", how="left")
-
+        
         packed2, tip_cols2 = _pack_full_tooltip(packed2_in, x_col="X", legend_title="Score")
+
 
         overlay2 = (
             alt.Chart(packed2).mark_bar(size=BAR_SIZE.get(granularity, 36), opacity=0.001)
