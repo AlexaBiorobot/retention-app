@@ -943,11 +943,9 @@ def _pack_full_tooltip(out_df: pd.DataFrame, x_col: str, legend_title: str):
         xval = r[x_col]
         total = int(sum(r[c] for c in r.index if c != x_col))
         row = {x_col: xval, "total": total}
-        # сформируем по колонке на каждое значение шкалы
         for v in vals:
-            col_name = f"{v}"   # колонка для тултипа
-            c = int(r.get(str(v), 0))
-            row[col_name] = (f"— {c} ({(c/total):.0%})" if total > 0 and c > 0 else "")
+            cnt = int(r.get(str(v), 0))
+            row[str(v)] = (f"— {cnt} ({(cnt/total):.0%})" if total > 0 and cnt > 0 else "")
         rows.append(row)
 
     df = pd.DataFrame(rows)
