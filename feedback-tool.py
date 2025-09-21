@@ -2402,33 +2402,6 @@ with cH2:
 
 # ==================== Refunds (LatAm) — separate tab ====================
 
-# вспомогательная функция: генерим имена колонок A..Z, AA..AZ, BA..BZ, ...
-def _excel_cols(n: int) -> list[str]:
-    import string
-    cols = []
-    letters = string.ascii_uppercase
-    # 1-буквенные
-    for ch in letters:
-        cols.append(ch)
-        if len(cols) == n:
-            return cols
-    # 2-буквенные (хватает для AS/AU)
-    for a in letters:
-        for b in letters:
-            cols.append(a + b)
-            if len(cols) == n:
-                return cols
-    return cols[:n]
-
-def load_sheet_as_letter_df_by_key(sheet_key: str, sheet_name: str) -> pd.DataFrame:
-    ws = client.open_by_key(sheet_key).worksheet(sheet_name)
-    values = ws.get_all_values()
-    if not values or len(values) < 2:
-        return pd.DataFrame()
-    num_cols = len(values[0])
-    cols = _excel_cols(num_cols)  # A..Z, AA..AZ, ...
-    return pd.DataFrame(values[1:], columns=cols)
-
 REFUNDS_SHEET_ID = "1ITOBSlVk4trLSKAkc5vobQrdTz6ve1Z5ljf1CnQfDJo"
 REFUNDS_TAB_NAME = "Refunds - LatAm"
 
@@ -2437,134 +2410,112 @@ refunds_tab, = st.tabs(["Refunds (LatAm)"])
 with refunds_tab:
     st.subheader("Refunds — LatAm")
 
+    # 1) One load, lettered columns (AS, AU, K)
     df_ref = load_sheet_as_letter_df_by_key(REFUNDS_SHEET_ID, REFUNDS_TAB_NAME)
 
     if df_ref.empty or not {"AS", "AU"}.issubset(df_ref.columns):
         st.info("No data (expected columns: AS — month, AU — boolean flag).")
     else:
-        # AU == TRUE
-        au_true = df_ref["AU"].astype(str).str.strip().str.lower().isin(["true", "1", "yes"])
-        dff = df_ref[au_true].copy()
-
-        # AS → число (на ось X). Если не число — отбрасываем.
-        dff["AS"] = pd.to_numeric(dff["AS"], errors="coerce")
-        dff = dff.dropna(subset=["AS"])
+        # 2) Keep only AU == TRUE
+        dff = df_ref.copy()
+        dff["AU"] = dff["AU"].astype(str).str.strip().str.lower().isin(["true", "1", "yes"])
+        dff = dff[dff["AU"]]
         if dff.empty:
             st.info("No rows with AU=TRUE.")
         else:
-            dff["AS"] = dff["AS"].astype(int)
+            # 3) Build Month label and sort key from AS
+            #    If AS is a date → use YYYY-MM; otherwise try numeric month index.
+            dt = pd.to_datetime(dff["AS"], errors="coerce")
+            as_num = pd.to_numeric(dff["AS"], errors="coerce")
 
-            # считаем количество строк на каждый AS
-            counts = (dff.groupby("AS", as_index=False)
-                        .size()
-                        .rename(columns={"size": "count"})
-                        .sort_values("AS"))
-
-            # график
-            bar = (
-                alt.Chart(counts)
-                  .mark_bar(size=36)
-                  .encode(
-                      x=alt.X("AS:O", title="Month (AS)", sort="ascending"),
-                      y=alt.Y("count:Q", title="Number of rows"),
-                      tooltip=[
-                          alt.Tooltip("AS:O", title="Month (AS)"),
-                          alt.Tooltip("count:Q", title="Rows"),
-                      ],
-                  )
-                  .properties(height=420)
+            # numeric sort key: YYYYMM for dates, else integer AS
+            month_key = np.where(dt.notna(), dt.dt.year * 100 + dt.dt.month, as_num)
+            month_label = np.where(
+                dt.notna(),
+                dt.dt.to_period("M").astype(str),
+                as_num.astype("Int64").astype(str)
             )
-            st.altair_chart(bar, use_container_width=True, theme=None)
 
-# --- Refunds: source data (Google Sheet) ---
-REFUNDS_SHEET_ID = "1ITOBSlVk4trLSKAkc5vobQrdTz6ve1Z5ljf1CnQfDJo"
-ws_ref = client.open_by_key(REFUNDS_SHEET_ID).worksheet("Refunds - LatAm")
-df_refunds = pd.DataFrame(ws_ref.get_all_records())  # uses header row
+            dff = dff.assign(MonthKey=month_key, Month=month_label)
+            dff = dff[~pd.isna(dff["MonthKey"])].copy()
+            dff["MonthKey"] = pd.to_numeric(dff["MonthKey"], errors="coerce")
+            dff = dff.dropna(subset=["MonthKey"])
 
-# keep only AU == TRUE
-df_refunds["AU"] = (
-    df_refunds["AU"].astype(str).str.strip().str.lower().isin(["true", "1", "yes"])
-)
-df_refunds = df_refunds[df_refunds["AU"]]
+            # 4) Reason column (K) -> fill blanks
+            if "K" in dff.columns:
+                dff["K"] = dff["K"].astype(str).str.strip()
+                dff.loc[dff["K"].eq("") | dff["K"].str.lower().eq("nan"), "K"] = "Unspecified"
+            else:
+                dff["K"] = "Unspecified"
 
-# month from AS
-df_refunds["AS"] = pd.to_datetime(df_refunds["AS"], errors="coerce")
-df_refunds = df_refunds.dropna(subset=["AS"])
-df_refunds["Month"] = df_refunds["AS"].dt.to_period("M").astype(str)
+            tab1, tab2 = st.tabs(["Refunds — by month", "Refund reasons — share by month"])
 
-# reason column (K). Replace blanks/NaN with "Unspecified"
-df_refunds["K"] = df_refunds["K"].astype(str).str.strip()
-df_refunds.loc[df_refunds["K"].eq("") | df_refunds["K"].str.lower().eq("nan"), "K"] = "Unspecified"
-
-tab1, tab2 = st.tabs(["Refunds — by month", "Refund reasons — share by month"])
-
-# ---------- TAB 1: simple count by month ----------
-with tab1:
-    st.markdown("**Count of refunds per month (AU = TRUE)**")
-    if df_refunds.empty:
-        st.info("No data after filtering by AU = TRUE.")
-    else:
-        by_month = (
-            df_refunds.groupby("Month", as_index=False)
-                      .size()
-                      .rename(columns={"size": "count"})
-                      .sort_values("Month")
-        )
-        ch_counts = (
-            alt.Chart(by_month)
-               .mark_bar()
-               .encode(
-                   x=alt.X("Month:N", sort="ascending", title="Month"),
-                   y=alt.Y("count:Q", title="Refunds (count)"),
-                   tooltip=[
-                       alt.Tooltip("Month:N", title="Month"),
-                       alt.Tooltip("count:Q", title="Refunds"),
-                   ],
-               )
-               .properties(height=420)
-        )
-        st.altair_chart(ch_counts, use_container_width=True, theme=None)
-
-# ---------- TAB 2: 100% stacked by reason (K) per month ----------
-with tab2:
-    st.markdown("**Refund reasons share by month (AU = TRUE)**")
-    if df_refunds.empty:
-        st.info("No data after filtering by AU = TRUE.")
-    else:
-        # counts per Month & Reason
-        grp = (
-            df_refunds.groupby(["Month", "K"], as_index=False)
-                      .size()
-                      .rename(columns={"size": "count"})
-        )
-        totals = grp.groupby("Month", as_index=False)["count"].sum().rename(columns={"count": "total"})
-        out = grp.merge(totals, on="Month", how="left")
-        # order months
-        month_order = sorted(out["Month"].unique().tolist())
-
-        base = alt.Chart(out).transform_calculate(pct="datum.count / datum.total")
-
-        ch_stack = (
-            base.mark_bar()
-                .encode(
-                    x=alt.X("Month:N", sort=month_order, title="Month"),
-                    y=alt.Y(
-                        "count:Q",
-                        stack="normalize",
-                        axis=alt.Axis(format="%", title="Share of refunds (100%)"),
-                        scale=alt.Scale(domain=[0, 1], nice=False, clamp=True),
-                    ),
-                    color=alt.Color("K:N", title="Refund reason"),
-                    order=alt.Order("count:Q", sort="ascending"),
-                    tooltip=[
-                        alt.Tooltip("Month:N", title="Month"),
-                        alt.Tooltip("K:N", title="Reason"),
-                        alt.Tooltip("count:Q", title="Count"),
-                        alt.Tooltip("pct:Q", title="Share", format=".0%"),
-                        alt.Tooltip("total:Q", title="Total in month"),
-                    ],
+            # ---------- TAB 1: simple count by month ----------
+            with tab1:
+                by_month = (
+                    dff.groupby(["MonthKey", "Month"], as_index=False)
+                       .size()
+                       .rename(columns={"size": "count"})
+                       .sort_values("MonthKey")
                 )
-                .properties(height=420)
-        )
-        st.altair_chart(ch_stack, use_container_width=True, theme=None)
+                month_order = by_month.sort_values("MonthKey")["Month"].tolist()
+
+                ch_counts = (
+                    alt.Chart(by_month)
+                       .mark_bar(size=36)
+                       .encode(
+                           x=alt.X("Month:N", sort=month_order, title="Month"),
+                           y=alt.Y("count:Q", title="Refunds (count)"),
+                           tooltip=[
+                               alt.Tooltip("Month:N", title="Month"),
+                               alt.Tooltip("count:Q", title="Refunds"),
+                           ],
+                       )
+                       .properties(height=420)
+                )
+                st.altair_chart(ch_counts, use_container_width=True, theme=None)
+
+            # ---------- TAB 2: 100% stacked by reason (K) per month ----------
+            with tab2:
+                grp = (
+                    dff.groupby(["MonthKey", "Month", "K"], as_index=False)
+                       .size()
+                       .rename(columns={"size": "count"})
+                )
+                totals = grp.groupby(["MonthKey", "Month"], as_index=False)["count"] \
+                            .sum().rename(columns={"count": "total"})
+                out = grp.merge(totals, on=["MonthKey", "Month"], how="left")
+                month_order = (
+                    out[["MonthKey", "Month"]]
+                    .drop_duplicates()
+                    .sort_values("MonthKey")["Month"]
+                    .tolist()
+                )
+
+                ch_stack = (
+                    alt.Chart(out)
+                       .transform_calculate(pct="datum.count / datum.total")
+                       .mark_bar(size=36)
+                       .encode(
+                           x=alt.X("Month:N", sort=month_order, title="Month"),
+                           y=alt.Y(
+                               "count:Q",
+                               stack="normalize",
+                               axis=alt.Axis(format="%", title="Share of refunds (100%)"),
+                               scale=alt.Scale(domain=[0, 1], nice=False, clamp=True),
+                           ),
+                           color=alt.Color("K:N", title="Refund reason"),
+                           order=alt.Order("count:Q", sort="ascending"),
+                           tooltip=[
+                               alt.Tooltip("Month:N", title="Month"),
+                               alt.Tooltip("K:N", title="Reason"),
+                               alt.Tooltip("count:Q", title="Count"),
+                               alt.Tooltip("pct:Q", title="Share", format=".0%"),
+                               alt.Tooltip("total:Q", title="Total in month"),
+                           ],
+                       )
+                       .properties(height=420)
+                )
+                st.altair_chart(ch_stack, use_container_width=True, theme=None)
+
 
