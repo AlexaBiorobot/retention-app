@@ -1163,11 +1163,20 @@ with col3:
         # общий тултип на весь столбик
         _tmp1 = fr1_out.rename(columns={"bucket_label": "X"})
         packed1_in = _tmp1[["X", "val", "count"]].copy()
+        
+        # добавляем total по X
         totals1 = (packed1_in.groupby("X", as_index=False)["count"]
-                                .sum().rename(columns={"count": "total"}))
+                                    .sum().rename(columns={"count": "total"}))
         packed1_in = packed1_in.merge(totals1, on="X", how="left")
         
+        # ⬅️ ДОБАВЬ ЭТО:
+        packed1_in["val"] = pd.to_numeric(packed1_in["val"], errors="coerce")
+        packed1_in = packed1_in.dropna(subset=["val"])
+        packed1_in["val"] = packed1_in["val"].astype(int)
+        packed1_in["val_str"] = packed1_in["val"].astype(str)
+        
         packed1, tip_cols1 = _pack_full_tooltip_axis(packed1_in, x_col="X", legend_title="Score")
+
 
 
         overlay1 = (
@@ -1209,11 +1218,20 @@ with col4:
 
         _tmp2 = fr2_out.rename(columns={"bucket_label": "X"})
         packed2_in = _tmp2[["X", "val", "count"]].copy()
+        
+        # добавляем total по X
         totals2 = (packed2_in.groupby("X", as_index=False)["count"]
-                                .sum().rename(columns={"count": "total"}))
+                                    .sum().rename(columns={"count": "total"}))
         packed2_in = packed2_in.merge(totals2, on="X", how="left")
         
+        # ⬅️ ДОБАВЬ ЭТО:
+        packed2_in["val"] = pd.to_numeric(packed2_in["val"], errors="coerce")
+        packed2_in = packed2_in.dropna(subset=["val"])
+        packed2_in["val"] = packed2_in["val"].astype(int)
+        packed2_in["val_str"] = packed2_in["val"].astype(str)
+        
         packed2, tip_cols2 = _pack_full_tooltip_axis(packed2_in, x_col="X", legend_title="Score")
+
 
 
         overlay2 = (
