@@ -969,39 +969,55 @@ def _build_numeric_counts_by_axis(df_src: pd.DataFrame, axis_col: str, val_col: 
     out = grp.merge(totals, on=axis_col, how="left")
     return out
 
-def _pack_full_tooltip_axis(out_df: pd.DataFrame, x_col: str, legend_title: str):
+def _pack_full_tooltip_axis(df_src: pd.DataFrame, x_col: str, legend_title: str):
     """
-    Готовит по одному ряду на x-значение с ПОСТРОЧНОЙ разбивкой.
-    Возвращает DataFrame и список имён колонок для тултипа.
-    Ожидает: x_col, 'val', 'val_str', 'count', 'total'
+    Готовит DF для общего тултипа по столбику.
+    Нужны поля: x_col, 'val', 'count'. 'total' не нужен.
+    Возвращает: (packed_df, tips)
+      - packed_df: содержит [x_col, total, tt_<val>...]
+      - tips: список [('tt_<val>', '<val>'), ...] — чтобы в тултипе были заголовки 1,2,3...
     """
-    if out_df.empty:
+    need = {x_col, "val", "count"}
+    if df_src.empty or not need.issubset(df_src.columns):
         return pd.DataFrame(columns=[x_col, "total"]), []
 
-    # порядок категорий по числу (1..N)
-    vals = sorted(out_df["val"].dropna().unique().tolist())
+    d = df_src[[x_col, "val", "count"]].copy()
+    d["val"] = pd.to_numeric(d["val"], errors="coerce")
+    d["count"] = pd.to_numeric(d["count"], errors="coerce").fillna(0).astype(int)
+    d = d.dropna(subset=["val"])
+    if d.empty:
+        return pd.DataFrame(columns=[x_col, "total"]), []
 
-    # wide-таблица: index=x, columns=val_str, values=count
-    wide = (out_df
-            .pivot_table(index=x_col, columns="val_str", values="count",
-                         aggfunc="sum", fill_value=0)
-            .reset_index())
+    d["val"] = d["val"].astype(int)
 
-    rows = []
-    for _, r in wide.iterrows():
-        xval = r[x_col]
-        total = int(sum(r[c] for c in r.index if c != x_col))
-        row = {x_col: xval, "total": total}
-        for v in vals:
-            cnt = int(r.get(str(v), 0))
-            row[str(v)] = (f"— {cnt} ({(cnt/total):.0%})" if total > 0 and cnt > 0 else "")
-        rows.append(row)
+    # wide: index = период; колонки = значения шкалы; значения = count
+    wide = (
+        d.groupby([x_col, "val"], as_index=False)["count"].sum()
+         .pivot(index=x_col, columns="val", values="count")
+         .fillna(0).astype(int)
+         .reset_index()
+    )
 
-    df = pd.DataFrame(rows)
+    val_cols = sorted([c for c in wide.columns if c != x_col])  # числовые
+    wide["total"] = wide[val_cols].sum(axis=1).astype(int)
 
-    # порядок колонок для тултипа (строки без заголовков)
-    tooltip_cols = [f"br_{v}" for v in vals]
-    return df, tooltip_cols
+    tips = []  # [('tt_1', '1'), ('tt_2', '2'), ...]
+    for v in val_cols:
+        out_col = f"tt_{v}"
+        tips.append((out_col, str(v)))
+
+        def _fmt_row(r):
+            c = int(r.get(v, 0))
+            t = int(r.get("total", 0))
+            if t <= 0:
+                return f"{c} (0%)" if c else ""
+            pct = c / t
+            # пустая строка для нулей, чтобы не мусорить тултип
+            return f"{c} ({pct:.0%})" if c > 0 else ""
+
+        wide[out_col] = wide.apply(_fmt_row, axis=1).astype(str)
+
+    return wide[[x_col, "total"] + [c for c, _ in tips]], tips
 
 def _make_percent_stack_by_axis(out_df: pd.DataFrame, axis_col: str, legend_title: str):
     """
@@ -1174,20 +1190,19 @@ with col3:
         packed1_in = packed1_in.dropna(subset=["val"])
         packed1_in["val"] = packed1_in["val"].astype(int)
         packed1_in["val_str"] = packed1_in["val"].astype(str)
+
+        packed1, tips1 = _pack_full_tooltip_axis(packed1_in, x_col="X", legend_title="Score")
         
-        packed1, tip_cols1 = _pack_full_tooltip_axis(packed1_in, x_col="X", legend_title="Score")
-
-
-
         overlay1 = (
             alt.Chart(packed1).mark_bar(size=BAR_SIZE.get(granularity, 36), opacity=0.001)
               .encode(
                   x=alt.X("X:N", sort=fr1_bucket_order),
                   y=alt.Y("total:Q", title=None),
                   tooltip=[
-                      alt.Tooltip("X:N",     title="Period"),
+                      alt.Tooltip("X:N", title="Period"),
+                      # строки «1 23 (45%)», «2 7 (13%)», …
+                      *[alt.Tooltip(f"{col}:N", title=title) for col, title in tips1],
                       alt.Tooltip("total:Q", title="All answers"),
-                      *[alt.Tooltip(f"{c}:N", title="") for c in tip_cols1],
                   ]
               )
         )
@@ -1230,19 +1245,18 @@ with col4:
         packed2_in["val"] = packed2_in["val"].astype(int)
         packed2_in["val_str"] = packed2_in["val"].astype(str)
         
-        packed2, tip_cols2 = _pack_full_tooltip_axis(packed2_in, x_col="X", legend_title="Score")
-
-
-
+        packed2, tips2 = _pack_full_tooltip_axis(packed2_in, x_col="X", legend_title="Score")
+        
         overlay2 = (
             alt.Chart(packed2).mark_bar(size=BAR_SIZE.get(granularity, 36), opacity=0.001)
               .encode(
                   x=alt.X("X:N", sort=fr2_bucket_order),
                   y=alt.Y("total:Q", title=None),
                   tooltip=[
-                      alt.Tooltip("X:N",     title="Period"),
+                      alt.Tooltip("X:N", title="Period"),
+                      # строки вида: 1 12 (15%), 2 3 (4%) ...
+                      *[alt.Tooltip(f"{col}:N", title=title) for col, title in tips2],
                       alt.Tooltip("total:Q", title="All answers"),
-                      *[alt.Tooltip(f"{c}:N", title="") for c in tip_cols2],
                   ]
               )
         )
