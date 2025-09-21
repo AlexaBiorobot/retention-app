@@ -1161,13 +1161,12 @@ with col3:
         st.info("Нет данных (FR1).")
     else:
         bars1 = (
-            alt.Chart(fr1_out).mark_bar(size=BAR_SIZE.get(granularity, 36))
+            alt.Chart(fr1_out).mark_bar(size=BAR_SIZE.get(granularity, 36), tooltip=False)
               .encode(
                   x=alt.X("bucket_label:N", title="Period", sort=fr1_bucket_order),
                   y=alt.Y("sum(count):Q", title="Answers"),
                   color=alt.Color("val_str:N", title="Score", sort=fr1_val_order),
                   order=alt.Order("val:Q", sort="ascending"),
-                  tooltip=None,  # можно просто убрать эту строку
               )
               .properties(height=420)
         )
@@ -1193,7 +1192,7 @@ with col3:
             alt.Chart(packed1).mark_bar(size=BAR_SIZE.get(granularity, 36), opacity=0.001)
               .encode(
                   x=alt.X("X:N", sort=fr1_bucket_order),
-                  y=alt.Y("total:Q", title=None),
+                  y=alt.Y("total:Q"),
                   tooltip=[
                       *[alt.Tooltip(f"{col}:N", title=title) for col, title in tips1],
                       alt.Tooltip("total:Q", title="All answers"),
@@ -1210,13 +1209,12 @@ with col4:
         st.info("Нет данных (FR2).")
     else:
         bars2 = (
-            alt.Chart(fr2_out).mark_bar(size=BAR_SIZE.get(granularity, 36))
+            alt.Chart(fr2_out).mark_bar(size=BAR_SIZE.get(granularity, 36), tooltip=False)
               .encode(
                   x=alt.X("bucket_label:N", title="Period", sort=fr2_bucket_order),
                   y=alt.Y("sum(count):Q", title="Answers"),
                   color=alt.Color("val_str:N", title="Score", sort=fr2_val_order),
                   order=alt.Order("val:Q", sort="ascending"),
-                  tooltip=None,
               )
               .properties(height=420)
         )
@@ -1241,7 +1239,7 @@ with col4:
             alt.Chart(packed2).mark_bar(size=BAR_SIZE.get(granularity, 36), opacity=0.001)
               .encode(
                   x=alt.X("X:N", sort=fr2_bucket_order),
-                  y=alt.Y("total:Q", title=None),
+                  y=alt.Y("total:Q"),
                   tooltip=[
                       *[alt.Tooltip(f"{col}:N", title=title) for col, title in tips2],
                       alt.Tooltip("total:Q", title="All answers"),
