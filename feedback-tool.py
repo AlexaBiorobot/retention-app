@@ -1167,12 +1167,8 @@ with col3:
                   y=alt.Y("sum(count):Q", title="Answers"),
                   color=alt.Color("val_str:N", title="Score", sort=fr1_val_order),
                   order=alt.Order("val:Q", sort="ascending"),
-                  tooltip=[
-                      alt.Tooltip("bucket_label:N", title="Period"),
-                      alt.Tooltip("val_str:N", title="Score"),
-                      alt.Tooltip("count:Q", title="Answers"),
-                      alt.Tooltip("pct:Q", title="% of all answers", format=".0%")
-                  ])
+                  tooltip=None,  # можно просто убрать эту строку
+              )
               .properties(height=420)
         )
 
@@ -1199,8 +1195,6 @@ with col3:
                   x=alt.X("X:N", sort=fr1_bucket_order),
                   y=alt.Y("total:Q", title=None),
                   tooltip=[
-                      alt.Tooltip("X:N", title="Period"),
-                      # строки «1 23 (45%)», «2 7 (13%)», …
                       *[alt.Tooltip(f"{col}:N", title=title) for col, title in tips1],
                       alt.Tooltip("total:Q", title="All answers"),
                   ]
@@ -1222,12 +1216,8 @@ with col4:
                   y=alt.Y("sum(count):Q", title="Answers"),
                   color=alt.Color("val_str:N", title="Score", sort=fr2_val_order),
                   order=alt.Order("val:Q", sort="ascending"),
-                  tooltip=[
-                      alt.Tooltip("bucket_label:N", title="Period"),
-                      alt.Tooltip("val_str:N", title="Score"),
-                      alt.Tooltip("count:Q", title="Answers"),
-                      alt.Tooltip("pct:Q", title="% of all answers", format=".0%")
-                  ])
+                  tooltip=None,
+              )
               .properties(height=420)
         )
 
@@ -1253,8 +1243,6 @@ with col4:
                   x=alt.X("X:N", sort=fr2_bucket_order),
                   y=alt.Y("total:Q", title=None),
                   tooltip=[
-                      alt.Tooltip("X:N", title="Period"),
-                      # строки вида: 1 12 (15%), 2 3 (4%) ...
                       *[alt.Tooltip(f"{col}:N", title=title) for col, title in tips2],
                       alt.Tooltip("total:Q", title="All answers"),
                   ]
