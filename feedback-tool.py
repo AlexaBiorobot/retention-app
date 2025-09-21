@@ -1517,7 +1517,7 @@ else:
 
 # ---------- НИЖЕ: Аспекты урока — Form Responses 1 ----------
 st.markdown("---")
-st.subheader("Аспекты урока — Form Responses 1")
+st.subheader("Liked in time")
 
 df_aspects = df1_base.copy()
 if not df_aspects.empty and selected_lessons:
@@ -1527,7 +1527,7 @@ if not df_aspects.empty and selected_lessons:
 asp_counts, _unknown_all = build_aspects_counts(df_aspects, text_col="E", date_col="A", granularity=granularity)
 
 # ---- График: «Аспекты по датам (ось X — A)» с быстрым общим тултипом ----
-st.markdown("**Аспекты по датам (ось X — A)**")
+st.markdown("**in time**")
 if asp_counts.empty:
     st.info("Не нашёл упоминаний аспектов (лист 'Form Responses 1', колонка E).")
 else:
@@ -1547,9 +1547,9 @@ else:
     bars = (
         alt.Chart(asp_counts).mark_bar(size=max(40, BAR_SIZE.get(granularity, 36)))
           .encode(
-              x=alt.X("bucket_label:N", title="Период (по A)", sort=bucket_order),
-              y=alt.Y("sum(count):Q", title="Кол-во упоминаний", scale=y_scale_bar),
-              color=alt.Color("aspect:N", title="Аспект", sort=present)
+              x=alt.X("bucket_label:N", title="Period", sort=bucket_order),
+              y=alt.Y("sum(count):Q", title="Answers", scale=y_scale_bar),
+              color=alt.Color("aspect:N", title="Liked", sort=present)
           )
     )
 
@@ -1585,10 +1585,13 @@ else:
               x=alt.X("bucket_label:N", sort=bucket_order),
               y=alt.Y("total:Q", scale=y_scale_bar),
               tooltip=[
-                  # вместо "Период" и "Всего упоминаний"
-                  alt.Tooltip("t1:N", title="Liked"),
-                  # дальше строки с названиями аспектов
-                  *[alt.Tooltip(f"t{i}:N", title=top_names[i-1]) for i in range(2, TOP_K+1)],
+                  # только строки-значения, без заголовков слева и без "Период"
+                  alt.Tooltip("t1:N", title=""),
+                  alt.Tooltip("t2:N", title=""),
+                  alt.Tooltip("t3:N", title=""),
+                  alt.Tooltip("t4:N", title=""),
+                  alt.Tooltip("t5:N", title=""),
+                  alt.Tooltip("t6:N", title=""),
               ],
           )
     )
