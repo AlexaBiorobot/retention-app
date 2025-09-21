@@ -1252,7 +1252,7 @@ with col4:
 
 # --------- ЕДИНАЯ ТАБЛИЦА ПО МЕСЯЦАМ (Month) — I–J / Aspects / Dislike / Comments + итоги ---------
 st.markdown("---")
-st.subheader("Сводная таблица по месяцам (Month) — I–J / Aspects / Dislike / Comments + итоги")
+st.subheader("Detailed feedback")
 
 KEY_COL_FR1 = "R"   # FR1: Month #
 KEY_COL_FR2 = "Q"   # FR2: Month #
@@ -1488,13 +1488,13 @@ else:
 
         unified_rows.append({
             KEY_LABEL: int(m),
-            "I — J (EN)": ij_text,
-            "Total I–J pairs": total_pairs,
-            "Aspects + Unknown (EN)": "\n".join(aspects_bul),
-            "Total aspects": total_aspects_all,
-            "Dislike + Unknown (EN)": "\n".join(dis_bul),
-            "Total dislike": total_dis_all,
-            "Comments (EN)": comm_txt,
+            "Score with argumentation": ij_text,
+            "Total scores": total_pairs,
+            "What liked": "\n".join(aspects_bul),
+            "Total liked": total_aspects_all,
+            "What disliked": "\n".join(dis_bul),
+            "Total disliked": total_dis_all,
+            "Other comments": comm_txt,
             "Total comments": total_comm,
             "Total mentions (all)": total_all,
         })
