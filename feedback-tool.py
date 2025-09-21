@@ -920,19 +920,47 @@ def _build_numeric_counts_by_axis(df_src: pd.DataFrame, axis_col: str, val_col: 
     out = grp.merge(totals, on=axis_col, how="left")
     return out
 
+def _pack_full_tooltip(out_df: pd.DataFrame, x_col: str, legend_title: str):
+    """
+    Готовит по одному ряду на x-значение с полным текстом-разбивкой.
+    Ожидает колонки: x_col, 'val', 'val_str', 'count', 'total'
+    """
+    if out_df.empty:
+        return pd.DataFrame(columns=[x_col, "total", "tooltip_text"])
+    # порядок категорий по числовому значению
+    vals = sorted(out_df["val"].dropna().unique().tolist())
+    # делаем wide-таблицу: index=x, columns=val_str, values=count
+    wide = (out_df
+            .pivot_table(index=x_col, columns="val_str", values="count",
+                         aggfunc="sum", fill_value=0)
+            .reset_index())
+    # построим текст
+    rows = []
+    for _, r in wide.iterrows():
+        xval = r[x_col]
+        total = int(sum(r[c] for c in r.index if c not in [x_col]))
+        parts = []
+        for v in vals:  # 1..N
+            col = str(v)
+            c = int(r.get(col, 0))
+            if c > 0 and total > 0:
+                parts.append(f"{col} — {c} ({c/total:.0%})")
+        rows.append({x_col: xval, "total": total,
+                     "tooltip_text": "\n".join(parts)})
+    return pd.DataFrame(rows)
+
 def _make_percent_stack_by_axis(out_df: pd.DataFrame, axis_col: str, legend_title: str):
     """
-    Рисует нормированный стек 0–100% по оси axis_col (месяц: R или Q).
-    Верхние слои — бОльшие значения шкалы.
+    Нормированный стек 0–100% по axis_col + прозрачный оверлей
+    с тултипом на ВЕСЬ столбик.
     """
     if out_df.empty:
         return None
 
     axis_order = sorted(out_df[axis_col].unique().tolist())
-
     base = alt.Chart(out_df).transform_calculate(pct='datum.count / datum.total')
 
-    chart = (
+    bars = (
         base.mark_bar(size=28, stroke=None, strokeWidth=0)
             .encode(
                 x=alt.X(f"{axis_col}:O", title="Month", sort=axis_order),
@@ -947,26 +975,36 @@ def _make_percent_stack_by_axis(out_df: pd.DataFrame, axis_col: str, legend_titl
                     title=legend_title,
                     sort=alt.SortField(field="val", order="ascending"),
                     legend=alt.Legend(
-                        orient="bottom",
-                        direction="horizontal",
-                        columns=5,
-                        labelLimit=1000,
-                        titleLimit=1000,
-                        symbolType="square",
+                        orient="bottom", direction="horizontal",
+                        columns=5, labelLimit=1000, titleLimit=1000, symbolType="square",
                     ),
                 ),
                 order=alt.Order("val:Q", sort="ascending"),
+                # локальные тултипы по сегменту оставить можно, но не обязательно
                 tooltip=[
                     alt.Tooltip("val_str:N", title=legend_title),
                     alt.Tooltip("count:Q",  title="Answers"),
                     alt.Tooltip("pct:Q",    title="% of answers", format=".0%"),
-                    alt.Tooltip("total:Q",  title="All answers"),
                 ],
             )
-    ).configure_legend(labelLimit=1000, titleLimit=1000)
+    )
 
-    return chart
+    # ⬇️ Прозрачный слой с ЕДИНЫМ тултипом на весь столбец
+    packed = _pack_full_tooltip(out_df, x_col=axis_col, legend_title=legend_title)
+    overlay = (
+        alt.Chart(packed).mark_bar(size=28, opacity=0.001)
+          .encode(
+              x=alt.X(f"{axis_col}:O", sort=axis_order),
+              y=alt.Y("total:Q", title=None),  # просто чтобы занимал весь столбец
+              tooltip=[
+                  alt.Tooltip(f"{axis_col}:O", title="Month"),
+                  alt.Tooltip("total:Q",       title="All answers"),
+                  alt.Tooltip("tooltip_text:N", title="Breakdown"),
+              ]
+          )
+    )
 
+    return (bars + overlay).configure_legend(labelLimit=1000, titleLimit=1000)
 
 # Источники с учётом текущих фильтров курсов/дат/уроков
 # ЛЕВЫЙ: FR1 — G по месяцам (R)
@@ -1034,6 +1072,26 @@ with col3:
         )
         st.altair_chart(bars1, use_container_width=True, theme=None)
 
+# общий тултип на весь столбик для fr1_out
+packed1 = _pack_full_tooltip(
+    fr1_out.rename(columns={"bucket_label": "X"}),  # временно единое имя оси
+    x_col="X", legend_title=fr1_title
+)
+overlay1 = (
+    alt.Chart(packed1).mark_bar(size=BAR_SIZE.get(granularity, 36), opacity=0.001)
+      .encode(
+          x=alt.X("X:N", sort=fr1_bucket_order),
+          y=alt.Y("total:Q", title=None),
+          tooltip=[
+              alt.Tooltip("X:N",           title="Period"),
+              alt.Tooltip("total:Q",       title="All answers"),
+              alt.Tooltip("tooltip_text:N", title="Breakdown"),
+          ]
+      )
+)
+st.altair_chart((bars1 + overlay1).properties(height=420),
+                use_container_width=True, theme=None)
+
 with col4:
     st.markdown("**Lesson feedback**")
     if fr2_out.empty:
@@ -1055,6 +1113,25 @@ with col4:
               .properties(height=420)
         )
         st.altair_chart(bars2, use_container_width=True, theme=None)
+
+packed2 = _pack_full_tooltip(
+    fr2_out.rename(columns={"bucket_label": "X"}),
+    x_col="X", legend_title=fr2_title
+)
+overlay2 = (
+    alt.Chart(packed2).mark_bar(size=BAR_SIZE.get(granularity, 36), opacity=0.001)
+      .encode(
+          x=alt.X("X:N", sort=fr2_bucket_order),
+          y=alt.Y("total:Q", title=None),
+          tooltip=[
+              alt.Tooltip("X:N",           title="Period"),
+              alt.Tooltip("total:Q",       title="All answers"),
+              alt.Tooltip("tooltip_text:N", title="Breakdown"),
+          ]
+      )
+)
+st.altair_chart((bars2 + overlay2).properties(height=420),
+                use_container_width=True, theme=None)
 
 # --------- ЕДИНАЯ ТАБЛИЦА ПО УРОКАМ: I–J + Aspects+Unknown, Dislike+Unknown, Additional comments ---------
 st.markdown("---")
