@@ -1573,7 +1573,7 @@ else:
         return pd.Series({"total": total, "tooltip_text": "\n".join(lines)})
 
     packed = wide.apply(_pack_row, axis=1).reset_index()
-
+    
     bubble = (
         alt.Chart(packed)
           .mark_bar(size=max(40, BAR_SIZE.get(granularity, 36)), opacity=0.001)
@@ -1581,13 +1581,16 @@ else:
               x=alt.X("bucket_label:N", sort=bucket_order),
               y=alt.Y("total:Q", scale=y_scale_bar),
               tooltip=[
-                  alt.Tooltip("bucket_label:N", title="Период"),
+                  # ⬇️ УБРАЛИ период из тултипа
+                  # alt.Tooltip("bucket_label:N", title="Период"),
+    
                   alt.Tooltip("total:Q", title="Всего упоминаний"),
-                  alt.Tooltip("tooltip_text:N", title=""),
+                  # ⬇️ Переименовали на "Liked"; \n внутри строки даст переносы
+                  alt.Tooltip("tooltip_text:N", title="Liked"),
               ]
           )
     )
-
+    
     st.altair_chart((bars + bubble).properties(height=460),
                     theme=None, use_container_width=True)
 
