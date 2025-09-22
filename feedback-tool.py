@@ -1706,16 +1706,16 @@ else:
     bars_r = (
         base.mark_bar(size=28, stroke=None, strokeWidth=0)
             .encode(
-                x=alt.X("R:O", title="Month (R)", sort="ascending"),
+                x=alt.X("R:O", title="Month", sort="ascending"),
                 y=alt.Y(
                     "count:Q",
                     stack="normalize",
-                    axis=alt.Axis(format="%", title="% от упоминаний"),
+                    axis=alt.Axis(format="%", title="% of answers"),
                     scale=alt.Scale(domain=[0, 1], nice=False, clamp=True)
                 ),
                 color=alt.Color(
                     "aspect_en:N",
-                    title="Аспект (EN)",
+                    title="Liked",
                     scale=alt.Scale(domain=legend_domain_en),
                     legend=alt.Legend(
                         orient="bottom", direction="horizontal",
@@ -1723,16 +1723,20 @@ else:
                     ),
                 ),
                 tooltip=[
-                    alt.Tooltip("R:O", title="Месяц (R)"),
-                    alt.Tooltip("aspect_en:N", title="Аспект"),
-                    alt.Tooltip("count:Q", title="Кол-во"),
-                    alt.Tooltip("pct:Q", title="Доля", format=".0%"),
-                    alt.Tooltip("total:Q", title="Всего по месяцу"),
+                    # Месяц (R) — убрали
+                    alt.Tooltip("aspect_en:N", title="Liked"),
+                    alt.Tooltip("count:Q",   title="Answers"),
+                    alt.Tooltip("pct:Q",     title="%", format=".0%"),
+                    alt.Tooltip("total:Q",   title="All answers"),
                 ],
             )
     ).configure_legend(labelLimit=1000, titleLimit=1000)
-
-    st.altair_chart(bars_r.properties(height=460), use_container_width=True, theme=None)
+    
+    st.altair_chart(
+        bars_r.properties(title="Likes per months", height=460),
+        use_container_width=True,
+        theme=None
+    )
 
 # Подсказка, если онлайн-переводчик недоступен
 if _gt is None:
