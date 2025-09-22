@@ -1933,7 +1933,7 @@ with st.expander("Dislike in time — show/hide", expanded=False):
 
 # --------- FR2: по урокам (ось X — R) — графики в % по D и E ---------
 st.markdown("---")
-st.subheader("FR2 — распределение по месяцам (ось X — Q) — графики (в %)")
+st.subheader("Lesson lenght")
 
 # Источник — df2_base + фильтр по выбранным месяцам (Q)
 df2_months = df2_base.copy()
@@ -1944,7 +1944,7 @@ if not df2_months.empty and selected_months:
 col_left, col_right = st.columns(2)
 
 with col_left:
-    st.markdown("**FR2 — по D (шаблоны), % внутри месяца (Q)**")
+    st.markdown("**Did the class start in time?**")
     if df2_months.empty:
         st.info("Нет данных для графика по D.")
     else:
@@ -2001,7 +2001,7 @@ with col_left:
 
 
 with col_right:
-    st.markdown("**FR2 — по E (шаблоны), % внутри месяца (Q)**")
+    st.markdown("**Was the class the right length?**")
     if df2_months.empty:
         st.info("Нет данных для графика по E.")
     else:
@@ -2055,7 +2055,6 @@ with col_right:
             )
 
 # ---------- FR2 — Lesson length (D/E) в стиле "Dislike in time" ----------
-st.markdown("---")
 with st.expander("Lesson length — show/hide", expanded=False):
     st.subheader("Lesson length")
 
@@ -2230,7 +2229,7 @@ with st.expander("Lesson length — show/hide", expanded=False):
 
 # --------- FR2: три графика "Average by R" по колонкам F, G, H ---------
 st.markdown("---")
-st.subheader("Form Responses 2 — Averages by month (Q): F, G, H")
+st.subheader("Clear explainations and participation")
 
 # Источник — df2_base + фильтр по выбранным месяцам (Q)
 df2_months_avg = df2_base.copy()
@@ -2269,7 +2268,7 @@ aggH  = _avg_by_r(df2_avg_src, "H") if ("H" in df2.columns and not df2_avg_src.e
 
 colF, colG2, colH = st.columns(3)
 
-def _make_avg_chart(df_avg: pd.DataFrame, title_y: str):
+def _make_avg_chart(df_avg: pd.DataFrame, title_panel: str):
     if df_avg.empty or len(df_avg) == 0:
         return st.info("Нет данных для выбранных фильтров.")
     y_min = float(df_avg["avg_y"].min())
@@ -2280,29 +2279,28 @@ def _make_avg_chart(df_avg: pd.DataFrame, title_y: str):
         alt.Chart(df_avg)
           .mark_line(point=True)
           .encode(
-              x=alt.X("R:Q", title="Month (Q)"),
-              y=alt.Y("avg_y:Q", title=title_y, scale=y_scale),
+              x=alt.X("R:Q", title="Month"),
+              y=alt.Y("avg_y:Q", title="Average score", scale=y_scale),
               tooltip=[
-                  alt.Tooltip("R:Q", title="R"),
-                  alt.Tooltip("avg_y:Q", title=title_y, format=".2f"),
-                  alt.Tooltip("count:Q", title="Кол-во ответов"),
+                  alt.Tooltip("avg_y:Q", title="Average score", format=".2f"),
+                  alt.Tooltip("count:Q", title="Answers"),
               ],
           )
-          .properties(height=340)
+          .properties(height=340, title=title_panel)
     )
     st.altair_chart(chart, use_container_width=True, theme=None)
 
 with colF:
-    st.markdown("**FR2 — Average F by month**")
-    _make_avg_chart(aggF, "Average F")
+    st.markdown("**Were the material and explainations clear?**")
+    _make_avg_chart(aggF, "Were the material and explainations clear?")
 
 with colG2:
-    st.markdown("**FR2 — Average G by month**")
-    _make_avg_chart(aggG_2, "Average G")
+    st.markdown("**Did the teacher explain calmly and in a way that was easy to follow?**")
+    _make_avg_chart(aggG_2, "Did the teacher explain calmly and in a way that was easy to follow?")
 
 with colH:
-    st.markdown("**FR2 — Average H by month**")
-    _make_avg_chart(aggH, "Average H")
+    st.markdown("**Did you feel you could ask questions and participate in class?**")
+    _make_avg_chart(aggH, "Did you feel you could ask questions and participate in class?")
 
 # ---------- FR2: распределения по F / G / H (по типу "Распределение значений") ----------
 st.markdown("---")
