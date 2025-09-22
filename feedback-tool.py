@@ -981,159 +981,160 @@ with st.expander("Average score per lessons — show/hide", expanded=False):
 # ---------- РАСПРЕДЕЛЕНИЕ ПО месяцам (в %) ДЛЯ ТЕХ ЖЕ ШКАЛ ----------
 st.markdown("---")
 st.subheader("Scores — distribution throughout the course")
-    AX_FR1 = "R"  # месяц в FR1
-    AX_FR2 = "Q"  # месяц в FR2
 
-    def _build_numeric_counts_by_axis(df_src: pd.DataFrame, axis_col: str, val_col: str, allowed_vals: list[int] | None):
-        if df_src.empty or axis_col not in df_src.columns or val_col not in df_src.columns:
-            return pd.DataFrame(columns=[axis_col, "val", "val_str", "count", "total"])
+AX_FR1 = "R"  # месяц в FR1
+AX_FR2 = "Q"  # месяц в FR2
 
-        d = df_src.copy()
-        d[axis_col] = pd.to_numeric(d[axis_col], errors="coerce")
-        d[val_col]  = pd.to_numeric(d[val_col],  errors="coerce")
-        d = d.dropna(subset=[axis_col, val_col])
+def _build_numeric_counts_by_axis(df_src: pd.DataFrame, axis_col: str, val_col: str, allowed_vals: list[int] | None):
+    if df_src.empty or axis_col not in df_src.columns or val_col not in df_src.columns:
+        return pd.DataFrame(columns=[axis_col, "val", "val_str", "count", "total"])
+
+    d = df_src.copy()
+    d[axis_col] = pd.to_numeric(d[axis_col], errors="coerce")
+    d[val_col]  = pd.to_numeric(d[val_col],  errors="coerce")
+    d = d.dropna(subset=[axis_col, val_col])
+    if d.empty:
+        return pd.DataFrame(columns=[axis_col, "val", "val_str", "count", "total"])
+
+    if allowed_vals is not None:
+        d = d[d[val_col].isin(allowed_vals)]
         if d.empty:
             return pd.DataFrame(columns=[axis_col, "val", "val_str", "count", "total"])
 
-        if allowed_vals is not None:
-            d = d[d[val_col].isin(allowed_vals)]
-            if d.empty:
-                return pd.DataFrame(columns=[axis_col, "val", "val_str", "count", "total"])
+    d[axis_col] = d[axis_col].astype(int)
+    d["val"] = d[val_col].astype(int)
+    d["val_str"] = d["val"].astype(str)
 
-        d[axis_col] = d[axis_col].astype(int)
-        d["val"] = d[val_col].astype(int)
-        d["val_str"] = d["val"].astype(str)
+    grp = (d.groupby([axis_col, "val", "val_str"], as_index=False)
+             .size().rename(columns={"size": "count"}))
+    totals = (grp.groupby(axis_col, as_index=False)["count"]
+                .sum().rename(columns={"count": "total"}))
+    out = grp.merge(totals, on=axis_col, how="left")
+    return out
 
-        grp = (d.groupby([axis_col, "val", "val_str"], as_index=False)
-                 .size().rename(columns={"size": "count"}))
-        totals = (grp.groupby(axis_col, as_index=False)["count"]
-                    .sum().rename(columns={"count": "total"}))
-        out = grp.merge(totals, on=axis_col, how="left")
-        return out
+def _pack_full_tooltip_axis(df_src: pd.DataFrame, x_col: str, legend_title: str):
+    need = {x_col, "val", "count"}
+    if df_src.empty or not need.issubset(df_src.columns):
+        return pd.DataFrame(columns=[x_col, "total"]), []
 
-    def _pack_full_tooltip_axis(df_src: pd.DataFrame, x_col: str, legend_title: str):
-        need = {x_col, "val", "count"}
-        if df_src.empty or not need.issubset(df_src.columns):
-            return pd.DataFrame(columns=[x_col, "total"]), []
+    d = df_src[[x_col, "val", "count"]].copy()
+    d["val"] = pd.to_numeric(d["val"], errors="coerce")
+    d["count"] = pd.to_numeric(d["count"], errors="coerce").fillna(0).astype(int)
+    d = d.dropna(subset=["val"])
+    if d.empty:
+        return pd.DataFrame(columns=[x_col, "total"]), []
 
-        d = df_src[[x_col, "val", "count"]].copy()
-        d["val"] = pd.to_numeric(d["val"], errors="coerce")
-        d["count"] = pd.to_numeric(d["count"], errors="coerce").fillna(0).astype(int)
-        d = d.dropna(subset=["val"])
-        if d.empty:
-            return pd.DataFrame(columns=[x_col, "total"]), []
+    d["val"] = d["val"].astype(int)
 
-        d["val"] = d["val"].astype(int)
+    wide = (
+        d.groupby([x_col, "val"], as_index=False)["count"].sum()
+         .pivot(index=x_col, columns="val", values="count")
+         .fillna(0).astype(int)
+         .reset_index()
+    )
 
-        wide = (
-            d.groupby([x_col, "val"], as_index=False)["count"].sum()
-             .pivot(index=x_col, columns="val", values="count")
-             .fillna(0).astype(int)
-             .reset_index()
-        )
+    val_cols = sorted([c for c in wide.columns if c != x_col])
+    wide["total"] = wide[val_cols].sum(axis=1).astype(int)
 
-        val_cols = sorted([c for c in wide.columns if c != x_col])
-        wide["total"] = wide[val_cols].sum(axis=1).astype(int)
+    tips = []
+    for v in val_cols:
+        out_col = f"tt_{v}"
+        tips.append((out_col, str(v)))
 
-        tips = []
-        for v in val_cols:
-            out_col = f"tt_{v}"
-            tips.append((out_col, str(v)))
+        def _fmt_row(r):
+            c = int(r.get(v, 0))
+            t = int(r.get("total", 0))
+            if t <= 0:
+                return f"{c} (0%)" if c else ""
+            pct = c / t
+            return f"{c} ({pct:.0%})" if c > 0 else ""
 
-            def _fmt_row(r):
-                c = int(r.get(v, 0))
-                t = int(r.get("total", 0))
-                if t <= 0:
-                    return f"{c} (0%)" if c else ""
-                pct = c / t
-                return f"{c} ({pct:.0%})" if c > 0 else ""
+        wide[out_col] = wide.apply(_fmt_row, axis=1).astype(str)
 
-            wide[out_col] = wide.apply(_fmt_row, axis=1).astype(str)
+    return wide[[x_col, "total"] + [c for c, _ in tips]], tips
 
-        return wide[[x_col, "total"] + [c for c, _ in tips]], tips
-
-    def _make_percent_stack_by_axis(out_df: pd.DataFrame, axis_col: str, legend_title: str):
-        if out_df.empty:
-            return None
-        axis_order = sorted(out_df[axis_col].unique().tolist())
-        base = alt.Chart(out_df).transform_calculate(pct='datum.count / datum.total')
-        bars = (
-            base.mark_bar(size=28, stroke=None, strokeWidth=0)
-                .encode(
-                    x=alt.X(f"{axis_col}:O", title="Month", sort=axis_order),
-                    y=alt.Y("count:Q", stack="normalize",
-                            axis=alt.Axis(format="%", title="% of answers"),
-                            scale=alt.Scale(domain=[0,1], nice=False, clamp=True)),
-                    color=alt.Color("val_str:N", title=legend_title,
-                                    sort=alt.SortField(field="val", order="ascending"),
-                                    legend=alt.Legend(orient="bottom", direction="horizontal",
-                                                      columns=5, labelLimit=1000, titleLimit=1000,
-                                                      symbolType="square")),
-                    order=alt.Order("val:Q", sort="ascending"),
-                )
-        )
-
-        tmp = out_df.copy()
-        tmp["val"] = pd.to_numeric(tmp.get("val", tmp["val_str"]), errors="coerce").astype("Int64")
-        vals = sorted([int(v) for v in tmp["val"].dropna().unique().tolist()])
-
-        wide = tmp.pivot_table(index=axis_col, columns="val", values="count",
-                               aggfunc="sum", fill_value=0).reset_index()
-        wide["total"] = wide[[v for v in vals]].sum(axis=1).astype(int)
-        for v in vals:
-            c = wide[v].astype(int)
-            t = wide["total"].replace(0, pd.NA)
-            pct = (c / t).round(3)
-            wide[str(v)] = np.where(
-                (wide["total"] > 0) & (c > 0),
-                c.astype(str) + " (" + (pct.fillna(0).map(lambda x: f"{x:.0%}")) + ")",
-                ""
+def _make_percent_stack_by_axis(out_df: pd.DataFrame, axis_col: str, legend_title: str):
+    if out_df.empty:
+        return None
+    axis_order = sorted(out_df[axis_col].unique().tolist())
+    base = alt.Chart(out_df).transform_calculate(pct='datum.count / datum.total')
+    bars = (
+        base.mark_bar(size=28, stroke=None, strokeWidth=0)
+            .encode(
+                x=alt.X(f"{axis_col}:O", title="Month", sort=axis_order),
+                y=alt.Y("count:Q", stack="normalize",
+                        axis=alt.Axis(format="%", title="% of answers"),
+                        scale=alt.Scale(domain=[0,1], nice=False, clamp=True)),
+                color=alt.Color("val_str:N", title=legend_title,
+                                sort=alt.SortField(field="val", order="ascending"),
+                                legend=alt.Legend(orient="bottom", direction="horizontal",
+                                                  columns=5, labelLimit=1000, titleLimit=1000,
+                                                  symbolType="square")),
+                order=alt.Order("val:Q", sort="ascending"),
             )
-        tooltip_cols = [str(v) for v in vals]
-        wide[tooltip_cols] = wide[tooltip_cols].fillna("").astype(str)
+    )
 
-        overlay = (
-            alt.Chart(wide)
-              .mark_bar(size=28, opacity=0.001)
-              .encode(
-                  x=alt.X(f"{axis_col}:O", sort=axis_order),
-                  y=alt.Y("total:Q"),
-                  tooltip=[alt.Tooltip("total:Q", title="All answers"),
-                           *[alt.Tooltip(f"{col}:N", title=col) for col in tooltip_cols]]
-              )
+    tmp = out_df.copy()
+    tmp["val"] = pd.to_numeric(tmp.get("val", tmp["val_str"]), errors="coerce").astype("Int64")
+    vals = sorted([int(v) for v in tmp["val"].dropna().unique().tolist()])
+
+    wide = tmp.pivot_table(index=axis_col, columns="val", values="count",
+                           aggfunc="sum", fill_value=0).reset_index()
+    wide["total"] = wide[[v for v in vals]].sum(axis=1).astype(int)
+    for v in vals:
+        c = wide[v].astype(int)
+        t = wide["total"].replace(0, pd.NA)
+        pct = (c / t).round(3)
+        wide[str(v)] = np.where(
+            (wide["total"] > 0) & (c > 0),
+            c.astype(str) + " (" + (pct.fillna(0).map(lambda x: f"{x:.0%}")) + ")",
+            ""
         )
-        return (bars + overlay).configure_legend(labelLimit=1000, titleLimit=1000)
+    tooltip_cols = [str(v) for v in vals]
+    wide[tooltip_cols] = wide[tooltip_cols].fillna("").astype(str)
 
-    # Источники с учётом фильтров
-    df1_months_G = df1_base.copy()
-    if not df1_months_G.empty and selected_months:
-        df1_months_G[AX_FR1 + "_num"] = pd.to_numeric(df1_months_G[AX_FR1], errors="coerce")
-        df1_months_G = df1_months_G[df1_months_G[AX_FR1 + "_num"].isin(selected_months)]
+    overlay = (
+        alt.Chart(wide)
+          .mark_bar(size=28, opacity=0.001)
+          .encode(
+              x=alt.X(f"{axis_col}:O", sort=axis_order),
+              y=alt.Y("total:Q"),
+              tooltip=[alt.Tooltip("total:Q", title="All answers"),
+                       *[alt.Tooltip(f"{col}:N", title=col) for col in tooltip_cols]]
+          )
+    )
+    return (bars + overlay).configure_legend(labelLimit=1000, titleLimit=1000)
 
-    df2_months_I = df2_base.copy()
-    if not df2_months_I.empty and selected_months:
-        df2_months_I[AX_FR2 + "_num"] = pd.to_numeric(df2_months_I[AX_FR2], errors="coerce")
-        df2_months_I = df2_months_I[df2_months_I[AX_FR2 + "_num"].isin(selected_months)]
+# Источники с учётом фильтров
+df1_months_G = df1_base.copy()
+if not df1_months_G.empty and selected_months:
+    df1_months_G[AX_FR1 + "_num"] = pd.to_numeric(df1_months_G[AX_FR1], errors="coerce")
+    df1_months_G = df1_months_G[df1_months_G[AX_FR1 + "_num"].isin(selected_months)]
 
-    left_col, right_col = st.columns(2)
+df2_months_I = df2_base.copy()
+if not df2_months_I.empty and selected_months:
+    df2_months_I[AX_FR2 + "_num"] = pd.to_numeric(df2_months_I[AX_FR2], errors="coerce")
+    df2_months_I = df2_months_I[df2_months_I[AX_FR2 + "_num"].isin(selected_months)]
 
-    with left_col:
-        st.markdown("**Monthly feedback**")
-        out_G_M = _build_numeric_counts_by_axis(df1_months_G, axis_col=AX_FR1, val_col="G", allowed_vals=[1,2,3,4,5])
-        if out_G_M.empty:
-            st.info("No data")
-        else:
-            ch_G_M = _make_percent_stack_by_axis(out_G_M, axis_col=AX_FR1, legend_title="Score")
-            st.altair_chart(ch_G_M.properties(height=460), use_container_width=True, theme=None)
+left_col, right_col = st.columns(2)
 
-    with right_col:
-        st.markdown("**Lesson feedback**")
-        out_I_M = _build_numeric_counts_by_axis(df2_months_I, axis_col=AX_FR2, val_col="I", allowed_vals=list(range(1, 11)))
-        if out_I_M.empty:
-            st.info("No data")
-        else:
-            ch_I_M = _make_percent_stack_by_axis(out_I_M, axis_col=AX_FR2, legend_title="Score")
-            st.altair_chart(ch_I_M.properties(height=460), use_container_width=True, theme=None)
+with left_col:
+    st.markdown("**Monthly feedback**")
+    out_G_M = _build_numeric_counts_by_axis(df1_months_G, axis_col=AX_FR1, val_col="G", allowed_vals=[1,2,3,4,5])
+    if out_G_M.empty:
+        st.info("No data")
+    else:
+        ch_G_M = _make_percent_stack_by_axis(out_G_M, axis_col=AX_FR1, legend_title="Score")
+        st.altair_chart(ch_G_M.properties(height=460), use_container_width=True, theme=None)
+
+with right_col:
+    st.markdown("**Lesson feedback**")
+    out_I_M = _build_numeric_counts_by_axis(df2_months_I, axis_col=AX_FR2, val_col="I", allowed_vals=list(range(1, 11)))
+    if out_I_M.empty:
+        st.info("No data")
+    else:
+        ch_I_M = _make_percent_stack_by_axis(out_I_M, axis_col=AX_FR2, legend_title="Score")
+        st.altair_chart(ch_I_M.properties(height=460), use_container_width=True, theme=None)
 
 # ---------- РАСПРЕДЕЛЕНИЕ ЗНАЧЕНИЙ ПО месяцам (в %) ДЛЯ ТЕХ ЖЕ ШКАЛ ----------
 
