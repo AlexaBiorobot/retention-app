@@ -1745,25 +1745,28 @@ with st.expander("Liked in time — show/hide", expanded=False):
 if _gt is None:
     st.caption("⚠️ deep-translator недоступен — используется упрощённый пословный перевод.")
 
-# --------- DISLIKE: «Распределение по месяцам (ось X — Q=Month) — график (в %)» из F ---------
+# --------- ГРАФИК «Распределение по месяцам (ось X — R)» В % — DISLIKED ---------
 st.markdown("---")
-st.subheader("Disliked per months")
+st.subheader("Disliked throughout the course")
 
-# 1) Готовим данные FR1: месяц R и dislike-тексты F
-df_dislike_months = df1_base.copy()
-if df_dislike_months.empty or not {"R", "F"}.issubset(df_dislike_months.columns):
-    st.info("No data for Dislike by months.")
+# источник: FR1 (df1_base) + (опционально) фильтр выбранных месяцев (по R)
+df_dislike_m = df1_base.copy()
+if not df_dislike_m.empty and selected_months:
+    df_dislike_m["R_num"] = pd.to_numeric(df_dislike_m["R"], errors="coerce")
+    df_dislike_m = df_dislike_m[df_dislike_m["R_num"].isin(selected_months)]
+
+# Подсчёт: из FR1 берём R (месяц) и F (dislike-тексты), матчим на DISLIKE_ES_EN
+if df_dislike_m.empty or not {"R", "F"}.issubset(df_dislike_m.columns):
+    cnt_by_m_dis = pd.DataFrame(columns=["R","aspect_en","count"])
 else:
-    d = df_dislike_months[["R", "F"]].copy()
-    d["R"] = pd.to_numeric(d["R"], errors="coerce")
-    d = d.dropna(subset=["R"])
-    d["R"] = d["R"].astype(int)
+    dsrc = df_dislike_m[["R","F"]].copy()
+    dsrc["R"] = pd.to_numeric(dsrc["R"], errors="coerce")
+    dsrc = dsrc.dropna(subset=["R"])
+    dsrc["R"] = dsrc["R"].astype(int)
 
-    # нормализованные шаблоны (как в build_dislike_counts_by_S)
     dislike_norm = [(_norm_local(es), en) for es, en in DISLIKE_ES_EN]
-
-    rows = []
-    for _, r in d.iterrows():
+    rows_dis = []
+    for _, r in dsrc.iterrows():
         raw = str(r["F"] or "").strip()
         if not raw:
             continue
@@ -1774,63 +1777,60 @@ else:
                 continue
             for es_norm, en in dislike_norm:
                 if t == es_norm or es_norm in t:
-                    rows.append((int(r["R"]), en, 1))
+                    rows_dis.append((int(r["R"]), en, 1))
                     break
 
-    if not rows:
-        st.info("No matched dislike phrases in F for selected filters.")
-    else:
-        out = (pd.DataFrame(rows, columns=["R", "aspect_en", "count"])
-               .groupby(["R", "aspect_en"], as_index=False)["count"].sum())
+    cnt_by_m_dis = (
+        pd.DataFrame(rows_dis, columns=["R","aspect_en","count"])
+        if rows_dis else pd.DataFrame(columns=["R","aspect_en","count"])
+    )
 
-        # 2) Переименуем R -> Q, чтобы ось и подписи были «Month»
-        out = out.rename(columns={"R": "Q"})
+if cnt_by_m_dis.empty:
+    st.info("Нет данных для графика по месяцам (Disliked).")
+else:
+    base = (
+        alt.Chart(cnt_by_m_dis)
+          .transform_aggregate(count='sum(count)', groupby=['R', 'aspect_en'])
+          .transform_joinaggregate(total='sum(count)', groupby=['R'])
+          .transform_calculate(pct='datum.count / datum.total')
+    )
 
-        # 3) График как в «Likes per months»
-        base_dis = (
-            alt.Chart(out)
-              .transform_aggregate(count='sum(count)', groupby=['Q', 'aspect_en'])
-              .transform_joinaggregate(total='sum(count)', groupby=['Q'])
-              .transform_calculate(pct='datum.count / datum.total')
-        )
+    dislike_domain_en = [en for _, en in DISLIKE_ES_EN]
 
-        dislike_domain_en = [en for _, en in DISLIKE_ES_EN]
-
-        chart = (
-            base_dis.mark_bar(size=28, stroke=None, strokeWidth=0)
-                .encode(
-                    x=alt.X("Q:O", title="Month", sort="ascending"),
-                    y=alt.Y(
-                        "count:Q",
-                        stack="normalize",
-                        axis=alt.Axis(format="%", title="% of answers"),
-                        scale=alt.Scale(domain=[0, 1], nice=False, clamp=True)
+    bars_r_dis = (
+        base.mark_bar(size=28, stroke=None, strokeWidth=0)
+            .encode(
+                x=alt.X("R:O", title="Month", sort="ascending"),
+                y=alt.Y(
+                    "count:Q",
+                    stack="normalize",
+                    axis=alt.Axis(format="%", title="% of answers"),
+                    scale=alt.Scale(domain=[0, 1], nice=False, clamp=True)
+                ),
+                color=alt.Color(
+                    "aspect_en:N",
+                    title="Disliked",
+                    scale=alt.Scale(domain=dislike_domain_en),
+                    legend=alt.Legend(
+                        orient="bottom", direction="horizontal",
+                        columns=2, labelLimit=1000, titleLimit=1000, symbolType="square",
                     ),
-                    color=alt.Color(
-                        "aspect_en:N",
-                        title="Disliked",
-                        scale=alt.Scale(domain=dislike_domain_en),
-                        legend=alt.Legend(
-                            orient="bottom", direction="horizontal",
-                            columns=2, labelLimit=1000, titleLimit=1000, symbolType="square",
-                        ),
-                    ),
-                    order=alt.Order("count:Q", sort="ascending"),
-                    tooltip=[
-                        # месяц в тултипе НЕ показываем — как просили
-                        alt.Tooltip("aspect_en:N", title="Disliked"),
-                        alt.Tooltip("count:Q",     title="Answers"),
-                        alt.Tooltip("pct:Q",       title="%", format=".0%"),
-                        alt.Tooltip("total:Q",     title="All answers"),
-                    ],
-                )
-        ).configure_legend(labelLimit=1000, titleLimit=1000)
+                ),
+                tooltip=[
+                    # Месяц не показываем в тултипе
+                    alt.Tooltip("aspect_en:N", title="Disliked"),
+                    alt.Tooltip("count:Q",   title="Answers"),
+                    alt.Tooltip("pct:Q",     title="%", format=".0%"),
+                    alt.Tooltip("total:Q",   title="All answers"),
+                ],
+            )
+    ).configure_legend(labelLimit=1000, titleLimit=1000)
 
-        st.altair_chart(
-            chart.properties(title="Dislikes per months", height=460),
-            use_container_width=True,
-            theme=None
-        )
+    st.altair_chart(
+        bars_r_dis.properties(title="Dislikes per months", height=460),
+        use_container_width=True,
+        theme=None
+    )
 
 # ---------- Dislike dynamics (по датам A из FR1, текст из F) — как Liked in time ----------
 st.markdown("---")
