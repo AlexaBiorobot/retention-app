@@ -1833,7 +1833,6 @@ else:
     )
 
 # ---------- Dislike dynamics (по датам A из FR1, текст из F) — как Liked in time ----------
-st.markdown("---")
 with st.expander("Dislike in time — show/hide", expanded=False):
     st.subheader("Dislike in time")
 
@@ -1915,122 +1914,179 @@ with st.expander("Dislike in time — show/hide", expanded=False):
         st.altair_chart((bars + bubble).properties(height=460),
                         use_container_width=True, theme=None)
 
-# ---------- FR2: распределения по шаблонным текстам D и E ----------
+# ---------- FR2 — Lesson length (D/E) в стиле "Dislike in time" ----------
 st.markdown("---")
-st.subheader(f"Form Responses 2 — шаблонные распределения (гранулярность: {granularity.lower()})")
+with st.expander("Lesson length — show/hide", expanded=False):
+    st.subheader("Lesson length")
 
-# Источник: df2_base (курсы/даты) + фильтр по урокам (R)
-def _apply_r_filter(df_src: pd.DataFrame) -> pd.DataFrame:
-    if df_src.empty or "R" not in df_src.columns:
-        return df_src
-    if selected_lessons:
-        d = df_src.copy()
-        d["R_num"] = pd.to_numeric(d["R"], errors="coerce")
-        d = d[d["R_num"].isin(selected_lessons)]
-        return d
-    return df_src
+    # Источник: df2_base + единый фильтр по выбранным месяцам (Q)
+    df2_text_src = _apply_q_filter(df2_base)
 
-def _apply_q_filter(df_src: pd.DataFrame) -> pd.DataFrame:
-    if df_src.empty or "Q" not in df_src.columns:
-        return df_src
-    if selected_months:
-        d = df_src.copy()
-        d["Q_num"] = pd.to_numeric(d["Q"], errors="coerce")
-        d = d[d["Q_num"].isin(selected_months)]
-        return d
-    return df_src
-
-df2_text_src = _apply_q_filter(df2_base)
-
-colD, colE = st.columns(2)
-
-# ---- D (по шаблонам) ----
-with colD:
-    st.markdown("**FR2 — распределение по D (шаблоны)**")
+    # ===== D: Did the class start in time? =====
+    st.markdown("**Did the class start in time?**")
     if df2_text_src.empty or "D" not in df2_text_src.columns:
         st.info("Нет данных (колонка D отсутствует или фильтры пустые).")
     else:
-        d_cnt = build_template_counts(df2_text_src, text_col="D", date_col="A",
-                                      granularity=granularity, templates_es_en=FR2_D_TEMPL_ES_EN)
+        d_cnt = build_template_counts(
+            df2_text_src, text_col="D", date_col="A",
+            granularity=granularity, templates_es_en=FR2_D_TEMPL_ES_EN
+        )
         if d_cnt.empty:
             st.info("Нет совпадений с шаблонными фразами для D.")
         else:
-            # период и легенда
-            d_bucket_order = (d_cnt[["bucket","bucket_label"]]
-                              .drop_duplicates()
-                              .sort_values("bucket")["bucket_label"].tolist())
-            legend_domain = [en for _, en in FR2_D_TEMPL_ES_EN]
-
-            # добавим total/pct для тултипов
-            d_totals = (d_cnt.groupby(["bucket","bucket_label"], as_index=False)["count"]
-                            .sum().rename(columns={"count":"total"}))
-            d_out = d_cnt.merge(d_totals, on=["bucket","bucket_label"], how="left")
-            d_out["pct"] = d_out["count"] / d_out["total"]
-
-            barsD = (
-                alt.Chart(d_out)
-                   .mark_bar(size=BAR_SIZE.get(granularity, 36))
-                   .encode(
-                       x=alt.X("bucket_label:N", title="Период", sort=d_bucket_order),
-                       y=alt.Y("sum(count):Q", title="Кол-во ответов"),
-                       color=alt.Color(
-                           "templ_en:N",
-                           title="D (EN)",
-                           scale=alt.Scale(domain=legend_domain),
-                       ),
-                       tooltip=[
-                           alt.Tooltip("bucket_label:N", title="Период"),
-                           alt.Tooltip("templ_en:N", title="Шаблон (EN)"),
-                           alt.Tooltip("count:Q", title="Кол-во"),
-                           alt.Tooltip("pct:Q", title="% внутри периода", format=".0%"),
-                       ],
-                   )
-                   .properties(height=420)
+            # порядок периодов
+            d_bucket_order = (
+                d_cnt[["bucket","bucket_label"]]
+                .drop_duplicates()
+                .sort_values("bucket")["bucket_label"].tolist()
             )
-            st.altair_chart(barsD, use_container_width=True, theme=None)
 
-# ---- E (по шаблонам) ----
-with colE:
-    st.markdown("**FR2 — распределение по E (шаблоны)**")
+            # максимум по Y (как в "Liked/Dislike in time")
+            d_totals = (
+                d_cnt.groupby("bucket_label", as_index=False)["count"]
+                     .sum().rename(columns={"count":"total"})
+            )
+            y_max_d = max(1, int(d_totals["total"].max()))
+            y_scale_d = alt.Scale(domain=[0, y_max_d * 1.1], nice=False, clamp=True)
+
+            # столбики: сумма упоминаний по периоду, цвета — по шаблонам
+            barsD = (
+                alt.Chart(d_cnt)
+                  .mark_bar(size=max(40, BAR_SIZE.get(granularity, 36)))
+                  .encode(
+                      x=alt.X("bucket_label:N", title="Period", sort=d_bucket_order),
+                      y=alt.Y("sum(count):Q", title="Answers", scale=y_scale_d),
+                      color=alt.Color(
+                          "templ_en:N",
+                          title="Start time",
+                          # фиксированный порядок легенды по исходному списку:
+                          scale=alt.Scale(domain=[en for _, en in FR2_D_TEMPL_ES_EN]),
+                      ),
+                  )
+            )
+
+            # общий тултип (TOP-K строк «Категория — N (p%)»)
+            wideD = (
+                d_cnt
+                .pivot_table(index=["bucket","bucket_label"], columns="templ_en",
+                             values="count", aggfunc="sum", fill_value=0)
+            )
+            col_order_D = list(wideD.sum(axis=0).sort_values(ascending=False).index)
+            TOP_K = 6
+
+            def _pack_row_named_D(r, names=col_order_D[:TOP_K]):
+                total = int(r.sum())
+                out = {"total": total}
+                for i, name in enumerate(names, start=1):
+                    c = int(r.get(name, 0))
+                    out[f"t{i}"] = f"{name} — {c} ({c/total:.0%})" if total > 0 and c > 0 else ""
+                return pd.Series(out)
+
+            packedD = wideD.apply(_pack_row_named_D, axis=1).reset_index()
+
+            bubbleD = (
+                alt.Chart(packedD)
+                  .mark_bar(size=max(40, BAR_SIZE.get(granularity, 36)), opacity=0.001)
+                  .encode(
+                      x=alt.X("bucket_label:N", sort=d_bucket_order),
+                      y=alt.Y("total:Q", scale=y_scale_d),
+                      tooltip=[
+                          alt.Tooltip("t1:N", title=""),
+                          alt.Tooltip("t2:N", title=""),
+                          alt.Tooltip("t3:N", title=""),
+                          alt.Tooltip("t4:N", title=""),
+                          alt.Tooltip("t5:N", title=""),
+                          alt.Tooltip("t6:N", title=""),
+                      ],
+                  )
+            )
+
+            st.altair_chart(
+                (barsD + bubbleD).properties(height=420),
+                use_container_width=True, theme=None
+            )
+
+    # ===== E: Was the class the right length? =====
+    st.markdown("**Was the class the right length?**")
     if df2_text_src.empty or "E" not in df2_text_src.columns:
         st.info("Нет данных (колонка E отсутствует или фильтры пустые).")
     else:
-        e_cnt = build_template_counts(df2_text_src, text_col="E", date_col="A",
-                                      granularity=granularity, templates_es_en=FR2_E_TEMPL_ES_EN)
+        e_cnt = build_template_counts(
+            df2_text_src, text_col="E", date_col="A",
+            granularity=granularity, templates_es_en=FR2_E_TEMPL_ES_EN
+        )
         if e_cnt.empty:
             st.info("Нет совпадений с шаблонными фразами для E.")
         else:
-            e_bucket_order = (e_cnt[["bucket","bucket_label"]]
-                              .drop_duplicates()
-                              .sort_values("bucket")["bucket_label"].tolist())
-            legend_domain_e = [en for _, en in FR2_E_TEMPL_ES_EN]
-
-            e_totals = (e_cnt.groupby(["bucket","bucket_label"], as_index=False)["count"]
-                           .sum().rename(columns={"count":"total"}))
-            e_out = e_cnt.merge(e_totals, on=["bucket","bucket_label"], how="left")
-            e_out["pct"] = e_out["count"] / e_out["total"]
-
-            barsE = (
-                alt.Chart(e_out)
-                   .mark_bar(size=BAR_SIZE.get(granularity, 36))
-                   .encode(
-                       x=alt.X("bucket_label:N", title="Период", sort=e_bucket_order),
-                       y=alt.Y("sum(count):Q", title="Кол-во ответов"),
-                       color=alt.Color(
-                           "templ_en:N",
-                           title="E (EN)",
-                           scale=alt.Scale(domain=legend_domain_e),
-                       ),
-                       tooltip=[
-                           alt.Tooltip("bucket_label:N", title="Период"),
-                           alt.Tooltip("templ_en:N", title="Шаблон (EN)"),
-                           alt.Tooltip("count:Q", title="Кол-во"),
-                           alt.Tooltip("pct:Q", title="% внутри периода", format=".0%"),
-                       ],
-                   )
-                   .properties(height=420)
+            # порядок периодов
+            e_bucket_order = (
+                e_cnt[["bucket","bucket_label"]]
+                .drop_duplicates()
+                .sort_values("bucket")["bucket_label"].tolist()
             )
-            st.altair_chart(barsE, use_container_width=True, theme=None)
+
+            # максимум по Y
+            e_totals = (
+                e_cnt.groupby("bucket_label", as_index=False)["count"]
+                     .sum().rename(columns={"count":"total"})
+            )
+            y_max_e = max(1, int(e_totals["total"].max()))
+            y_scale_e = alt.Scale(domain=[0, y_max_e * 1.1], nice=False, clamp=True)
+
+            # столбики
+            barsE = (
+                alt.Chart(e_cnt)
+                  .mark_bar(size=max(40, BAR_SIZE.get(granularity, 36)))
+                  .encode(
+                      x=alt.X("bucket_label:N", title="Period", sort=e_bucket_order),
+                      y=alt.Y("sum(count):Q", title="Answers", scale=y_scale_e),
+                      color=alt.Color(
+                          "templ_en:N",
+                          title="Class length",
+                          scale=alt.Scale(domain=[en for _, en in FR2_E_TEMPL_ES_EN]),
+                      ),
+                  )
+            )
+
+            # общий тултип
+            wideE = (
+                e_cnt
+                .pivot_table(index=["bucket","bucket_label"], columns="templ_en",
+                             values="count", aggfunc="sum", fill_value=0)
+            )
+            col_order_E = list(wideE.sum(axis=0).sort_values(ascending=False).index)
+
+            def _pack_row_named_E(r, names=col_order_E[:TOP_K]):
+                total = int(r.sum())
+                out = {"total": total}
+                for i, name in enumerate(names, start=1):
+                    c = int(r.get(name, 0))
+                    out[f"t{i}"] = f"{name} — {c} ({c/total:.0%})" if total > 0 and c > 0 else ""
+                return pd.Series(out)
+
+            packedE = wideE.apply(_pack_row_named_E, axis=1).reset_index()
+
+            bubbleE = (
+                alt.Chart(packedE)
+                  .mark_bar(size=max(40, BAR_SIZE.get(granularity, 36)), opacity=0.001)
+                  .encode(
+                      x=alt.X("bucket_label:N", sort=e_bucket_order),
+                      y=alt.Y("total:Q", scale=y_scale_e),
+                      tooltip=[
+                          alt.Tooltip("t1:N", title=""),
+                          alt.Tooltip("t2:N", title=""),
+                          alt.Tooltip("t3:N", title=""),
+                          alt.Tooltip("t4:N", title=""),
+                          alt.Tooltip("t5:N", title=""),
+                          alt.Tooltip("t6:N", title=""),
+                      ],
+                  )
+            )
+
+            st.altair_chart(
+                (barsE + bubbleE).properties(height=420),
+                use_container_width=True, theme=None
+            )
 
 # --------- FR2: по урокам (ось X — R) — графики в % по D и E ---------
 st.markdown("---")
