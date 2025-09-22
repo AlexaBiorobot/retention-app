@@ -1633,8 +1633,8 @@ else:
             "Total disliked": total_dis_all,
             "Other comments": comm_txt,
             "Total comments": total_comm,
-            "Refunds — L (EN)": refunds_l_text,       # ← новое поле с буллетами по L
-            "Total refunds (AU=TRUE)": total_refunds_l,  # ← общее число строк-рефандов в месяце
+            "Refunds": refunds_l_text,       # ← новое поле с буллетами по L
+            "Total refunds": total_refunds_l,  # ← общее число строк-рефандов в месяце
             "Total mentions (all)": total_all,
         })
 
