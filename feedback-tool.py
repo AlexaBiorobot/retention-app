@@ -1596,92 +1596,9 @@ else:
         height=height
     )
 
-# ---------- НИЖЕ: Аспекты урока — Form Responses 1 ----------
-st.markdown("---")
-st.subheader("Liked in time")
-
-df_aspects = df1_base.copy()
-if not df_aspects.empty and selected_lessons:
-    df_aspects["S_num"] = pd.to_numeric(df_aspects["S"], errors="coerce")
-    df_aspects = df_aspects[df_aspects["S_num"].isin(selected_lessons)]
-
-asp_counts, _unknown_all = build_aspects_counts(df_aspects, text_col="E", date_col="A", granularity=granularity)
-
-# ---- График: «Аспекты по датам (ось X — A)» с быстрым общим тултипом ----
-if asp_counts.empty:
-    st.info("Не нашёл упоминаний аспектов (лист 'Form Responses 1', колонка E).")
-else:
-    asp_counts["aspect_en"] = asp_counts["aspect"].apply(aspect_to_en_label)
-
-    bucket_order = (asp_counts[["bucket","bucket_label"]]
-                    .drop_duplicates()
-                    .sort_values("bucket")["bucket_label"].tolist())
-
-    totals_by_bucket = (asp_counts.groupby("bucket_label", as_index=False)["count"]
-                                  .sum().rename(columns={"count":"total"}))
-    y_max = max(1, int(totals_by_bucket["total"].max()))
-    y_scale_bar = alt.Scale(domain=[0, y_max * 1.1], nice=False, clamp=True)
-
-    present = (asp_counts["aspect"].unique().tolist())
-
-    bars = (
-        alt.Chart(asp_counts).mark_bar(size=max(40, BAR_SIZE.get(granularity, 36)))
-          .encode(
-              x=alt.X("bucket_label:N", title="Period", sort=bucket_order),
-              y=alt.Y("sum(count):Q", title="Answers", scale=y_scale_bar),
-              color=alt.Color("aspect:N", title="Liked", sort=present)
-          )
-    )
-
-    # ---------- быстрый «общий тултип» ----------
-    wide = (
-        asp_counts
-        .pivot_table(index=["bucket","bucket_label"], columns="aspect_en",
-                     values="count", aggfunc="sum", fill_value=0)
-    )
-    
-    # сорт аспектов по сумме за всё время
-    col_order = list(wide.sum(axis=0).sort_values(ascending=False).index)
-    TOP_K = 6
-    top_names = col_order[:TOP_K]  # фиксированный список имён для заголовков строк
-    
-    def _pack_row_named(r, names=top_names):
-        total = int(r.sum())  # сумма по ВСЕМ аспектам, чтобы проценты были корректны
-        out = {"total": total}
-        for i, name in enumerate(names, start=1):
-            c = int(r.get(name, 0))
-            if total > 0 and c > 0:
-                out[f"t{i}"] = f"{name} — {c} ({c/total:.0%})"
-            else:
-                out[f"t{i}"] = ""
-        return pd.Series(out)
-    
-    packed = wide.apply(_pack_row_named, axis=1).reset_index()
-    
-    bubble = (
-        alt.Chart(packed)
-          .mark_bar(size=max(40, BAR_SIZE.get(granularity, 36)), opacity=0.001)
-          .encode(
-              x=alt.X("bucket_label:N", sort=bucket_order),
-              y=alt.Y("total:Q", scale=y_scale_bar),
-              tooltip=[
-                  # только строки-значения, без заголовков слева и без "Период"
-                  alt.Tooltip("t1:N", title=""),
-                  alt.Tooltip("t2:N", title=""),
-                  alt.Tooltip("t3:N", title=""),
-                  alt.Tooltip("t4:N", title=""),
-                  alt.Tooltip("t5:N", title=""),
-                  alt.Tooltip("t6:N", title=""),
-              ],
-          )
-    )
-
-    st.altair_chart((bars + bubble).properties(height=460),
-                    theme=None, use_container_width=True)
-
 # --------- ГРАФИК «Распределение по месяцам (ось X — R)» В % ---------
 st.markdown("---")
-st.subheader("Распределение по месяцам (ось X — R) — график (в %)")
+st.subheader("Liked throughout the course")
 
 # источник: FR1 (df1_base) + (опционально) фильтр выбранных месяцев
 df_aspects_m = df1_base.copy()
@@ -1737,6 +1654,92 @@ else:
         use_container_width=True,
         theme=None
     )
+
+# --- спрятанный блок "Liked in time" под тогл ---
+with st.expander("Liked in time — show/hide", expanded=False):
+    st.subheader("Liked in time")
+
+    df_aspects = df1_base.copy()
+    if not df_aspects.empty and selected_lessons:
+        df_aspects["S_num"] = pd.to_numeric(df_aspects["S"], errors="coerce")
+        df_aspects = df_aspects[df_aspects["S_num"].isin(selected_lessons)]
+
+    asp_counts, _unknown_all = build_aspects_counts(
+        df_aspects, text_col="E", date_col="A", granularity=granularity
+    )
+
+    if asp_counts.empty:
+        st.info("Не нашёл упоминаний аспектов (лист 'Form Responses 1', колонка E).")
+    else:
+        asp_counts["aspect_en"] = asp_counts["aspect"].apply(aspect_to_en_label)
+
+        bucket_order = (
+            asp_counts[["bucket","bucket_label"]]
+            .drop_duplicates()
+            .sort_values("bucket")["bucket_label"].tolist()
+        )
+
+        totals_by_bucket = (
+            asp_counts.groupby("bucket_label", as_index=False)["count"]
+                      .sum().rename(columns={"count":"total"})
+        )
+        y_max = max(1, int(totals_by_bucket["total"].max()))
+        y_scale_bar = alt.Scale(domain=[0, y_max * 1.1], nice=False, clamp=True)
+
+        present = asp_counts["aspect"].unique().tolist()
+
+        bars = (
+            alt.Chart(asp_counts)
+              .mark_bar(size=max(40, BAR_SIZE.get(granularity, 36)))
+              .encode(
+                  x=alt.X("bucket_label:N", title="Period", sort=bucket_order),
+                  y=alt.Y("sum(count):Q", title="Answers", scale=y_scale_bar),
+                  color=alt.Color("aspect:N", title="Liked", sort=present)
+              )
+        )
+
+        # общий тултип (как было)
+        wide = (
+            asp_counts
+            .pivot_table(index=["bucket","bucket_label"], columns="aspect_en",
+                         values="count", aggfunc="sum", fill_value=0)
+        )
+
+        col_order = list(wide.sum(axis=0).sort_values(ascending=False).index)
+        TOP_K = 6
+        top_names = col_order[:TOP_K]
+
+        def _pack_row_named(r, names=top_names):
+            total = int(r.sum())
+            out = {"total": total}
+            for i, name in enumerate(names, start=1):
+                c = int(r.get(name, 0))
+                out[f"t{i}"] = f"{name} — {c} ({c/total:.0%})" if total > 0 and c > 0 else ""
+            return pd.Series(out)
+
+        packed = wide.apply(_pack_row_named, axis=1).reset_index()
+
+        bubble = (
+            alt.Chart(packed)
+              .mark_bar(size=max(40, BAR_SIZE.get(granularity, 36)), opacity=0.001)
+              .encode(
+                  x=alt.X("bucket_label:N", sort=bucket_order),
+                  y=alt.Y("total:Q", scale=y_scale_bar),
+                  tooltip=[
+                      alt.Tooltip("t1:N", title=""),
+                      alt.Tooltip("t2:N", title=""),
+                      alt.Tooltip("t3:N", title=""),
+                      alt.Tooltip("t4:N", title=""),
+                      alt.Tooltip("t5:N", title=""),
+                      alt.Tooltip("t6:N", title=""),
+                  ],
+              )
+        )
+
+        st.altair_chart(
+            (bars + bubble).properties(height=460),
+            theme=None, use_container_width=True
+        )
 
 # Подсказка, если онлайн-переводчик недоступен
 if _gt is None:
