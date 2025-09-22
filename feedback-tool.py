@@ -980,7 +980,7 @@ with st.expander("Average score per lessons — show/hide", expanded=False):
 
 # ---------- РАСПРЕДЕЛЕНИЕ ПО месяцам (в %) ДЛЯ ТЕХ ЖЕ ШКАЛ ----------
 st.markdown("---")
-with st.expander("Scores — distribution in time (show/hide)", expanded=False):
+st.subheader("Scores — distribution throughout the course")
     AX_FR1 = "R"  # месяц в FR1
     AX_FR2 = "Q"  # месяц в FR2
 
@@ -1138,119 +1138,116 @@ with st.expander("Scores — distribution in time (show/hide)", expanded=False):
 # ---------- РАСПРЕДЕЛЕНИЕ ЗНАЧЕНИЙ ПО месяцам (в %) ДЛЯ ТЕХ ЖЕ ШКАЛ ----------
 
 st.markdown("---")
-st.subheader("Scores - distribution in time")
+with st.expander("Scores — distribution in time (show/hide)", expanded=False):
+    st.subheader("Scores - distribution in time")
 
-col3, col4 = st.columns([1, 1])
+    col3, col4 = st.columns([1, 1])
 
-with col3:
-    st.markdown("**Monthly feedback**")
-    if fr1_out.empty:
-        st.info("Нет данных (FR1).")
-    else:
-        bars1 = (
-            alt.Chart(fr1_out).mark_bar(size=BAR_SIZE.get(granularity, 36), tooltip=False)
-              .encode(
-                  x=alt.X("bucket_label:N", title="Period", sort=fr1_bucket_order),
-                  y=alt.Y("sum(count):Q", title="Answers"),
-                  color=alt.Color("val_str:N", title="Score", sort=fr1_val_order),
-                  order=alt.Order("val:Q", sort="ascending"),
-              )
-              .properties(height=420)
-        )
+    with col3:
+        st.markdown("**Monthly feedback**")
+        if fr1_out.empty:
+            st.info("Нет данных (FR1).")
+        else:
+            bars1 = (
+                alt.Chart(fr1_out).mark_bar(size=BAR_SIZE.get(granularity, 36), tooltip=False)
+                  .encode(
+                      x=alt.X("bucket_label:N", title="Period", sort=fr1_bucket_order),
+                      y=alt.Y("sum(count):Q", title="Answers"),
+                      color=alt.Color("val_str:N", title="Score", sort=fr1_val_order),
+                      order=alt.Order("val:Q", sort="ascending"),
+                  )
+                  .properties(height=420)
+            )
 
-        # общий тултип на весь столбик
-        _tmp1 = fr1_out.rename(columns={"bucket_label": "X"})
-        packed1_in = _tmp1[["X", "val", "count"]].copy()
+            # общий тултип на весь столбик
+            _tmp1 = fr1_out.rename(columns={"bucket_label": "X"})
+            packed1_in = _tmp1[["X", "val", "count"]].copy()
+
+            totals1 = (packed1_in.groupby("X", as_index=False)["count"]
+                                        .sum().rename(columns={"count": "total"}))
+            packed1_in = packed1_in.merge(totals1, on="X", how="left")
+
+            packed1_in["val"] = pd.to_numeric(packed1_in["val"], errors="coerce")
+            packed1_in = packed1_in.dropna(subset=["val"])
+            packed1_in["val"] = packed1_in["val"].astype(int)
+            packed1_in["val_str"] = packed1_in["val"].astype(str)
+
+            packed1, tips1 = _pack_full_tooltip_axis(packed1_in, x_col="X", legend_title="Score")
+
+            overlay1 = (
+                alt.Chart(packed1).mark_bar(size=BAR_SIZE.get(granularity, 36), opacity=0.001)
+                  .encode(
+                      x=alt.X("X:N", sort=fr1_bucket_order),
+                      y=alt.Y("total:Q"),
+                      tooltip=[
+                          *[alt.Tooltip(f"{col}:N", title=title) for col, title in tips1],
+                          alt.Tooltip("total:Q", title="All answers"),
+                      ]
+                  )
+            )
+
+            st.altair_chart(
+                (bars1 + overlay1)
+                    .properties(
+                        height=420,
+                        padding={"left": 10, "right": 48, "top": 10, "bottom": 70}
+                    )
+                    .configure_view(clip=False, stroke=None),
+                use_container_width=True, theme=None
+            )
+
+    with col4:
+        st.markdown("**Lesson feedback**")
+        if fr2_out.empty:
+            st.info("Нет данных (FR2).")
+        else:
+            bars2 = (
+                alt.Chart(fr2_out).mark_bar(size=BAR_SIZE.get(granularity, 36), tooltip=False)
+                  .encode(
+                      x=alt.X("bucket_label:N", title="Period", sort=fr2_bucket_order),
+                      y=alt.Y("sum(count):Q", title="Answers"),
+                      color=alt.Color("val_str:N", title="Score", sort=fr2_val_order),
+                      order=alt.Order("val:Q", sort="ascending"),
+                  )
+                  .properties(height=420)
+            )
+
+            _tmp2 = fr2_out.rename(columns={"bucket_label": "X"})
+            packed2_in = _tmp2[["X", "val", "count"]].copy()
+
+            totals2 = (packed2_in.groupby("X", as_index=False)["count"]
+                                        .sum().rename(columns={"count": "total"}))
+            packed2_in = packed2_in.merge(totals2, on="X", how="left")
+
+            packed2_in["val"] = pd.to_numeric(packed2_in["val"], errors="coerce")
+            packed2_in = packed2_in.dropna(subset=["val"])
+            packed2_in["val"] = packed2_in["val"].astype(int)
+            packed2_in["val_str"] = packed2_in["val"].astype(str)
+
+            packed2, tips2 = _pack_full_tooltip_axis(packed2_in, x_col="X", legend_title="Score")
+
+            overlay2 = (
+                alt.Chart(packed2).mark_bar(size=BAR_SIZE.get(granularity, 36), opacity=0.001)
+                  .encode(
+                      x=alt.X("X:N", sort=fr2_bucket_order),
+                      y=alt.Y("total:Q"),
+                      tooltip=[
+                          *[alt.Tooltip(f"{col}:N", title=title) for col, title in tips2],
+                          alt.Tooltip("total:Q", title="All answers"),
+                      ]
+                  )
+            )
+
+            st.altair_chart(
+                (bars2 + overlay2)
+                    .properties(
+                        height=420,
+                        padding={"left": 10, "right": 48, "top": 10, "bottom": 70}
+                    )
+                    .configure_view(clip=False, stroke=None),
+                use_container_width=True, theme=None
+            )
         
-        # добавляем total по X
-        totals1 = (packed1_in.groupby("X", as_index=False)["count"]
-                                    .sum().rename(columns={"count": "total"}))
-        packed1_in = packed1_in.merge(totals1, on="X", how="left")
-        
-        # ⬅️ ДОБАВЬ ЭТО:
-        packed1_in["val"] = pd.to_numeric(packed1_in["val"], errors="coerce")
-        packed1_in = packed1_in.dropna(subset=["val"])
-        packed1_in["val"] = packed1_in["val"].astype(int)
-        packed1_in["val_str"] = packed1_in["val"].astype(str)
-
-        packed1, tips1 = _pack_full_tooltip_axis(packed1_in, x_col="X", legend_title="Score")
-        
-        overlay1 = (
-            alt.Chart(packed1).mark_bar(size=BAR_SIZE.get(granularity, 36), opacity=0.001)
-              .encode(
-                  x=alt.X("X:N", sort=fr1_bucket_order),
-                  y=alt.Y("total:Q"),
-                  tooltip=[
-                      *[alt.Tooltip(f"{col}:N", title=title) for col, title in tips1],
-                      alt.Tooltip("total:Q", title="All answers"),
-                  ]
-              )
-        )
-
-        st.altair_chart(
-            (bars1 + overlay1)
-                .properties(
-                    height=420,
-                    padding={"left": 10, "right": 48, "top": 10, "bottom": 70}  # ← добавили запас
-                )
-                .configure_view(clip=False, stroke=None),  # ← не клипать содержимое, убрать рамку
-            use_container_width=True, theme=None
-        )
-
-with col4:
-    st.markdown("**Lesson feedback**")
-    if fr2_out.empty:
-        st.info("Нет данных (FR2).")
-    else:
-        bars2 = (
-            alt.Chart(fr2_out).mark_bar(size=BAR_SIZE.get(granularity, 36), tooltip=False)
-              .encode(
-                  x=alt.X("bucket_label:N", title="Period", sort=fr2_bucket_order),
-                  y=alt.Y("sum(count):Q", title="Answers"),
-                  color=alt.Color("val_str:N", title="Score", sort=fr2_val_order),
-                  order=alt.Order("val:Q", sort="ascending"),
-              )
-              .properties(height=420)
-        )
-
-        _tmp2 = fr2_out.rename(columns={"bucket_label": "X"})
-        packed2_in = _tmp2[["X", "val", "count"]].copy()
-        
-        # добавляем total по X
-        totals2 = (packed2_in.groupby("X", as_index=False)["count"]
-                                    .sum().rename(columns={"count": "total"}))
-        packed2_in = packed2_in.merge(totals2, on="X", how="left")
-        
-        # ⬅️ ДОБАВЬ ЭТО:
-        packed2_in["val"] = pd.to_numeric(packed2_in["val"], errors="coerce")
-        packed2_in = packed2_in.dropna(subset=["val"])
-        packed2_in["val"] = packed2_in["val"].astype(int)
-        packed2_in["val_str"] = packed2_in["val"].astype(str)
-        
-        packed2, tips2 = _pack_full_tooltip_axis(packed2_in, x_col="X", legend_title="Score")
-        
-        overlay2 = (
-            alt.Chart(packed2).mark_bar(size=BAR_SIZE.get(granularity, 36), opacity=0.001)
-              .encode(
-                  x=alt.X("X:N", sort=fr2_bucket_order),
-                  y=alt.Y("total:Q"),
-                  tooltip=[
-                      *[alt.Tooltip(f"{col}:N", title=title) for col, title in tips2],
-                      alt.Tooltip("total:Q", title="All answers"),
-                  ]
-              )
-        )
-
-        st.altair_chart(
-            (bars2 + overlay2)
-                .properties(
-                    height=420,
-                    padding={"left": 10, "right": 48, "top": 10, "bottom": 70}
-                )
-                .configure_view(clip=False, stroke=None),
-            use_container_width=True, theme=None
-        )
-
 # --------- ЕДИНАЯ ТАБЛИЦА ПО МЕСЯЦАМ (Month) — I–J / Aspects / Dislike / Comments + итоги ---------
 st.markdown("---")
 st.subheader("Detailed feedback")
