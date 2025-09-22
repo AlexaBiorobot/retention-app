@@ -2299,9 +2299,65 @@ with colG2:
 with colH:
     _make_avg_chart(aggH, "Did you feel you could ask questions and participate in class?")
 
+# ---------- FR2: распределение по месяцам (ось X — Q) — F / G / H (в %), как "Scores — distribution throughout the course"
+st.markdown("---")
+st.subheader("Clear explanations & participation — distribution throughout the course")
+
+# Базовый источник c учётом выбранных месяцев (Q)
+df2_q = df2_base.copy()
+if not df2_q.empty and selected_months:
+    df2_q["Q_num"] = pd.to_numeric(df2_q["Q"], errors="coerce")
+    df2_q = df2_q[df2_q["Q_num"].isin(selected_months)]
+
+def _allowed_int_vals(d: pd.DataFrame, col: str) -> list[int]:
+    if d.empty or col not in d.columns:
+        return []
+    v = pd.to_numeric(d[col], errors="coerce").dropna().astype(int).unique().tolist()
+    return sorted(v)
+
+c1, c2, c3 = st.columns(3)
+
+with c1:
+    st.markdown("**Were the material and explanations clear?**")
+    if df2_q.empty:
+        st.info("No data.")
+    else:
+        allowedF = _allowed_int_vals(df2_q, "F")
+        outF = _build_numeric_counts_by_axis(df2_q, axis_col="Q", val_col="F", allowed_vals=allowedF or None)
+        if outF.empty:
+            st.info("No data.")
+        else:
+            chF = _make_percent_stack_by_axis(outF, axis_col="Q", legend_title="Score")
+            st.altair_chart(chF.properties(height=460), use_container_width=True, theme=None)
+
+with c2:
+    st.markdown("**Did the teacher explain calmly and in a way that was easy to follow?**")
+    if df2_q.empty:
+        st.info("No data.")
+    else:
+        allowedG = _allowed_int_vals(df2_q, "G")
+        outG = _build_numeric_counts_by_axis(df2_q, axis_col="Q", val_col="G", allowed_vals=allowedG or None)
+        if outG.empty:
+            st.info("No data.")
+        else:
+            chG = _make_percent_stack_by_axis(outG, axis_col="Q", legend_title="Score")
+            st.altair_chart(chG.properties(height=460), use_container_width=True, theme=None)
+
+with c3:
+    st.markdown("**Did you feel you could ask questions and participate in class?**")
+    if df2_q.empty:
+        st.info("No data.")
+    else:
+        allowedH = _allowed_int_vals(df2_q, "H")
+        outH = _build_numeric_counts_by_axis(df2_q, axis_col="Q", val_col="H", allowed_vals=allowedH or None)
+        if outH.empty:
+            st.info("No data.")
+        else:
+            chH = _make_percent_stack_by_axis(outH, axis_col="Q", legend_title="Score")
+            st.altair_chart(chH.properties(height=460), use_container_width=True, theme=None)
+
 # ---------- FR2: распределения по F / G / H (по типу "Распределение значений") ----------
 st.markdown("---")
-st.subheader(f"Form Responses 2 — распределение F / G / H (гранулярность: {granularity.lower()})")
 
 def _prep_df2_numeric_dist(df_src: pd.DataFrame, value_col: str, granularity: str):
     """Готовим df с bucket’ами и списком допустимых значений (инт)."""
@@ -2309,32 +2365,24 @@ def _prep_df2_numeric_dist(df_src: pd.DataFrame, value_col: str, granularity: st
         return pd.DataFrame(), [], [], value_col
     d = df_src.copy()
     d = d.dropna(subset=["A", value_col])
-    # приводим к числу и убираем NaN
     d[value_col] = pd.to_numeric(d[value_col], errors="coerce")
     d = d.dropna(subset=[value_col])
     if d.empty:
         return pd.DataFrame(), [], [], value_col
 
-    # только целые значения шкалы
-    d[value_col] = d[value_col].astype(int)
+    d[value_col] = d[value_col].astype(int)              # только целые значения шкалы
+    d = add_bucket(d, "A", granularity)                  # buckets
+    d = ensure_bucket_and_label(d, "A", granularity)     # подписи
 
-    # добавляем buckets и подписи
-    d = add_bucket(d, "A", granularity)
-    d = ensure_bucket_and_label(d, "A", granularity)
-
-    # динамически определяем допустимые значения (встречающиеся целые)
     allowed_values = sorted(d[value_col].dropna().unique().tolist())
     if not allowed_values:
         return pd.DataFrame(), [], [], value_col
 
-    # используем существующую утилиту, чтобы получить out/pct и порядки
     out, bucket_order, val_order, title = prep_distribution(d, value_col, allowed_values, value_col)
     return out, bucket_order, val_order, title
 
 # источник с учётом фильтра по месяцам (Q)
 df2_numeric_src = _apply_q_filter(df2_base)
-
-cF, cG, cH = st.columns(3)
 
 def _draw_fr2_dist_block(container, df_src, value_col: str, title: str):
     with container:
@@ -2391,181 +2439,24 @@ def _draw_fr2_dist_block(container, df_src, value_col: str, title: str):
             use_container_width=True, theme=None
         )
 
-# Рендер трёх блоков по шаблону
-_draw_fr2_dist_block(cF, df2_numeric_src, "F", "FR2 — distribution of F")
-_draw_fr2_dist_block(cG, df2_numeric_src, "G", "FR2 — distribution of G")
-_draw_fr2_dist_block(cH, df2_numeric_src, "H", "FR2 — distribution of H")
+# --- всё под тоглом ---
+with st.expander("Clear explainations and participation — show/hide", expanded=False):
+    st.subheader("Clear explainations and participation in time")
 
+    cF, cG, cH = st.columns(3)
 
-# ---------- FR2: по урокам (ось X — R) — графики (в %) для F / G / H ----------
-st.markdown("---")
-st.subheader("Form Responses 2 — по месяцам (ось X — Q) — графики (в %)")
-
-def _build_numeric_counts_by_Q(df_src: pd.DataFrame, value_col: str) -> pd.DataFrame:
-    """
-    Считает частоты целых значений шкалы в колонке value_col
-    внутри каждого месяца Q. Возвращает: Q, val, val_str, count, total.
-    """
-    if df_src.empty or value_col not in df_src.columns or "Q" not in df_src.columns:
-        return pd.DataFrame(columns=["Q","val","val_str","count","total"])
-
-    d = df_src.copy()
-    d["Q"] = pd.to_numeric(d["Q"], errors="coerce")
-    d[value_col] = pd.to_numeric(d[value_col], errors="coerce")
-    d = d.dropna(subset=["Q", value_col])
-    if d.empty:
-        return pd.DataFrame(columns=["Q","val","val_str","count","total"])
-
-    d["Q"] = d["Q"].astype(int)
-    d["val"] = d[value_col].astype(int)
-    d["val_str"] = d["val"].astype(str)
-
-    grp = (d.groupby(["Q","val","val_str"], as_index=False)
-             .size().rename(columns={"size":"count"}))
-    totals = (grp.groupby("Q", as_index=False)["count"]
-                .sum().rename(columns={"count":"total"}))
-    out = grp.merge(totals, on="Q", how="left")
-    return out
-
-def _make_percent_stack_by_Q(out_df: pd.DataFrame, legend_title: str):
-    """Нормированный стек 0–100% по Q (месяцы), верх = большие значения шкалы."""
-    if out_df.empty:
-        return None
-    q_order = sorted(out_df["Q"].unique().tolist())
-    base = alt.Chart(out_df).transform_calculate(pct='datum.count / datum.total')
-    chart = (
-        base.mark_bar(size=28, stroke=None, strokeWidth=0)
-            .encode(
-                x=alt.X("Q:O", title="Q (month #)", sort=q_order),
-                y=alt.Y("count:Q",
-                        stack="normalize",
-                        axis=alt.Axis(format="%", title="% от ответов"),
-                        scale=alt.Scale(domain=[0, 1], nice=False, clamp=True)),
-                color=alt.Color(
-                    "val_str:N",
-                    title=legend_title,
-                    sort=alt.SortField(field="val", order="ascending"),
-                    legend=alt.Legend(
-                        orient="bottom", direction="horizontal",
-                        columns=3, labelLimit=1000, titleLimit=1000, symbolType="square")),
-                order=alt.Order("val:Q", sort="ascending"),
-                tooltip=[
-                    alt.Tooltip("Q:O", title="Месяц (Q)"),
-                    alt.Tooltip("val_str:N", title=legend_title),
-                    alt.Tooltip("count:Q", title="Кол-во"),
-                    alt.Tooltip("pct:Q", title="Доля", format=".0%"),
-                    alt.Tooltip("total:Q", title="Всего по месяцу"),
-                ],
-            )
-    ).configure_legend(labelLimit=1000, titleLimit=1000)
-    return chart
-
-def _build_numeric_counts_by_R(df_src: pd.DataFrame, value_col: str) -> pd.DataFrame:
-    """
-    Считает, сколько раз встречается каждое целое значение шкалы в колонке value_col
-    внутри каждого урока R. Возвращает колонки: R, val, val_str, count, total.
-    """
-    if df_src.empty or value_col not in df_src.columns or "R" not in df_src.columns:
-        return pd.DataFrame(columns=["R","val","val_str","count","total"])
-
-    d = df_src.copy()
-    d["R"] = pd.to_numeric(d["R"], errors="coerce")
-    d[value_col] = pd.to_numeric(d[value_col], errors="coerce")
-    d = d.dropna(subset=["R", value_col])
-    if d.empty:
-        return pd.DataFrame(columns=["R","val","val_str","count","total"])
-
-    d["R"] = d["R"].astype(int)
-    d["val"] = d[value_col].astype(int)
-    d["val_str"] = d["val"].astype(str)
-
-    grp = (d.groupby(["R","val","val_str"], as_index=False)
-             .size().rename(columns={"size":"count"}))
-    totals = (grp.groupby("R", as_index=False)["count"]
-                .sum().rename(columns={"count":"total"}))
-    out = grp.merge(totals, on="R", how="left")
-    return out
-
-def _make_percent_stack_by_R(out_df: pd.DataFrame, legend_title: str):
-    """
-    Рисует нормированный стек по R (0–100%) с верхом = бОльшие значения шкалы.
-    """
-    if out_df.empty:
-        return None
-
-    r_order = sorted(out_df["R"].unique().tolist())
-
-    base = alt.Chart(out_df).transform_calculate(pct='datum.count / datum.total')
-
-    chart = (
-        base.mark_bar(size=28, stroke=None, strokeWidth=0)
-            .encode(
-                x=alt.X("R:O", title="R", sort=r_order),
-                y=alt.Y(
-                    "count:Q",
-                    stack="normalize",
-                    axis=alt.Axis(format="%", title="% от ответов"),
-                    scale=alt.Scale(domain=[0, 1], nice=False, clamp=True)
-                ),
-                color=alt.Color(
-                    "val_str:N",
-                    title=legend_title,
-                    # ⬇️ легенда и порядок категорий по убыванию ЧИСЛОВОГО val
-                    sort=alt.SortField(field="val", order="ascending"),
-                    legend=alt.Legend(
-                        orient="bottom",
-                        direction="horizontal",
-                        columns=3,
-                        labelLimit=1000,
-                        titleLimit=1000,
-                        symbolType="square",
-                    ),
-                ),
-                # ⬇️ порядок слоёв внутри столбца
-                order=alt.Order("val:Q", sort="ascending"),
-                tooltip=[
-                    alt.Tooltip("R:O", title="Урок (R)"),
-                    alt.Tooltip("val_str:N", title=legend_title),
-                    alt.Tooltip("count:Q", title="Кол-во"),
-                    alt.Tooltip("pct:Q", title="Доля", format=".0%"),
-                    alt.Tooltip("total:Q", title="Всего по уроку"),
-                ],
-            )
-    ).configure_legend(labelLimit=1000, titleLimit=1000)
-
-    return chart
-
-# источник с учётом фильтра по месяцам (Q)
-df2_lessons_src = _apply_q_filter(df2_base)  # функция из п.9.1
-
-cF2, cG2, cH2 = st.columns(3)
-
-with cF2:
-    st.markdown("**FR2 — по месяцам (Q) — F (в %)**")
-    outF_Q = _build_numeric_counts_by_Q(df2_lessons_src, "F")
-    if outF_Q.empty:
-        st.info("Нет данных по F для выбранных фильтров.")
-    else:
-        chF_Q = _make_percent_stack_by_Q(outF_Q, "F")
-        st.altair_chart(chF_Q.properties(height=460), use_container_width=True, theme=None)
-
-with cG2:
-    st.markdown("**FR2 — по месяцам (Q) — G (в %)**")
-    outG_Q = _build_numeric_counts_by_Q(df2_lessons_src, "G")
-    if outG_Q.empty:
-        st.info("Нет данных по G для выбранных фильтров.")
-    else:
-        chG_Q = _make_percent_stack_by_Q(outG_Q, "G")
-        st.altair_chart(chG_Q.properties(height=460), use_container_width=True, theme=None)
-
-with cH2:
-    st.markdown("**FR2 — по месяцам (Q) — H (в %)**")
-    outH_Q = _build_numeric_counts_by_Q(df2_lessons_src, "H")
-    if outH_Q.empty:
-        st.info("Нет данных по H для выбранных фильтров.")
-    else:
-        chH_Q = _make_percent_stack_by_Q(outH_Q, "H")
-        st.altair_chart(chH_Q.properties(height=460), use_container_width=True, theme=None)
+    _draw_fr2_dist_block(
+        cF, df2_numeric_src, "F",
+        "Were the material and explainations clear?"
+    )
+    _draw_fr2_dist_block(
+        cG, df2_numeric_src, "G",
+        "Did the teacher explain calmly and in a way that was easy to follow?"
+    )
+    _draw_fr2_dist_block(
+        cH, df2_numeric_src, "H",
+        "Did you feel you could ask questions and participate in class?"
+    )
 
 # ==================== Refunds (LatAm) — separate tab ====================
 
