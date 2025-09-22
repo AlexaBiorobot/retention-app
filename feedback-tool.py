@@ -752,6 +752,23 @@ granularity = st.sidebar.selectbox(
 BAR_SIZE = {"День": 18, "Неделя": 44, "Месяц": 56, "Год": 64}
 bar_size = BAR_SIZE.get(granularity, 36)
 
+TOP_K = 6
+
+def _apply_q_filter(df_src: pd.DataFrame) -> pd.DataFrame:
+    """
+    Возвращает df_src, отфильтрованный по выбранным месяцам (FR2: Q),
+    если список selected_months не пуст. Приводит Q к int.
+    """
+    if df_src.empty or "Q" not in df_src.columns:
+        return df_src.copy()
+    d = df_src.copy()
+    d["Q"] = pd.to_numeric(d["Q"], errors="coerce")
+    d = d.dropna(subset=["Q"])
+    d["Q"] = d["Q"].astype(int)
+    if selected_months:
+        d = d[d["Q"].isin(selected_months)]
+    return d
+
 # ---- БАЗОВЫЕ ФИЛЬТРЫ ПО КУРСАМ/ДАТЕ ДЛЯ ОБОИХ ЛИСТОВ ----
 df1_base = filter_df(df1, "N", "A", selected_courses, date_range)
 df2_base = filter_df(df2, "M", "A", selected_courses, date_range)
@@ -2548,9 +2565,6 @@ with cH2:
         st.altair_chart(chH_Q.properties(height=460), use_container_width=True, theme=None)
 
 # ==================== Refunds (LatAm) — separate tab ====================
-
-REFUNDS_SHEET_ID = "1ITOBSlVk4trLSKAkc5vobQrdTz6ve1Z5ljf1CnQfDJo"
-REFUNDS_TAB_NAME = "Refunds - LatAm"
 
 refunds_tab, = st.tabs(["Refunds (LatAm)"])
 
