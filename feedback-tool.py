@@ -1954,50 +1954,50 @@ with col_left:
         if cnt_by_m_D.empty:
             st.info("Нет данных для графика по D.")
         else:
-        # --- D ---
-        legend_domain_D = [en for _, en in FR2_D_TEMPL_ES_EN]
-        base_D = (
-            alt.Chart(cnt_by_m_D)
-              .transform_aggregate(count='sum(count)', groupby=['R', 'templ_en'])
-              .transform_joinaggregate(total='sum(count)', groupby=['R'])
-              .transform_calculate(pct='datum.count / datum.total')
-        )
-        
-        bars_D = (
-            base_D.mark_bar(size=28, stroke=None, strokeWidth=0)
-              .encode(
-                  x=alt.X("R:O", title="Month", sort="ascending"),
-                  y=alt.Y(
-                      "count:Q",
-                      stack="normalize",
-                      axis=alt.Axis(format="%", title="% of answers"),
-                      scale=alt.Scale(domain=[0, 1], nice=False, clamp=True)
-                  ),
-                  color=alt.Color(
-                      "templ_en:N",
-                      title="Start time",
-                      scale=alt.Scale(domain=legend_domain_D),
-                      legend=alt.Legend(
-                          orient="bottom", direction="horizontal",
-                          columns=2, labelLimit=1000, titleLimit=1000, symbolType="square",
+            # --- D ---
+            legend_domain_D = [en for _, en in FR2_D_TEMPL_ES_EN]
+            base_D = (
+                alt.Chart(cnt_by_m_D)
+                  .transform_aggregate(count='sum(count)', groupby=['R', 'templ_en'])
+                  .transform_joinaggregate(total='sum(count)', groupby=['R'])
+                  .transform_calculate(pct='datum.count / datum.total')
+            )
+            
+            bars_D = (
+                base_D.mark_bar(size=28, stroke=None, strokeWidth=0)
+                  .encode(
+                      x=alt.X("R:O", title="Month", sort="ascending"),
+                      y=alt.Y(
+                          "count:Q",
+                          stack="normalize",
+                          axis=alt.Axis(format="%", title="% of answers"),
+                          scale=alt.Scale(domain=[0, 1], nice=False, clamp=True)
                       ),
-                  ),
-                  # порядок слоёв как в "Disliked throughout the course"
-                  order=alt.Order("count:Q", sort="ascending"),
-                  tooltip=[
-                      # Месяц не показываем
-                      alt.Tooltip("templ_en:N", title="Start time"),
-                      alt.Tooltip("count:Q",   title="Answers"),
-                      alt.Tooltip("pct:Q",     title="%", format=".0%"),
-                      alt.Tooltip("total:Q",   title="All answers"),
-                  ],
-              )
-        ).configure_legend(labelLimit=1000, titleLimit=1000)
-        
-        st.altair_chart(
-            bars_D.properties(title="Start time — share by months", height=460),
-            use_container_width=True, theme=None
-        )
+                      color=alt.Color(
+                          "templ_en:N",
+                          title="Start time",
+                          scale=alt.Scale(domain=legend_domain_D),
+                          legend=alt.Legend(
+                              orient="bottom", direction="horizontal",
+                              columns=2, labelLimit=1000, titleLimit=1000, symbolType="square",
+                          ),
+                      ),
+                      # порядок слоёв как в "Disliked throughout the course"
+                      order=alt.Order("count:Q", sort="ascending"),
+                      tooltip=[
+                          # Месяц не показываем
+                          alt.Tooltip("templ_en:N", title="Start time"),
+                          alt.Tooltip("count:Q",   title="Answers"),
+                          alt.Tooltip("pct:Q",     title="%", format=".0%"),
+                          alt.Tooltip("total:Q",   title="All answers"),
+                      ],
+                  )
+            ).configure_legend(labelLimit=1000, titleLimit=1000)
+            
+            st.altair_chart(
+                bars_D.properties(title="Start time — share by months", height=460),
+                use_container_width=True, theme=None
+            )
 
 
 with col_right:
@@ -2011,48 +2011,48 @@ with col_right:
         if cnt_by_m_E.empty:
             st.info("Нет данных для графика по E.")
         else:
-        # --- E ---
-        legend_domain_E = [en for _, en in FR2_E_TEMPL_ES_EN]
-        base_E = (
-            alt.Chart(cnt_by_m_E)
-              .transform_aggregate(count='sum(count)', groupby=['R', 'templ_en'])
-              .transform_joinaggregate(total='sum(count)', groupby=['R'])
-              .transform_calculate(pct='datum.count / datum.total')
-        )
-        
-        bars_E = (
-            base_E.mark_bar(size=28, stroke=None, strokeWidth=0)
-              .encode(
-                  x=alt.X("R:O", title="Month", sort="ascending"),
-                  y=alt.Y(
-                      "count:Q",
-                      stack="normalize",
-                      axis=alt.Axis(format="%", title="% of answers"),
-                      scale=alt.Scale(domain=[0, 1], nice=False, clamp=True)
-                  ),
-                  color=alt.Color(
-                      "templ_en:N",
-                      title="Class length",
-                      scale=alt.Scale(domain=legend_domain_E),
-                      legend=alt.Legend(
-                          orient="bottom", direction="horizontal",
-                          columns=2, labelLimit=1000, titleLimit=1000, symbolType="square",
+            # --- E ---
+            legend_domain_E = [en for _, en in FR2_E_TEMPL_ES_EN]
+            base_E = (
+                alt.Chart(cnt_by_m_E)
+                  .transform_aggregate(count='sum(count)', groupby=['R', 'templ_en'])
+                  .transform_joinaggregate(total='sum(count)', groupby=['R'])
+                  .transform_calculate(pct='datum.count / datum.total')
+            )
+            
+            bars_E = (
+                base_E.mark_bar(size=28, stroke=None, strokeWidth=0)
+                  .encode(
+                      x=alt.X("R:O", title="Month", sort="ascending"),
+                      y=alt.Y(
+                          "count:Q",
+                          stack="normalize",
+                          axis=alt.Axis(format="%", title="% of answers"),
+                          scale=alt.Scale(domain=[0, 1], nice=False, clamp=True)
                       ),
-                  ),
-                  order=alt.Order("count:Q", sort="ascending"),
-                  tooltip=[
-                      alt.Tooltip("templ_en:N", title="Class length"),
-                      alt.Tooltip("count:Q",   title="Answers"),
-                      alt.Tooltip("pct:Q",     title="%", format=".0%"),
-                      alt.Tooltip("total:Q",   title="All answers"),
-                  ],
-              )
-        ).configure_legend(labelLimit=1000, titleLimit=1000)
-        
-        st.altair_chart(
-            bars_E.properties(title="Class length — share by months", height=460),
-            use_container_width=True, theme=None
-        )
+                      color=alt.Color(
+                          "templ_en:N",
+                          title="Class length",
+                          scale=alt.Scale(domain=legend_domain_E),
+                          legend=alt.Legend(
+                              orient="bottom", direction="horizontal",
+                              columns=2, labelLimit=1000, titleLimit=1000, symbolType="square",
+                          ),
+                      ),
+                      order=alt.Order("count:Q", sort="ascending"),
+                      tooltip=[
+                          alt.Tooltip("templ_en:N", title="Class length"),
+                          alt.Tooltip("count:Q",   title="Answers"),
+                          alt.Tooltip("pct:Q",     title="%", format=".0%"),
+                          alt.Tooltip("total:Q",   title="All answers"),
+                      ],
+                  )
+            ).configure_legend(labelLimit=1000, titleLimit=1000)
+            
+            st.altair_chart(
+                bars_E.properties(title="Class length — share by months", height=460),
+                use_container_width=True, theme=None
+            )
 
 # ---------- FR2 — Lesson length (D/E) в стиле "Dislike in time" ----------
 st.markdown("---")
