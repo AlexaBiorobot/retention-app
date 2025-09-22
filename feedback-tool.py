@@ -1433,23 +1433,24 @@ if not df2_base.empty and {KEY_COL_FR2, "K"}.issubset(df2_base.columns):
             if t:
                 comments_per_month.setdefault(m, Counter())[t] += 1
 
-# === Refunds (LatAm) → метрики по месяцам для Detailed feedback ===
-# Берем: AS (дата), AV (курс), AU (флаг), L (значение для агрегирования)
+# === Refunds (LatAm) → тексты из L по месяцам (AS) ===
+# Берём: AS (дата/месяц), AV (курс, для фильтра), AU (флаг), L (текст)
 try:
-    _ws_ref = client.open_by_key(REFUNDS_SHEET_ID).worksheet(REFUNDS_TAB_NAME)
-    df_ref_all = pd.DataFrame(_ws_ref.get_all_records())
+    df_ref_all = load_sheet_as_letter_df_by_key(REFUNDS_SHEET_ID, REFUNDS_TAB_NAME)
 except Exception:
     df_ref_all = pd.DataFrame()
 
-refunds_by_month = {}
+# словарь: месяц(int) -> Counter({L_text_en: count})
+refunds_L_texts_by_month: dict[int, Counter] = {}
+
 if not df_ref_all.empty and {"AS", "AU", "AV", "L"}.issubset(df_ref_all.columns):
     dfr = df_ref_all.copy()
 
-    # AU == TRUE
+    # AU == TRUE (если нужно учитывать подтверждённые рефанды)
     dfr["AU"] = dfr["AU"].astype(str).str.strip().str.lower().isin(["true", "1", "yes"])
     dfr = dfr[dfr["AU"]]
 
-    # фильтр по курсам (AV), чтобы совпадал с основным фильтром приложения
+    # фильтр по курсам (AV) по текущему мультиселекту
     if selected_courses:
         dfr = dfr[dfr["AV"].astype(str).isin(selected_courses)]
 
@@ -1458,32 +1459,27 @@ if not df_ref_all.empty and {"AS", "AU", "AV", "L"}.issubset(df_ref_all.columns)
     dfr = dfr.dropna(subset=["AS"])
     dfr["MonthNum"] = dfr["AS"].dt.month.astype(int)
 
-    # дополнительный фильтр по выбранным месяцам (если задан)
+    # доп. фильтр по выбранным месяцам
     if selected_months:
         dfr = dfr[dfr["MonthNum"].isin(selected_months)]
 
-    # приводим L к числу для сумм/средних (если там текст — будет NaN и не испортит count)
-    dfr["L_num"] = pd.to_numeric(dfr["L"], errors="coerce")
-
-    agg_refunds = (
-        dfr.groupby("MonthNum", as_index=False)
-           .agg(
-               refunds_count=("AU", "size"),          # количество строк-рефандов
-               refunds_L_sum=("L_num", "sum"),        # сумма L (если число)
-               refunds_L_avg=("L_num", "mean"),       # среднее L (если число)
-           )
-    )
-
-    # в dict для удобного доступа при формировании строк
-    for _, rr in agg_refunds.iterrows():
-        m = int(rr["MonthNum"])
-        refunds_by_month[m] = {
-            "refunds_count": int(rr["refunds_count"]),
-            "refunds_L_sum": float(rr["refunds_L_sum"]) if pd.notna(rr["refunds_L_sum"]) else 0.0,
-            "refunds_L_avg": float(rr["refunds_L_avg"]) if pd.notna(rr["refunds_L_avg"]) else 0.0,
-        }
+    # берём только L (текст), разбиваем аккуратно без запятой
+    splitter_L = re.compile(r"[;\/\n|]+")  # ; / | и перенос строки (БЕЗ запятой)
+    for _, r in dfr.iterrows():
+        m = int(r["MonthNum"])
+        raw = str(r.get("L", "") or "").strip()
+        if not raw:
+            continue
+        parts = splitter_L.split(raw) if splitter_L.search(raw) else [raw]
+        for p in parts:
+            t = p.strip()
+            if not t:
+                continue
+            en = translate_es_to_en_safe(t)
+            refunds_L_texts_by_month.setdefault(m, Counter())[en] += 1
 else:
-    refunds_by_month = {}
+    refunds_L_texts_by_month = {}
+
 
 # === Формирование сводной таблицы ===
 all_months = sorted(set(
@@ -1591,6 +1587,22 @@ else:
         ref_cnt = refm.get("refunds_count", 0)
         ref_sum = refm.get("refunds_L_sum", 0.0)
         ref_avg = refm.get("refunds_L_avg", 0.0)
+
+        # --- Refunds: тексты L по месяцу (EN + count + %) ---
+        L_counter = refunds_L_texts_by_month.get(m, Counter())
+        total_L = int(sum(L_counter.values()))
+        if L_counter:
+            L_items = sorted(L_counter.items(), key=lambda kv: (-kv[1], _safe_text(kv[0]).casefold()))
+            # можно ограничить верхушку TOP_N
+            TOP_N = 12
+            L_items = L_items[:TOP_N]
+            L_bullets = [f"• {txt_en} — {c} ({(c/total_L if total_L else 0):.0%})"
+                         for txt_en, c in L_items]
+            if total_L > sum(c for _, c in L_items):
+                L_bullets.append(f"• … (+{total_L - sum(c for _, c in L_items)})")
+            L_text_block = "\n".join(L_bullets)
+        else:
+            L_text_block = ""
     
         unified_rows.append({
             KEY_LABEL: int(m),
@@ -1602,9 +1614,8 @@ else:
             "Total disliked": total_dis_all,
             "Other comments": comm_txt,
             "Total comments": total_comm,
-            "Refunds (AU=TRUE) — count": ref_cnt,         # ← новое
-            "Refunds — L sum": round(ref_sum, 2),         # ← новое
-            "Refunds — L avg": round(ref_avg, 2),         # ← новое
+            "Refunds — L (EN)": L_text_block,     # ← новый столбец с текстами L
+            "Refunds — L total": total_L,         # ← новый столбец с TOTAL по L
             "Total mentions (all)": total_all,
         })
 
@@ -1618,9 +1629,8 @@ else:
                 "What liked", "Total liked",
                 "What disliked", "Total disliked",
                 "Other comments", "Total comments",
-                "Refunds (AU=TRUE) — count",   # ← добавили
-                "Refunds — L sum",             # ← добавили
-                "Refunds — L avg",             # ← добавили
+                "Refunds — L (EN)",          # ← новый
+                "Refunds — L total",         # ← новый
                 "Total mentions (all)",
             ]
         ],
