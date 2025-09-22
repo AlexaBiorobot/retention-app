@@ -924,58 +924,59 @@ else:
     )
     st.altair_chart(ch_unified, use_container_width=True, theme=None)
 
-col1, col2 = st.columns([1, 1])
+with st.expander("Average score per lessons — show/hide", expanded=False):
+    col1, col2 = st.columns([1, 1])
 
-with col1:
-    st.subheader("Average score per lessons (source - Montly feedback)")
-    if agg1.empty:
-        st.info("Нет данных для выбранных фильтров.")
-    else:
-        y_min = float(agg1["avg_y"].min()) if len(agg1) else 0.0
-        y_max = float(agg1["avg_y"].max()) if len(agg1) else 5.0
-        pad = (y_max - y_min) * 0.1 if y_max > y_min else 0.5
-        y_scale = alt.Scale(domain=[y_min - pad, y_max + pad], nice=False, clamp=True)
+    with col1:
+        st.markdown("**Monthly feedback — average lesson score**")  # fix typo: Montly -> Monthly
+        if agg1.empty:
+            st.info("Нет данных для выбранных фильтров.")
+        else:
+            y_min = float(agg1["avg_y"].min()) if len(agg1) else 0.0
+            y_max = float(agg1["avg_y"].max()) if len(agg1) else 5.0
+            pad = (y_max - y_min) * 0.1 if y_max > y_min else 0.5
+            y_scale = alt.Scale(domain=[y_min - pad, y_max + pad], nice=False, clamp=True)
 
-        chart1 = (
-            alt.Chart(agg1)
-              .mark_line(
-                  color="#f59e0b",
-                  point=alt.OverlayMarkDef(color="#f59e0b", filled=True)
-              )
-              .encode(
-                  x=alt.X(f"{AX_FR1}:O", title="Month", sort="ascending"),
-                  y=alt.Y("avg_y:Q", title="Average score", scale=y_scale),
-                  tooltip=[
-                      alt.Tooltip("avg_y:Q", title="Average score", format=".2f"),
-                      alt.Tooltip("count:Q", title="Answers"),
-                  ],
-              )
-              .properties(height=380)
-        )
-        st.altair_chart(chart1, use_container_width=True, theme=None)
+            chart1 = (
+                alt.Chart(agg1)
+                  .mark_line(
+                      color="#f59e0b",
+                      point=alt.OverlayMarkDef(color="#f59e0b", filled=True)
+                  )
+                  .encode(
+                      x=alt.X(f"{AX_FR1}:O", title="Month", sort="ascending"),
+                      y=alt.Y("avg_y:Q", title="Average score", scale=y_scale),
+                      tooltip=[
+                          alt.Tooltip("avg_y:Q", title="Average score", format=".2f"),
+                          alt.Tooltip("count:Q", title="Answers"),
+                      ],
+                  )
+                  .properties(height=380)
+            )
+            st.altair_chart(chart1, use_container_width=True, theme=None)
 
-with col2:
-    st.subheader("Average score per lessons (source - Lesson feedback)")
-    if agg2.empty:
-        st.info("Нет данных для выбранных фильтров.")
-    else:
-        y_min2 = float(agg2["avg_y"].min()) if len(agg2) else 0.0
-        y_max2 = float(agg2["avg_y"].max()) if len(agg2) else 10.0
-        pad2 = (y_max2 - y_min2) * 0.1 if y_max2 > y_min2 else 0.5
-        y_scale2 = alt.Scale(domain=[y_min2 - pad2, y_max2 + pad2], nice=False, clamp=True)
+    with col2:
+        st.markdown("**Lesson feedback — average lesson score**")
+        if agg2.empty:
+            st.info("Нет данных для выбранных фильтров.")
+        else:
+            y_min2 = float(agg2["avg_y"].min()) if len(agg2) else 0.0
+            y_max2 = float(agg2["avg_y"].max()) if len(agg2) else 10.0
+            pad2 = (y_max2 - y_min2) * 0.1 if y_max2 > y_min2 else 0.5
+            y_scale2 = alt.Scale(domain=[y_min2 - pad2, y_max2 + pad2], nice=False, clamp=True)
 
-        chart2 = (
-            alt.Chart(agg2).mark_line(point=True)
-              .encode(
-                  x=alt.X(f"{AX_FR2}:O", title="Month", sort="ascending"),
-                  y=alt.Y("avg_y:Q", title="Average score", scale=y_scale2),
-                  tooltip=[
-                      alt.Tooltip("avg_y:Q", title="Average score", format=".2f"),
-                      alt.Tooltip("count:Q", title="Answers")
-                  ])
-              .properties(height=380)
-        )
-        st.altair_chart(chart2, use_container_width=True, theme=None)
+            chart2 = (
+                alt.Chart(agg2).mark_line(point=True)
+                  .encode(
+                      x=alt.X(f"{AX_FR2}:O", title="Month", sort="ascending"),
+                      y=alt.Y("avg_y:Q", title="Average score", scale=y_scale2),
+                      tooltip=[
+                          alt.Tooltip("avg_y:Q", title="Average score", format=".2f"),
+                          alt.Tooltip("count:Q", title="Answers")
+                      ])
+                  .properties(height=380)
+            )
+            st.altair_chart(chart2, use_container_width=True, theme=None)
 
 # ---------- РАСПРЕДЕЛЕНИЕ ПО месяцам (в %) ДЛЯ ТЕХ ЖЕ ШКАЛ ----------
 st.markdown("---")
