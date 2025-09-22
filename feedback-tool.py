@@ -2292,15 +2292,12 @@ def _make_avg_chart(df_avg: pd.DataFrame, title_panel: str):
 
 with colF:
     st.markdown("**Were the material and explainations clear?**")
-    _make_avg_chart(aggF, "Were the material and explainations clear?")
 
 with colG2:
     st.markdown("**Did the teacher explain calmly and in a way that was easy to follow?**")
-    _make_avg_chart(aggG_2, "Did the teacher explain calmly and in a way that was easy to follow?")
 
 with colH:
     st.markdown("**Did you feel you could ask questions and participate in class?**")
-    _make_avg_chart(aggH, "Did you feel you could ask questions and participate in class?")
 
 # ---------- FR2: распределения по F / G / H (по типу "Распределение значений") ----------
 st.markdown("---")
