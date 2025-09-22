@@ -981,7 +981,6 @@ with st.expander("Average score per lessons — show/hide", expanded=False):
 # ---------- РАСПРЕДЕЛЕНИЕ ПО месяцам (в %) ДЛЯ ТЕХ ЖЕ ШКАЛ ----------
 st.markdown("---")
 with st.expander("Scores — distribution in time (show/hide)", expanded=False):
-    st.subheader("Scores — distribution in time")
     AX_FR1 = "R"  # месяц в FR1
     AX_FR2 = "Q"  # месяц в FR2
 
