@@ -44,6 +44,18 @@ def load_sheet_as_letter_df(sheet_name: str) -> pd.DataFrame:
     letters = list(string.ascii_uppercase)[:num_cols]  # A..Z
     return pd.DataFrame(values[1:], columns=letters)
 
+def _excel_cols(n_cols: int) -> list[str]:
+    """A, B, ..., Z, AA, AB, ..., ZZ (хватает для листов до 702 колонок)."""
+    letters = list(string.ascii_uppercase)
+    cols = []
+    for a in [""] + letters:          # "" -> A..Z, затем AA..AZ, BA..BZ, ...
+        for b in letters:
+            name = (a + b) if a else b
+            cols.append(name)
+            if len(cols) >= n_cols:
+                return cols
+    return cols[:n_cols]
+
 def safe_minmax(dt1_min, dt1_max, dt2_min, dt2_max):
     mins = [d for d in [dt1_min, dt2_min] if pd.notna(d)]
     maxs = [d for d in [dt1_max, dt2_max] if pd.notna(d)]
@@ -1433,52 +1445,49 @@ if not df2_base.empty and {KEY_COL_FR2, "K"}.issubset(df2_base.columns):
             if t:
                 comments_per_month.setdefault(m, Counter())[t] += 1
 
-# === Refunds (LatAm) → тексты из L по месяцам (AS) ===
-# Берём: AS (дата/месяц), AV (курс, для фильтра), AU (флаг), L (текст)
+# === Refunds (LatAm) → тексты L по месяцам для Detailed feedback ===
+# Берем: AS (дата/месяц), AU (флаг), AV (курс — опционально фильтруем), L (ТЕКСТ!)
+refunds_L_texts_by_month = {}
+
 try:
-    df_ref_all = load_sheet_as_letter_df_by_key(REFUNDS_SHEET_ID, REFUNDS_TAB_NAME)
+    ws_ref = client.open_by_key(REFUNDS_SHEET_ID).worksheet(REFUNDS_TAB_NAME)
+    vals = ws_ref.get_all_values()
+    if vals and len(vals) >= 2:
+        cols = _excel_cols(len(vals[0]))           # ← переиспользуем генератор
+        dfr = pd.DataFrame(vals[1:], columns=cols)
+    else:
+        dfr = pd.DataFrame()
 except Exception:
-    df_ref_all = pd.DataFrame()
+    dfr = pd.DataFrame()
 
-# словарь: месяц(int) -> Counter({L_text_en: count})
-refunds_L_texts_by_month: dict[int, Counter] = {}
-
-if not df_ref_all.empty and {"AS", "AU", "AV", "L"}.issubset(df_ref_all.columns):
-    dfr = df_ref_all.copy()
-
-    # AU == TRUE (если нужно учитывать подтверждённые рефанды)
+if not dfr.empty and {"AS", "AU", "L"}.issubset(dfr.columns):
+    # AU == TRUE
     dfr["AU"] = dfr["AU"].astype(str).str.strip().str.lower().isin(["true", "1", "yes"])
     dfr = dfr[dfr["AU"]]
 
-    # фильтр по курсам (AV) по текущему мультиселекту
-    if selected_courses:
-        dfr = dfr[dfr["AV"].astype(str).isin(selected_courses)]
+    # (необязательно) фильтр по курсам из AV — делаем мягче
+    if "AV" in dfr.columns and selected_courses:
+        av = dfr["AV"].astype(str).str.strip()
+        patt = "|".join([re.escape(c) for c in selected_courses]) if selected_courses else ""
+        dfr = dfr[av.isin(selected_courses) | av.str.contains(patt, case=False, na=False)]
 
-    # месяц из AS
-    dfr["AS"] = pd.to_datetime(dfr["AS"], errors="coerce")
-    dfr = dfr.dropna(subset=["AS"])
-    dfr["MonthNum"] = dfr["AS"].dt.month.astype(int)
+    # Месяц из AS: сначала как дату, иначе как число
+    dt = pd.to_datetime(dfr["AS"], errors="coerce")
+    as_num = pd.to_numeric(dfr["AS"], errors="coerce")
+    dfr["MonthNum"] = np.where(dt.notna(), dt.dt.month, as_num).astype("Int64")
+    dfr = dfr.dropna(subset=["MonthNum"]).copy()
+    dfr["MonthNum"] = dfr["MonthNum"].astype(int)
 
-    # доп. фильтр по выбранным месяцам
-    if selected_months:
-        dfr = dfr[dfr["MonthNum"].isin(selected_months)]
+    # Только непустые L
+    dfr["L_text"] = dfr["L"].astype(str).str.strip()
+    dfr = dfr[dfr["L_text"] != ""]
 
-    # берём только L (текст), разбиваем аккуратно без запятой
-    splitter_L = re.compile(r"[;\/\n|]+")  # ; / | и перенос строки (БЕЗ запятой)
-    for _, r in dfr.iterrows():
-        m = int(r["MonthNum"])
-        raw = str(r.get("L", "") or "").strip()
-        if not raw:
-            continue
-        parts = splitter_L.split(raw) if splitter_L.search(raw) else [raw]
-        for p in parts:
-            t = p.strip()
-            if not t:
-                continue
-            en = translate_es_to_en_safe(t)
-            refunds_L_texts_by_month.setdefault(m, Counter())[en] += 1
-else:
-    refunds_L_texts_by_month = {}
+    # Группировка текстов L по месяцу (переводим на EN для консистентности)
+    for m, grp in dfr.groupby("MonthNum"):
+        cnt = Counter()
+        for t in grp["L_text"]:
+            cnt[translate_es_to_en_safe(t)] += 1
+        refunds_L_texts_by_month[int(m)] = cnt
 
 
 # === Формирование сводной таблицы ===
@@ -2506,21 +2515,9 @@ with refunds_tab:
     if not vals or len(vals) < 2:
         df_ref = pd.DataFrame()
     else:
-        import string as _str
         n_cols = len(vals[0])
-        # build A..Z, AA..AZ, BA..BZ, ...
-        letters = list(_str.ascii_uppercase)
-        cols = letters[:]  # A..Z
-        for a in letters:
-            for b in letters:
-                cols.append(a + b)
-                if len(cols) >= n_cols:
-                    break
-            if len(cols) >= n_cols:
-                break
-        cols = cols[:n_cols]
+        cols = _excel_cols(n_cols)
         df_ref = pd.DataFrame(vals[1:], columns=cols)
-
 
     if df_ref.empty or not {"AS", "AU"}.issubset(df_ref.columns):
         st.info("No data (expected columns: AS — month, AU — boolean flag).")
