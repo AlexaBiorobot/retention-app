@@ -2686,5 +2686,3 @@ with refunds_tab:
                        .properties(height=420)
                 )
                 st.altair_chart(ch_stack, use_container_width=True, theme=None)
-
-
