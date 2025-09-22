@@ -1648,8 +1648,8 @@ else:
                 "What liked", "Total liked",
                 "What disliked", "Total disliked",
                 "Other comments", "Total comments",
-                "Refunds — L (EN)",             # ← новое
-                "Total refunds (AU=TRUE)",      # ← новое
+                "Refunds",             # ← новое
+                "Total refunds",      # ← новое
                 "Total mentions (all)",
             ]
         ],
