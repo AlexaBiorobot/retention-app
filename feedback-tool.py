@@ -1138,7 +1138,6 @@ with right_col:
 
 # ---------- РАСПРЕДЕЛЕНИЕ ЗНАЧЕНИЙ ПО месяцам (в %) ДЛЯ ТЕХ ЖЕ ШКАЛ ----------
 
-st.markdown("---")
 with st.expander("Scores — distribution in time (show/hide)", expanded=False):
     st.subheader("Scores - distribution in time")
 
