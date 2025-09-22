@@ -1489,7 +1489,7 @@ all_months = sorted(set(
     (df_dis[KEY_LABEL].unique().tolist() if not df_dis.empty else []) +
     list(unknown_dislike_per_m.keys()) +
     list(comments_per_month.keys()) +
-    list(refunds_by_month.keys())                # ← добавили
+    list(refunds_L_texts_by_month.keys())    # ← было refunds_by_month, стало refunds_L_texts_by_month
 ))
 
 if not all_months:
