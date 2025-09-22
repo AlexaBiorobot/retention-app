@@ -1489,7 +1489,7 @@ all_months = sorted(set(
     (df_dis[KEY_LABEL].unique().tolist() if not df_dis.empty else []) +
     list(unknown_dislike_per_m.keys()) +
     list(comments_per_month.keys()) +
-    list(refunds_L_texts_by_month.keys())    # ← было refunds_by_month, стало refunds_L_texts_by_month
+    list(refunds_L_texts_by_month.keys())    # ← тут ДОЛЖЕН быть refunds_L_texts_by_month
 ))
 
 if not all_months:
@@ -1582,11 +1582,20 @@ else:
 
         total_all = total_aspects_all + total_dis_all + total_comm
 
-        # --- Refunds метрики по месяцу ---
-        refm = refunds_by_month.get(m, {})
-        ref_cnt = refm.get("refunds_count", 0)
-        ref_sum = refm.get("refunds_L_sum", 0.0)
-        ref_avg = refm.get("refunds_L_avg", 0.0)
+        # --- Refunds: только тексты из L (AU=TRUE), сгруппированные по месяцу ---
+        l_counter = refunds_L_texts_by_month.get(m, Counter())
+        total_refunds_l = int(sum(l_counter.values()))
+        if l_counter:
+            l_items = sorted(
+                l_counter.items(),
+                key=lambda kv: (-kv[1], _safe_text(kv[0]).casefold())
+            )
+            refunds_l_text = "\n".join(
+                f"• {phrase_en} — {c} ({(c/total_refunds_l if total_refunds_l else 0):.0%})"
+                for phrase_en, c in l_items
+            )
+        else:
+            refunds_l_text = ""
 
         # --- Refunds: тексты L по месяцу (EN + count + %) ---
         L_counter = refunds_L_texts_by_month.get(m, Counter())
@@ -1614,8 +1623,8 @@ else:
             "Total disliked": total_dis_all,
             "Other comments": comm_txt,
             "Total comments": total_comm,
-            "Refunds — L (EN)": L_text_block,     # ← новый столбец с текстами L
-            "Refunds — L total": total_L,         # ← новый столбец с TOTAL по L
+            "Refunds — L (EN)": refunds_l_text,       # ← новое поле с буллетами по L
+            "Total refunds (AU=TRUE)": total_refunds_l,  # ← общее число строк-рефандов в месяце
             "Total mentions (all)": total_all,
         })
 
@@ -1629,8 +1638,8 @@ else:
                 "What liked", "Total liked",
                 "What disliked", "Total disliked",
                 "Other comments", "Total comments",
-                "Refunds — L (EN)",          # ← новый
-                "Refunds — L total",         # ← новый
+                "Refunds — L (EN)",             # ← новое
+                "Total refunds (AU=TRUE)",      # ← новое
                 "Total mentions (all)",
             ]
         ],
