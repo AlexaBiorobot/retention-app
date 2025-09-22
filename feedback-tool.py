@@ -1931,6 +1931,129 @@ with st.expander("Dislike in time — show/hide", expanded=False):
         st.altair_chart((bars + bubble).properties(height=460),
                         use_container_width=True, theme=None)
 
+# --------- FR2: по урокам (ось X — R) — графики в % по D и E ---------
+st.markdown("---")
+st.subheader("FR2 — распределение по месяцам (ось X — Q) — графики (в %)")
+
+# Источник — df2_base + фильтр по выбранным месяцам (Q)
+df2_months = df2_base.copy()
+if not df2_months.empty and selected_months:
+    df2_months["Q_num"] = pd.to_numeric(df2_months["Q"], errors="coerce")
+    df2_months = df2_months[df2_months["Q_num"].isin(selected_months)]
+
+col_left, col_right = st.columns(2)
+
+with col_left:
+    st.markdown("**FR2 — по D (шаблоны), % внутри месяца (Q)**")
+    if df2_months.empty:
+        st.info("Нет данных для графика по D.")
+    else:
+        dfD = df2_months.copy()
+        dfD["R"] = pd.to_numeric(dfD["Q"], errors="coerce")  # временно переименовали ось
+        cnt_by_m_D = build_template_counts_by_R(dfD, text_col="D", templates_es_en=FR2_D_TEMPL_ES_EN)
+        if cnt_by_m_D.empty:
+            st.info("Нет данных для графика по D.")
+        else:
+        # --- D ---
+        legend_domain_D = [en for _, en in FR2_D_TEMPL_ES_EN]
+        base_D = (
+            alt.Chart(cnt_by_m_D)
+              .transform_aggregate(count='sum(count)', groupby=['R', 'templ_en'])
+              .transform_joinaggregate(total='sum(count)', groupby=['R'])
+              .transform_calculate(pct='datum.count / datum.total')
+        )
+        
+        bars_D = (
+            base_D.mark_bar(size=28, stroke=None, strokeWidth=0)
+              .encode(
+                  x=alt.X("R:O", title="Month", sort="ascending"),
+                  y=alt.Y(
+                      "count:Q",
+                      stack="normalize",
+                      axis=alt.Axis(format="%", title="% of answers"),
+                      scale=alt.Scale(domain=[0, 1], nice=False, clamp=True)
+                  ),
+                  color=alt.Color(
+                      "templ_en:N",
+                      title="Start time",
+                      scale=alt.Scale(domain=legend_domain_D),
+                      legend=alt.Legend(
+                          orient="bottom", direction="horizontal",
+                          columns=2, labelLimit=1000, titleLimit=1000, symbolType="square",
+                      ),
+                  ),
+                  # порядок слоёв как в "Disliked throughout the course"
+                  order=alt.Order("count:Q", sort="ascending"),
+                  tooltip=[
+                      # Месяц не показываем
+                      alt.Tooltip("templ_en:N", title="Start time"),
+                      alt.Tooltip("count:Q",   title="Answers"),
+                      alt.Tooltip("pct:Q",     title="%", format=".0%"),
+                      alt.Tooltip("total:Q",   title="All answers"),
+                  ],
+              )
+        ).configure_legend(labelLimit=1000, titleLimit=1000)
+        
+        st.altair_chart(
+            bars_D.properties(title="Start time — share by months", height=460),
+            use_container_width=True, theme=None
+        )
+
+
+with col_right:
+    st.markdown("**FR2 — по E (шаблоны), % внутри месяца (Q)**")
+    if df2_months.empty:
+        st.info("Нет данных для графика по E.")
+    else:
+        dfE = df2_months.copy()
+        dfE["R"] = pd.to_numeric(dfE["Q"], errors="coerce")  # временно переименовали ось
+        cnt_by_m_E = build_template_counts_by_R(dfE, text_col="E", templates_es_en=FR2_E_TEMPL_ES_EN)
+        if cnt_by_m_E.empty:
+            st.info("Нет данных для графика по E.")
+        else:
+        # --- E ---
+        legend_domain_E = [en for _, en in FR2_E_TEMPL_ES_EN]
+        base_E = (
+            alt.Chart(cnt_by_m_E)
+              .transform_aggregate(count='sum(count)', groupby=['R', 'templ_en'])
+              .transform_joinaggregate(total='sum(count)', groupby=['R'])
+              .transform_calculate(pct='datum.count / datum.total')
+        )
+        
+        bars_E = (
+            base_E.mark_bar(size=28, stroke=None, strokeWidth=0)
+              .encode(
+                  x=alt.X("R:O", title="Month", sort="ascending"),
+                  y=alt.Y(
+                      "count:Q",
+                      stack="normalize",
+                      axis=alt.Axis(format="%", title="% of answers"),
+                      scale=alt.Scale(domain=[0, 1], nice=False, clamp=True)
+                  ),
+                  color=alt.Color(
+                      "templ_en:N",
+                      title="Class length",
+                      scale=alt.Scale(domain=legend_domain_E),
+                      legend=alt.Legend(
+                          orient="bottom", direction="horizontal",
+                          columns=2, labelLimit=1000, titleLimit=1000, symbolType="square",
+                      ),
+                  ),
+                  order=alt.Order("count:Q", sort="ascending"),
+                  tooltip=[
+                      alt.Tooltip("templ_en:N", title="Class length"),
+                      alt.Tooltip("count:Q",   title="Answers"),
+                      alt.Tooltip("pct:Q",     title="%", format=".0%"),
+                      alt.Tooltip("total:Q",   title="All answers"),
+                  ],
+              )
+        ).configure_legend(labelLimit=1000, titleLimit=1000)
+        
+        st.altair_chart(
+            bars_E.properties(title="Class length — share by months", height=460),
+            use_container_width=True, theme=None
+        )
+
 # ---------- FR2 — Lesson length (D/E) в стиле "Dislike in time" ----------
 st.markdown("---")
 with st.expander("Lesson length — show/hide", expanded=False):
@@ -2104,110 +2227,6 @@ with st.expander("Lesson length — show/hide", expanded=False):
                 (barsE + bubbleE).properties(height=420),
                 use_container_width=True, theme=None
             )
-
-# --------- FR2: по урокам (ось X — R) — графики в % по D и E ---------
-st.markdown("---")
-st.subheader("FR2 — распределение по месяцам (ось X — Q) — графики (в %)")
-
-# Источник — df2_base + фильтр по выбранным месяцам (Q)
-df2_months = df2_base.copy()
-if not df2_months.empty and selected_months:
-    df2_months["Q_num"] = pd.to_numeric(df2_months["Q"], errors="coerce")
-    df2_months = df2_months[df2_months["Q_num"].isin(selected_months)]
-
-col_left, col_right = st.columns(2)
-
-with col_left:
-    st.markdown("**FR2 — по D (шаблоны), % внутри месяца (Q)**")
-    if df2_months.empty:
-        st.info("Нет данных для графика по D.")
-    else:
-        dfD = df2_months.copy()
-        dfD["R"] = pd.to_numeric(dfD["Q"], errors="coerce")  # временно переименовали ось
-        cnt_by_m_D = build_template_counts_by_R(dfD, text_col="D", templates_es_en=FR2_D_TEMPL_ES_EN)
-        if cnt_by_m_D.empty:
-            st.info("Нет данных для графика по D.")
-        else:
-            legend_domain_D = [en for _, en in FR2_D_TEMPL_ES_EN]
-            base_D = (
-                alt.Chart(cnt_by_m_D)
-                  .transform_aggregate(count='sum(count)', groupby=['R', 'templ_en'])
-                  .transform_joinaggregate(total='sum(count)', groupby=['R'])
-                  .transform_calculate(pct='datum.count / datum.total')
-            )
-            bars_D = (
-                base_D.mark_bar(size=28, stroke=None, strokeWidth=0)
-                  .encode(
-                      x=alt.X("R:O", title="Месяц", sort="ascending"),
-                      y=alt.Y("count:Q",
-                              stack="normalize",
-                              axis=alt.Axis(format="%", title="% от упоминаний"),
-                              scale=alt.Scale(domain=[0, 1], nice=False, clamp=True)),
-                      color=alt.Color(
-                          "templ_en:N",
-                          title="Template (EN)",
-                          scale=alt.Scale(domain=legend_domain_D),
-                          legend=alt.Legend(
-                              orient="bottom", direction="horizontal", columns=2,
-                              labelLimit=1000, titleLimit=1000, symbolType="square"
-                          ),
-                      ),
-                      tooltip=[
-                          alt.Tooltip("R:O", title="Месяц"),
-                          alt.Tooltip("templ_en:N", title="Шаблон"),
-                          alt.Tooltip("count:Q", title="Кол-во"),
-                          alt.Tooltip("pct:Q", title="Доля", format=".0%"),
-                          alt.Tooltip("total:Q", title="Всего по месяцу"),
-                      ],
-                  )
-            ).configure_legend(labelLimit=1000, titleLimit=1000)
-            st.altair_chart(bars_D.properties(height=420), use_container_width=True, theme=None)
-
-with col_right:
-    st.markdown("**FR2 — по E (шаблоны), % внутри месяца (Q)**")
-    if df2_months.empty:
-        st.info("Нет данных для графика по E.")
-    else:
-        dfE = df2_months.copy()
-        dfE["R"] = pd.to_numeric(dfE["Q"], errors="coerce")  # временно переименовали ось
-        cnt_by_m_E = build_template_counts_by_R(dfE, text_col="E", templates_es_en=FR2_E_TEMPL_ES_EN)
-        if cnt_by_m_E.empty:
-            st.info("Нет данных для графика по E.")
-        else:
-            legend_domain_E = [en for _, en in FR2_E_TEMPL_ES_EN]
-            base_E = (
-                alt.Chart(cnt_by_m_E)
-                  .transform_aggregate(count='sum(count)', groupby=['R', 'templ_en'])
-                  .transform_joinaggregate(total='sum(count)', groupby=['R'])
-                  .transform_calculate(pct='datum.count / datum.total')
-            )
-            bars_E = (
-                base_E.mark_bar(size=28, stroke=None, strokeWidth=0)
-                  .encode(
-                      x=alt.X("R:O", title="Месяц", sort="ascending"),
-                      y=alt.Y("count:Q",
-                              stack="normalize",
-                              axis=alt.Axis(format="%", title="% от упоминаний"),
-                              scale=alt.Scale(domain=[0, 1], nice=False, clamp=True)),
-                      color=alt.Color(
-                          "templ_en:N",
-                          title="Template (EN)",
-                          scale=alt.Scale(domain=legend_domain_E),
-                          legend=alt.Legend(
-                              orient="bottom", direction="horizontal", columns=2,
-                              labelLimit=1000, titleLimit=1000, symbolType="square"
-                          ),
-                      ),
-                      tooltip=[
-                          alt.Tooltip("R:O", title="Месяц"),
-                          alt.Tooltip("templ_en:N", title="Шаблон"),
-                          alt.Tooltip("count:Q", title="Кол-во"),
-                          alt.Tooltip("pct:Q", title="Доля", format=".0%"),
-                          alt.Tooltip("total:Q", title="Всего по месяцу"),
-                      ],
-                  )
-            ).configure_legend(labelLimit=1000, titleLimit=1000)
-            st.altair_chart(bars_E.properties(height=420), use_container_width=True, theme=None)
 
 # --------- FR2: три графика "Average by R" по колонкам F, G, H ---------
 st.markdown("---")
