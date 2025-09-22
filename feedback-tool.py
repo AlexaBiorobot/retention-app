@@ -1814,7 +1814,7 @@ else:
 
 # --------- DISLIKE: «Распределение по урокам (ось X — S) — график (в %)» из F ---------
 st.markdown("---")
-st.subheader("Dislike по урокам (ось X — S) — график (в %)")
+st.subheader("Disliked throughout the course")
 
 df_dislike_lessons = df1_base.copy()
 if not df_dislike_lessons.empty and selected_lessons:
@@ -1823,8 +1823,9 @@ if not df_dislike_lessons.empty and selected_lessons:
 
 cnt_by_s_dis = build_dislike_counts_by_S(df_dislike_lessons)
 if cnt_by_s_dis.empty:
-    st.info("Нет данных для dislike-графика по урокам.")
+    st.info("No data for Dislike by lessons.")
 else:
+    # как в «Likes per months»: агрегаты + pct
     base_dis = (
         alt.Chart(cnt_by_s_dis)
           .transform_aggregate(count='sum(count)', groupby=['S', 'aspect_en'])
@@ -1837,16 +1838,16 @@ else:
     bars_s_dis = (
         base_dis.mark_bar(size=28, stroke=None, strokeWidth=0)
             .encode(
-                x=alt.X("S:O", title="S", sort="ascending"),
+                x=alt.X("S:O", title="Lesson", sort="ascending"),
                 y=alt.Y(
                     "count:Q",
                     stack="normalize",
-                    axis=alt.Axis(format="%", title="% от упоминаний"),
+                    axis=alt.Axis(format="%", title="% of answers"),
                     scale=alt.Scale(domain=[0, 1], nice=False, clamp=True)
                 ),
                 color=alt.Color(
                     "aspect_en:N",
-                    title="Dislike-аспект (EN)",
+                    title="Disliked",
                     scale=alt.Scale(domain=dislike_domain_en),
                     legend=alt.Legend(
                         orient="bottom",
@@ -1857,17 +1858,23 @@ else:
                         symbolType="square",
                     ),
                 ),
+                # порядок слоёв как в референс-графике
+                order=alt.Order("count:Q", sort="ascending"),
                 tooltip=[
-                    alt.Tooltip("S:O", title="Урок"),
-                    alt.Tooltip("aspect_en:N", title="Dislike-аспект"),
-                    alt.Tooltip("count:Q", title="Кол-во"),
-                    alt.Tooltip("pct:Q", title="Доля", format=".0%"),
-                    alt.Tooltip("total:Q", title="Всего по уроку"),
+                    # как в «Likes per months»: без оси X в тултипе
+                    alt.Tooltip("aspect_en:N", title="Disliked"),
+                    alt.Tooltip("count:Q",     title="Answers"),
+                    alt.Tooltip("pct:Q",       title="%", format=".0%"),
+                    alt.Tooltip("total:Q",     title="All answers"),
                 ],
             )
     ).configure_legend(labelLimit=1000, titleLimit=1000)
 
-    st.altair_chart(bars_s_dis.properties(height=460), use_container_width=True, theme=None)
+    st.altair_chart(
+        bars_s_dis.properties(title="Dislikes per lessons", height=460),
+        use_container_width=True,
+        theme=None
+    )
 
 # ---------- FR2: распределения по шаблонным текстам D и E ----------
 st.markdown("---")
