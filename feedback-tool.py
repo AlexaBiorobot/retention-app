@@ -1474,9 +1474,10 @@ if not dfr.empty and {"AS", "AU", "L"}.issubset(dfr.columns):
     # Месяц из AS: сначала как дату, иначе как число
     dt = pd.to_datetime(dfr["AS"], errors="coerce")
     as_num = pd.to_numeric(dfr["AS"], errors="coerce")
-    dfr["MonthNum"] = np.where(dt.notna(), dt.dt.month, as_num).astype("Int64")
-    dfr = dfr.dropna(subset=["MonthNum"]).copy()
-    dfr["MonthNum"] = dfr["MonthNum"].astype(int)
+    
+    # без numpy.where — всё в pandas
+    dfr["MonthNum"] = dt.dt.month.where(dt.notna(), as_num)
+    dfr["MonthNum"] = pd.to_numeric(dfr["MonthNum"], errors="coerce").astype("Int64")
 
     # Только непустые L
     dfr["L_text"] = dfr["L"].astype(str).str.strip()
@@ -2535,11 +2536,11 @@ with refunds_tab:
             as_num = pd.to_numeric(dff["AS"], errors="coerce")
 
             # numeric sort key: YYYYMM for dates, else integer AS
-            month_key = np.where(dt.notna(), dt.dt.year * 100 + dt.dt.month, as_num)
-            month_label = np.where(
-                dt.notna(),
-                dt.dt.to_period("M").astype(str),
-                as_num.astype("Int64").astype(str)
+            month_key = (dt.dt.year * 100 + dt.dt.month).where(dt.notna(), as_num)
+            month_key = pd.to_numeric(month_key, errors="coerce")  # если нужно дальше сортировать числом
+            
+            month_label = dt.dt.to_period("M").astype(str).where(
+                dt.notna(), as_num.astype("Int64").astype(str)
             )
 
             dff = dff.assign(MonthKey=month_key, Month=month_label)
