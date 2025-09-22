@@ -2336,77 +2336,66 @@ df2_numeric_src = _apply_q_filter(df2_base)
 
 cF, cG, cH = st.columns(3)
 
-with cF:
-    st.markdown("**FR2 — распределение F**")
-    outF, orderF, valsF, titleF = _prep_df2_numeric_dist(df2_numeric_src, "F", granularity)
-    if outF.empty:
-        st.info("Нет данных по колонке F для выбранных фильтров.")
-    else:
-        barsF = (
-            alt.Chart(outF).mark_bar(size=BAR_SIZE.get(granularity, 36))
-              .encode(
-                  x=alt.X("bucket_label:N", title="Период", sort=orderF),
-                  y=alt.Y("sum(count):Q", title="Кол-во ответов"),
-                  color=alt.Color("val_str:N", title=titleF, sort=valsF),
-                  order=alt.Order("val:Q", sort="ascending"),
-                  tooltip=[
-                      alt.Tooltip("bucket_label:N", title="Период"),
-                      alt.Tooltip("val_str:N", title=titleF),
-                      alt.Tooltip("count:Q", title="Кол-во"),
-                      alt.Tooltip("pct:Q", title="% внутри периода", format=".0%"),
-                  ],
-              )
-              .properties(height=420)
-        )
-        st.altair_chart(barsF, use_container_width=True, theme=None)
+def _draw_fr2_dist_block(container, df_src, value_col: str, title: str):
+    with container:
+        st.markdown(f"**{title}**")
+        out, bucket_order, val_order, _ = _prep_df2_numeric_dist(df_src, value_col, granularity)
+        if out.empty:
+            st.info(f"Нет данных по колонке {value_col} для выбранных фильтров.")
+            return
 
-with cG:
-    st.markdown("**FR2 — распределение G**")
-    outG, orderG, valsG, titleG = _prep_df2_numeric_dist(df2_numeric_src, "G", granularity)
-    if outG.empty:
-        st.info("Нет данных по колонке G для выбранных фильтров.")
-    else:
-        barsG = (
-            alt.Chart(outG).mark_bar(size=BAR_SIZE.get(granularity, 36))
+        # Базовые бары — как в эталоне (без tooltip)
+        bars = (
+            alt.Chart(out).mark_bar(size=BAR_SIZE.get(granularity, 36), tooltip=False)
               .encode(
-                  x=alt.X("bucket_label:N", title="Период", sort=orderG),
-                  y=alt.Y("sum(count):Q", title="Кол-во ответов"),
-                  color=alt.Color("val_str:N", title=titleG, sort=valsG),
+                  x=alt.X("bucket_label:N", title="Period", sort=bucket_order),
+                  y=alt.Y("sum(count):Q", title="Answers"),
+                  color=alt.Color("val_str:N", title="Score", sort=val_order),
                   order=alt.Order("val:Q", sort="ascending"),
-                  tooltip=[
-                      alt.Tooltip("bucket_label:N", title="Период"),
-                      alt.Tooltip("val_str:N", title=titleG),
-                      alt.Tooltip("count:Q", title="Кол-во"),
-                      alt.Tooltip("pct:Q", title="% внутри периода", format=".0%"),
-                  ],
               )
               .properties(height=420)
         )
-        st.altair_chart(barsG, use_container_width=True, theme=None)
 
-with cH:
-    st.markdown("**FR2 — распределение H**")
-    outH, orderH, valsH, titleH = _prep_df2_numeric_dist(df2_numeric_src, "H", granularity)
-    if outH.empty:
-        st.info("Нет данных по колонке H для выбранных фильтров.")
-    else:
-        barsH = (
-            alt.Chart(outH).mark_bar(size=BAR_SIZE.get(granularity, 36))
+        # Общий оверлей-тултип (как в эталоне)
+        _tmp = out.rename(columns={"bucket_label": "X"})
+        packed_in = _tmp[["X", "val", "count"]].copy()
+        totals = (packed_in.groupby("X", as_index=False)["count"]
+                              .sum().rename(columns={"count": "total"}))
+        packed_in = packed_in.merge(totals, on="X", how="left")
+        packed_in["val"] = pd.to_numeric(packed_in["val"], errors="coerce")
+        packed_in = packed_in.dropna(subset=["val"])
+        packed_in["val"] = packed_in["val"].astype(int)
+        packed_in["val_str"] = packed_in["val"].astype(str)
+
+        packed, tips = _pack_full_tooltip_axis(packed_in, x_col="X", legend_title="Score")
+
+        overlay = (
+            alt.Chart(packed).mark_bar(size=BAR_SIZE.get(granularity, 36), opacity=0.001)
               .encode(
-                  x=alt.X("bucket_label:N", title="Период", sort=orderH),
-                  y=alt.Y("sum(count):Q", title="Кол-во ответов"),
-                  color=alt.Color("val_str:N", title=titleH, sort=valsH),
-                  order=alt.Order("val:Q", sort="ascending"),
+                  x=alt.X("X:N", sort=bucket_order),
+                  y=alt.Y("total:Q"),
                   tooltip=[
-                      alt.Tooltip("bucket_label:N", title="Период"),
-                      alt.Tooltip("val_str:N", title=titleH),
-                      alt.Tooltip("count:Q", title="Кол-во"),
-                      alt.Tooltip("pct:Q", title="% внутри периода", format=".0%"),
-                  ],
+                      *[alt.Tooltip(f"{col}:N", title=title_) for col, title_ in tips],
+                      alt.Tooltip("total:Q", title="All answers"),
+                  ]
               )
-              .properties(height=420)
         )
-        st.altair_chart(barsH, use_container_width=True, theme=None)
+
+        st.altair_chart(
+            (bars + overlay)
+              .properties(
+                  height=420,
+                  padding={"left": 10, "right": 48, "top": 10, "bottom": 70}
+              )
+              .configure_view(clip=False, stroke=None),
+            use_container_width=True, theme=None
+        )
+
+# Рендер трёх блоков по шаблону
+_draw_fr2_dist_block(cF, df2_numeric_src, "F", "FR2 — distribution of F")
+_draw_fr2_dist_block(cG, df2_numeric_src, "G", "FR2 — distribution of G")
+_draw_fr2_dist_block(cH, df2_numeric_src, "H", "FR2 — distribution of H")
+
 
 # ---------- FR2: по урокам (ось X — R) — графики (в %) для F / G / H ----------
 st.markdown("---")
