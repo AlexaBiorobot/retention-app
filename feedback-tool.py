@@ -22,6 +22,10 @@ st.set_page_config(layout="wide", page_title="40 week courses")
 
 SPREADSHEET_ID = "1fR8_Ay7jpzmPCAl6dWSCC7sWw5VJOaNpu5Zp8b78LRg"
 
+# === Refunds (LatAm) constants ===
+REFUNDS_SHEET_ID = "1ITOBSlVk4trLSKAkc5vobQrdTz6ve1Z5ljf1CnQfDJo"
+REFUNDS_TAB_NAME = "Refunds - LatAm"
+
 # ---- Авторизация через st.secrets (строка JSON) ----
 scope = ["https://spreadsheets.google.com/feeds",
          "https://www.googleapis.com/auth/drive"]
@@ -1429,6 +1433,58 @@ if not df2_base.empty and {KEY_COL_FR2, "K"}.issubset(df2_base.columns):
             if t:
                 comments_per_month.setdefault(m, Counter())[t] += 1
 
+# === Refunds (LatAm) → метрики по месяцам для Detailed feedback ===
+# Берем: AS (дата), AV (курс), AU (флаг), L (значение для агрегирования)
+try:
+    _ws_ref = client.open_by_key(REFUNDS_SHEET_ID).worksheet(REFUNDS_TAB_NAME)
+    df_ref_all = pd.DataFrame(_ws_ref.get_all_records())
+except Exception:
+    df_ref_all = pd.DataFrame()
+
+refunds_by_month = {}
+if not df_ref_all.empty and {"AS", "AU", "AV", "L"}.issubset(df_ref_all.columns):
+    dfr = df_ref_all.copy()
+
+    # AU == TRUE
+    dfr["AU"] = dfr["AU"].astype(str).str.strip().str.lower().isin(["true", "1", "yes"])
+    dfr = dfr[dfr["AU"]]
+
+    # фильтр по курсам (AV), чтобы совпадал с основным фильтром приложения
+    if selected_courses:
+        dfr = dfr[dfr["AV"].astype(str).isin(selected_courses)]
+
+    # месяц из AS
+    dfr["AS"] = pd.to_datetime(dfr["AS"], errors="coerce")
+    dfr = dfr.dropna(subset=["AS"])
+    dfr["MonthNum"] = dfr["AS"].dt.month.astype(int)
+
+    # дополнительный фильтр по выбранным месяцам (если задан)
+    if selected_months:
+        dfr = dfr[dfr["MonthNum"].isin(selected_months)]
+
+    # приводим L к числу для сумм/средних (если там текст — будет NaN и не испортит count)
+    dfr["L_num"] = pd.to_numeric(dfr["L"], errors="coerce")
+
+    agg_refunds = (
+        dfr.groupby("MonthNum", as_index=False)
+           .agg(
+               refunds_count=("AU", "size"),          # количество строк-рефандов
+               refunds_L_sum=("L_num", "sum"),        # сумма L (если число)
+               refunds_L_avg=("L_num", "mean"),       # среднее L (если число)
+           )
+    )
+
+    # в dict для удобного доступа при формировании строк
+    for _, rr in agg_refunds.iterrows():
+        m = int(rr["MonthNum"])
+        refunds_by_month[m] = {
+            "refunds_count": int(rr["refunds_count"]),
+            "refunds_L_sum": float(rr["refunds_L_sum"]) if pd.notna(rr["refunds_L_sum"]) else 0.0,
+            "refunds_L_avg": float(rr["refunds_L_avg"]) if pd.notna(rr["refunds_L_avg"]) else 0.0,
+        }
+else:
+    refunds_by_month = {}
+
 # === Формирование сводной таблицы ===
 all_months = sorted(set(
     list(ij_pairs_per_m.keys()) +
@@ -1436,7 +1492,8 @@ all_months = sorted(set(
     list(unknown_per_m.keys()) +
     (df_dis[KEY_LABEL].unique().tolist() if not df_dis.empty else []) +
     list(unknown_dislike_per_m.keys()) +
-    list(comments_per_month.keys())
+    list(comments_per_month.keys()) +
+    list(refunds_by_month.keys())                # ← добавили
 ))
 
 if not all_months:
@@ -1529,6 +1586,12 @@ else:
 
         total_all = total_aspects_all + total_dis_all + total_comm
 
+        # --- Refunds метрики по месяцу ---
+        refm = refunds_by_month.get(m, {})
+        ref_cnt = refm.get("refunds_count", 0)
+        ref_sum = refm.get("refunds_L_sum", 0.0)
+        ref_avg = refm.get("refunds_L_avg", 0.0)
+    
         unified_rows.append({
             KEY_LABEL: int(m),
             "Score with argumentation": ij_text,
@@ -1539,6 +1602,9 @@ else:
             "Total disliked": total_dis_all,
             "Other comments": comm_txt,
             "Total comments": total_comm,
+            "Refunds (AU=TRUE) — count": ref_cnt,         # ← новое
+            "Refunds — L sum": round(ref_sum, 2),         # ← новое
+            "Refunds — L avg": round(ref_avg, 2),         # ← новое
             "Total mentions (all)": total_all,
         })
 
@@ -1546,17 +1612,21 @@ else:
     height = min(1000, 140 + 28 * len(unified_table))
     st.dataframe(
         unified_table[
-            [KEY_LABEL,
-             "Score with argumentation", "Total scores",
-             "What liked", "Total liked",
-             "What disliked", "Total disliked",
-             "Other comments", "Total comments",
-             "Total mentions (all)"]
+            [
+                KEY_LABEL,
+                "Score with argumentation", "Total scores",
+                "What liked", "Total liked",
+                "What disliked", "Total disliked",
+                "Other comments", "Total comments",
+                "Refunds (AU=TRUE) — count",   # ← добавили
+                "Refunds — L sum",             # ← добавили
+                "Refunds — L avg",             # ← добавили
+                "Total mentions (all)",
+            ]
         ],
         use_container_width=True,
         height=height
     )
-
 
 # ---------- НИЖЕ: Аспекты урока — Form Responses 1 ----------
 st.markdown("---")
