@@ -18,7 +18,7 @@ try:
 except Exception:
     _gt = None  # нет библиотеки/интернета — используем запасной вариант
 
-st.set_page_config(layout="wide", page_title="40 week courses")
+st.set_page_config(layout="wide", page_title="Feedback LatAm")
 
 SPREADSHEET_ID = "1fR8_Ay7jpzmPCAl6dWSCC7sWw5VJOaNpu5Zp8b78LRg"
 
@@ -863,13 +863,9 @@ fr2_out, fr2_bucket_order, fr2_val_order, fr2_title = prep_distribution(df2_f, "
 # === Tabs ===
 feedback_tab, refunds_tab = st.tabs(["Feedback", "Refunds (LatAm)"])
 
-st.title("Parents + Students feedback: Latam")
-
 with feedback_tab:
-    st.title("Parents + Students feedback: Latam")
 
     # ---------- ЕДИНАЯ «РЕАЛИСТИЧНАЯ» ШКАЛА (перцентиль 0–100) ПО УРОКАМ ----------
-    st.markdown("---")
     st.subheader("Lesson scores (percentile 0–100)")
     
     st.markdown(
