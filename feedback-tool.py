@@ -2458,7 +2458,7 @@ with feedback_tab:
             "Did you feel you could ask questions and participate in class?"
         )
 
-# ==================== Refunds (LatAm) — separate tab ====================
+# ==================== Refunds (LatAm) — single page (2 charts) ====================
 
 with refunds_tab:
     st.subheader("Refunds — LatAm")
@@ -2473,21 +2473,23 @@ with refunds_tab:
             df_ref[c] = pd.NA
 
     if df_ref.empty or not {"AS", "AU"}.issubset(df_ref.columns):
-        st.info("No data (expected columns: AS — month, AU — boolean flag).")
+        st.info("No data (expected columns: AS — month/date, AU — boolean flag).")
     else:
-        # 2) Keep only AU == TRUE
+        # 1) Keep only AU == TRUE
         dff = df_ref.copy()
         dff["AU"] = dff["AU"].astype(str).str.strip().str.lower().isin(["true", "1", "yes"])
         dff = dff[dff["AU"]]
         if dff.empty:
             st.info("No rows with AU=TRUE.")
         else:
-            # 3) Build Month label and sort key from AS
+            # 2) Month key/label from AS (date or numeric month)
             dt = pd.to_datetime(dff["AS"], errors="coerce")
             as_num = pd.to_numeric(dff["AS"], errors="coerce")
 
+            # numeric sort key: YYYYMM for dates, else integer AS
             month_key = (dt.dt.year * 100 + dt.dt.month).where(dt.notna(), as_num)
             month_key = pd.to_numeric(month_key, errors="coerce")
+
             month_label = dt.dt.to_period("M").astype(str).where(
                 dt.notna(), as_num.astype("Int64").astype(str)
             )
@@ -2497,69 +2499,96 @@ with refunds_tab:
             dff["MonthKey"] = pd.to_numeric(dff["MonthKey"], errors="coerce")
             dff = dff.dropna(subset=["MonthKey"])
 
-            # 4) Reason column (K) -> fill blanks
+            # 3) Reason column (K) -> fill blanks
             if "K" in dff.columns:
                 dff["K"] = dff["K"].astype(str).str.strip()
                 dff.loc[dff["K"].eq("") | dff["K"].str.lower().eq("nan"), "K"] = "Unspecified"
             else:
                 dff["K"] = "Unspecified"
 
-            tab1, tab2 = st.tabs(["Refunds — by month", "Refund reasons — share by month"])
+            # ---------- CHART 1: simple count by month ----------
+            st.markdown("**Refunds — by month (count)**")
 
-            # --- TAB 1 ---
-            with tab1:
-                by_month = (
-                    dff.groupby(["MonthKey", "Month"], as_index=False)
-                       .size()
-                       .rename(columns={"size": "count"})
-                       .sort_values("MonthKey")
-                )
-                month_order = by_month["Month"].tolist()
-                ch_counts = (
-                    alt.Chart(by_month)
-                       .mark_bar(size=36)
-                       .encode(
-                           x=alt.X("Month:N", sort=month_order, title="Month"),
-                           y=alt.Y("count:Q", title="Refunds (count)"),
-                           tooltip=[alt.Tooltip("Month:N", title="Month"),
-                                    alt.Tooltip("count:Q", title="Refunds")],
-                       )
-                       .properties(height=420)
-                )
-                st.altair_chart(ch_counts, use_container_width=True, theme=None)
+            by_month = (
+                dff.groupby(["MonthKey", "Month"], as_index=False)
+                   .size()
+                   .rename(columns={"size": "count"})
+                   .sort_values("MonthKey")
+            )
+            month_order = by_month["Month"].tolist()
 
-            # --- TAB 2 ---
-            with tab2:
-                grp = (
-                    dff.groupby(["MonthKey", "Month", "K"], as_index=False)
-                       .size().rename(columns={"size": "count"})
-                )
-                totals = grp.groupby(["MonthKey", "Month"], as_index=False)["count"] \
-                            .sum().rename(columns={"count": "total"})
-                out = grp.merge(totals, on=["MonthKey", "Month"], how="left")
-                month_order = (
-                    out[["MonthKey", "Month"]].drop_duplicates()
-                    .sort_values("MonthKey")["Month"].tolist()
-                )
-                ch_stack = (
-                    alt.Chart(out)
-                       .transform_calculate(pct="datum.count / datum.total")
-                       .mark_bar(size=36)
-                       .encode(
-                           x=alt.X("Month:N", sort=month_order, title="Month"),
-                           y=alt.Y("count:Q", stack="normalize",
-                                   axis=alt.Axis(format="%", title="Share of refunds (100%)"),
-                                   scale=alt.Scale(domain=[0, 1], nice=False, clamp=True)),
-                           color=alt.Color("K:N", title="Refund reason"),
-                           order=alt.Order("count:Q", sort="ascending"),
-                           tooltip=[
-                               alt.Tooltip("Month:N", title="Month"),
-                               alt.Tooltip("K:N", title="Reason"),
-                               alt.Tooltip("count:Q", title="Count"),
-                               alt.Tooltip("pct:Q", title="Share", format=".0%"),
-                               alt.Tooltip("total:Q", title="Total in month"),
-                           ],
-                       )
-                       .properties(height=420)
-                )
-                st.altair_chart(ch_stack, use_container_width=True, theme=None)
+            ch_counts = (
+                alt.Chart(by_month)
+                   .mark_bar(size=36)
+                   .encode(
+                       x=alt.X("Month:N", sort=month_order, title="Month"),
+                       y=alt.Y("count:Q", title="Refunds (count)"),
+                       tooltip=[
+                           alt.Tooltip("Month:N", title="Month"),
+                           alt.Tooltip("count:Q", title="Refunds"),
+                       ],
+                   )
+                   .properties(height=420)
+            )
+            st.altair_chart(ch_counts, use_container_width=True, theme=None)
+
+            # ---------- CHART 2: 100% stacked by reason (distinct colors) ----------
+            st.markdown("**Refund reasons — share by month (100%)**")
+
+            grp = (
+                dff.groupby(["MonthKey", "Month", "K"], as_index=False)
+                   .size()
+                   .rename(columns={"size": "count"})
+            )
+            totals = (
+                grp.groupby(["MonthKey", "Month"], as_index=False)["count"]
+                   .sum()
+                   .rename(columns={"count": "total"})
+            )
+            out = grp.merge(totals, on=["MonthKey", "Month"], how="left")
+            month_order = (
+                out[["MonthKey", "Month"]]
+                .drop_duplicates()
+                .sort_values("MonthKey")["Month"]
+                .tolist()
+            )
+
+            # фиксируем порядок категорий и даём «разные» цвета (категориальная палитра)
+            reason_order = (
+                out.groupby("K", as_index=False)["count"]
+                   .sum()
+                   .sort_values("count", ascending=False)["K"]
+                   .tolist()
+            )
+
+            ch_stack = (
+                alt.Chart(out)
+                   .transform_calculate(pct="datum.count / datum.total")
+                   .mark_bar(size=36)
+                   .encode(
+                       x=alt.X("Month:N", sort=month_order, title="Month"),
+                       y=alt.Y(
+                           "count:Q",
+                           stack="normalize",
+                           axis=alt.Axis(format="%", title="Share of refunds (100%)"),
+                           scale=alt.Scale(domain=[0, 1], nice=False, clamp=True),
+                       ),
+                       color=alt.Color(
+                           "K:N",
+                           title="Refund reason",
+                           sort=reason_order,
+                           # палитра с большим числом различимых цветов
+                           scale=alt.Scale(scheme="category20")
+                       ),
+                       order=alt.Order("count:Q", sort="ascending"),
+                       tooltip=[
+                           alt.Tooltip("Month:N", title="Month"),
+                           alt.Tooltip("K:N", title="Reason"),
+                           alt.Tooltip("count:Q", title="Count"),
+                           alt.Tooltip("pct:Q", title="Share", format=".0%"),
+                           alt.Tooltip("total:Q", title="Total in month"),
+                       ],
+                   )
+                   .properties(height=420)
+            )
+            st.altair_chart(ch_stack, use_container_width=True, theme=None)
