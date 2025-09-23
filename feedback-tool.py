@@ -2624,7 +2624,6 @@ with qa_tab:
         dqa["B"] = pd.to_datetime(dqa["B"], errors="coerce")   # Lesson date
         dqa["H"] = pd.to_numeric(dqa["H"], errors="coerce")    # Month
         dqa["F"] = pd.to_numeric(dqa["F"], errors="coerce")    # QA marker (avg)
-        dqa["D"] = pd.to_numeric(dqa["D"], errors="coerce")    # QA marker (distribution)
         dqa = dqa.dropna(subset=["I"])                         # Course present
 
         # Apply global filters: courses + date
@@ -2679,8 +2678,6 @@ with qa_tab:
 
         # === QA (LatAm) — D text distribution by Month (H) ===
         st.markdown("**QA marker (D) — distribution by Month (100%)**")
-        
-        dqa = load_qa_df_cached()  # уже определена выше
         
         # Гарантируем нужные колонки
         need = ["H", "D", "I", "B"]   # Month, QA marker (text), Course, Lesson date
