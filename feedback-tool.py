@@ -69,6 +69,19 @@ def load_refunds_letter_df_cached() -> pd.DataFrame:
     cols = _excel_cols(len(vals[0]))
     return pd.DataFrame(vals[1:], columns=cols)
 
+@st.cache_data(ttl=300)
+def load_qa_letter_df_cached() -> pd.DataFrame:
+    """QA for analytics: возвращает DataFrame с буквенными колонками A,B,C..."""
+    try:
+        ws = client.open_by_key(REFUNDS_SHEET_ID).worksheet("QA for analytics")
+        vals = ws.get_all_values()
+    except Exception:
+        return pd.DataFrame()
+    if not vals or len(vals) < 2:
+        return pd.DataFrame()
+    cols = _excel_cols(len(vals[0]))
+    return pd.DataFrame(vals[1:], columns=cols)
+
 def safe_minmax(dt1_min, dt1_max, dt2_min, dt2_max):
     mins = [d for d in [dt1_min, dt2_min] if pd.notna(d)]
     maxs = [d for d in [dt1_max, dt2_max] if pd.notna(d)]
@@ -861,7 +874,7 @@ fr2_out, fr2_bucket_order, fr2_val_order, fr2_title = prep_distribution(df2_f, "
 # ==================== ОТРИСОВКА ====================
 
 # === Tabs ===
-feedback_tab, refunds_tab = st.tabs(["Feedback", "Refunds (LatAm)"])
+feedback_tab, refunds_tab, qa_tab = st.tabs(["Feedback", "Refunds (LatAm)", "QA (analytics)"])
 
 with feedback_tab:
 
@@ -2592,3 +2605,168 @@ with refunds_tab:
                    .properties(height=420)
             )
             st.altair_chart(ch_stack, use_container_width=True, theme=None)
+
+# ==================== QA (analytics) — 3 charts ====================
+with qa_tab:
+    st.subheader("QA analytics")
+
+    # Load
+    dqa = load_qa_letter_df_cached()
+    # Ensure required columns exist
+    for c in ["I", "H", "B", "F", "D"]:
+        if c not in dqa.columns:
+            dqa[c] = pd.NA
+
+    if dqa.empty:
+        st.info("No data in 'QA for analytics' tab.")
+    else:
+        # Types
+        dqa["B"] = pd.to_datetime(dqa["B"], errors="coerce")   # Lesson date
+        dqa["H"] = pd.to_numeric(dqa["H"], errors="coerce")    # Month
+        dqa["F"] = pd.to_numeric(dqa["F"], errors="coerce")    # QA marker (avg)
+        dqa["D"] = pd.to_numeric(dqa["D"], errors="coerce")    # QA marker (distribution)
+        dqa = dqa.dropna(subset=["I"])                         # Course present
+
+        # Apply global filters: courses + date
+        if selected_courses:
+            dqa = dqa[dqa["I"].isin(selected_courses)]
+        # date_range can be [] or [start, end]
+        if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
+            start_dt = pd.to_datetime(date_range[0])
+            end_dt   = pd.to_datetime(date_range[1])
+            dqa = dqa[(dqa["B"] >= start_dt) & (dqa["B"] <= end_dt)]
+        elif isinstance(date_range, (list, tuple)) and len(date_range) == 1:
+            only_dt = pd.to_datetime(date_range[0])
+            dqa = dqa[dqa["B"].dt.date == only_dt.date()]
+
+        # Apply global month filter (if any)
+        if selected_months:
+            dqa = dqa[dqa["H"].astype("Int64").isin(pd.Series(selected_months, dtype="Int64"))]
+
+        # ---------- Chart 1: Average F by Month (H) ----------
+        st.markdown("**Average QA marker (F) by Month**")
+
+        df_avg = dqa.dropna(subset=["H", "F"]).copy()
+        if df_avg.empty:
+            st.info("No data for average (F) by Month.")
+        else:
+            df_avg["H"] = df_avg["H"].astype(int)
+            agg = (df_avg.groupby("H", as_index=False)
+                         .agg(avg_F=("F", "mean"), count=("F", "size"))
+                         .sort_values("H"))
+            y_min = float(agg["avg_F"].min())
+            y_max = float(agg["avg_F"].max())
+            pad = (y_max - y_min) * 0.1 if y_max > y_min else 0.5
+            y_scale = alt.Scale(domain=[y_min - pad, y_max + pad], nice=False, clamp=True)
+
+            ch1 = (
+                alt.Chart(agg)
+                  .mark_line(point=True)
+                  .encode(
+                      x=alt.X("H:O", title="Month", sort="ascending"),
+                      y=alt.Y("avg_F:Q", title="Average QA marker (F)", scale=y_scale),
+                      tooltip=[
+                          alt.Tooltip("H:O", title="Month"),
+                          alt.Tooltip("avg_F:Q", title="Average F", format=".2f"),
+                          alt.Tooltip("count:Q", title="Answers"),
+                      ],
+                  )
+                  .properties(height=360)
+            )
+            st.altair_chart(ch1, use_container_width=True, theme=None)
+
+        st.markdown("---")
+
+        # ---------- Chart 2: Distribution of D by Month (H) (100% stacked) ----------
+        st.markdown("**QA marker (D) — distribution by Month (100%)**")
+
+        df_dist = dqa.dropna(subset=["H", "D"]).copy()
+        if df_dist.empty:
+            st.info("No data for distribution (D) by Month.")
+        else:
+            df_dist["H"] = df_dist["H"].astype(int)
+            df_dist["val"] = df_dist["D"].astype(int)
+            df_dist["val_str"] = df_dist["val"].astype(str)
+
+            grp = (df_dist.groupby(["H", "val", "val_str"], as_index=False)
+                           .size().rename(columns={"size": "count"}))
+            totals = (grp.groupby("H", as_index=False)["count"]
+                          .sum().rename(columns={"count": "total"}))
+            out = grp.merge(totals, on="H", how="left")
+
+            # Month order & value order
+            month_order = sorted(out["H"].unique().tolist())
+            val_order = sorted(out["val"].unique().tolist())
+
+            ch2 = (
+                alt.Chart(out)
+                  .mark_bar(size=28, stroke=None, strokeWidth=0)
+                  .encode(
+                      x=alt.X("H:O", title="Month", sort=month_order),
+                      y=alt.Y(
+                          "count:Q",
+                          stack="normalize",
+                          axis=alt.Axis(format="%", title="Share (100%)"),
+                          scale=alt.Scale(domain=[0,1], nice=False, clamp=True),
+                      ),
+                      color=alt.Color(
+                          "val_str:N",
+                          title="QA marker (D)",
+                          sort=[str(v) for v in val_order],
+                          legend=alt.Legend(orient="bottom", direction="horizontal",
+                                            columns=5, labelLimit=1000, titleLimit=1000,
+                                            symbolType="square"),
+                      ),
+                      order=alt.Order("val:Q", sort="ascending"),
+                      tooltip=[
+                          alt.Tooltip("H:O", title="Month"),
+                          alt.Tooltip("val_str:N", title="D"),
+                          alt.Tooltip("count:Q", title="Count"),
+                          alt.Tooltip("total:Q", title="Total in month"),
+                          alt.Tooltip("count:Q", title="Share", format=".0%", 
+                                      aggregate=None)  # ratio shown via stack axis
+                      ],
+                  )
+                  .properties(height=420)
+            ).configure_legend(labelLimit=1000, titleLimit=1000)
+            st.altair_chart(ch2, use_container_width=True, theme=None)
+
+        st.markdown("---")
+
+        # ---------- Chart 3: Average F over time (by lesson date B, bucketed; line) ----------
+        st.markdown("**Average QA marker (F) over time**")
+
+        df_time = dqa.dropna(subset=["B", "F"]).copy()
+        if df_time.empty:
+            st.info("No data for average (F) over time.")
+        else:
+            # Bucket by global granularity ("Day", "Week", "Month", "Year") using helpers
+            df_time = add_bucket(df_time, "B", granularity)
+            df_time = ensure_bucket_and_label(df_time, "B", granularity)
+
+            agg_t = (df_time.groupby(["bucket", "bucket_label"], as_index=False)
+                              .agg(avg_F=("F", "mean"), count=("F", "size"))
+                              .sort_values("bucket"))
+            bucket_order = agg_t["bucket_label"].tolist()
+
+            y_min = float(agg_t["avg_F"].min())
+            y_max = float(agg_t["avg_F"].max())
+            pad = (y_max - y_min) * 0.1 if y_max > y_min else 0.5
+            y_scale = alt.Scale(domain=[y_min - pad, y_max + pad], nice=False, clamp=True)
+
+            ch3 = (
+                alt.Chart(agg_t)
+                  .mark_line(point=True)
+                  .encode(
+                      x=alt.X("bucket_label:N", title="Period", sort=bucket_order),
+                      y=alt.Y("avg_F:Q", title="Average QA marker (F)", scale=y_scale),
+                      tooltip=[
+                          alt.Tooltip("bucket_label:N", title="Period"),
+                          alt.Tooltip("avg_F:Q", title="Average F", format=".2f"),
+                          alt.Tooltip("count:Q", title="Answers"),
+                      ],
+                  )
+                  .properties(height=380)
+            )
+            st.altair_chart(ch3, use_container_width=True, theme=None)
+
