@@ -2677,61 +2677,98 @@ with qa_tab:
 
         st.markdown("---")
 
-        # ---------- Chart 2: Distribution of D by Month (H) (100% stacked) ----------
         st.markdown("**QA marker (D) — distribution by Month (100%)**")
-
-        df_dist = dqa.dropna(subset=["H", "D"]).copy()
+        
+        # Источник для QA: dqa (у тебя он уже получен из "QA for analytics")
+        src = dqa.copy()
+        
+        # 1) Месяц: сначала пробуем взять из H как число, при пустоте — из даты B
+        src["H_num"] = pd.to_numeric(src.get("H"), errors="coerce")
+        if src["H_num"].isna().all():
+            src["B_dt"] = pd.to_datetime(src.get("B"), errors="coerce")
+            src["H_num"] = src["B_dt"].dt.month
+        
+        # 2) Текстовая категория из D
+        src["D_txt"] = (
+            src.get("D")
+               .astype(str)
+               .fillna("")
+               .str.strip()
+               .replace({"nan": ""})
+        )
+        
+        # Срез по курсам, если есть выбранные
+        if selected_courses and "I" in src.columns:
+            src = src[src["I"].astype(str).isin(selected_courses)]
+        
+        # Фильтр по месяцам: только по пересечению (чтобы не обнулить всё при несовпадении)
+        if selected_months:
+            qa_months_present = (
+                pd.to_numeric(dqa.get("H"), errors="coerce")
+                  .dropna().astype(int).unique().tolist()
+            )
+            inter = sorted(set(selected_months) & set(qa_months_present))
+            if inter:
+                src = src[src["H_num"].astype("Int64").isin(pd.Series(inter, dtype="Int64"))]
+            # если пересечения нет — ничего не режем по месяцам
+        
+        # 3) чистим пустые
+        df_dist = src.dropna(subset=["H_num"]).copy()
+        df_dist = df_dist[df_dist["D_txt"] != ""]
         if df_dist.empty:
-            st.info("No data for distribution (D) by Month.")
+            st.info("No data for distribution (text D) by Month.")
         else:
-            df_dist["H"] = df_dist["H"].astype(int)
-            df_dist["val"] = df_dist["D"].astype(int)
-            df_dist["val_str"] = df_dist["val"].astype(str)
-
-            grp = (df_dist.groupby(["H", "val", "val_str"], as_index=False)
-                           .size().rename(columns={"size": "count"}))
-            totals = (grp.groupby("H", as_index=False)["count"]
-                          .sum().rename(columns={"count": "total"}))
-            out = grp.merge(totals, on="H", how="left")
-
-            # Month order & value order
-            month_order = sorted(out["H"].unique().tolist())
-            val_order = sorted(out["val"].unique().tolist())
-
-            ch2 = (
+            df_dist["Month"] = df_dist["H_num"].astype(int)
+        
+            # Группировка и расчёт total по месяцу
+            grp = (
+                df_dist.groupby(["Month", "D_txt"], as_index=False)
+                       .size().rename(columns={"size": "count"})
+            )
+            totals = (
+                grp.groupby("Month", as_index=False)["count"]
+                   .sum().rename(columns={"count": "total"})
+            )
+            out = grp.merge(totals, on="Month", how="left")
+        
+            month_order = sorted(out["Month"].unique().tolist())
+            # порядок категорий — по общей частоте (сверху вниз)
+            cat_order = (
+                out.groupby("D_txt", as_index=False)["count"]
+                   .sum().sort_values("count", ascending=False)["D_txt"].tolist()
+            )
+        
+            ch = (
                 alt.Chart(out)
                   .mark_bar(size=28, stroke=None, strokeWidth=0)
                   .encode(
-                      x=alt.X("H:O", title="Month", sort=month_order),
+                      x=alt.X("Month:O", title="Month", sort=month_order),
                       y=alt.Y(
                           "count:Q",
                           stack="normalize",
                           axis=alt.Axis(format="%", title="Share (100%)"),
-                          scale=alt.Scale(domain=[0,1], nice=False, clamp=True),
+                          scale=alt.Scale(domain=[0, 1], nice=False, clamp=True),
                       ),
                       color=alt.Color(
-                          "val_str:N",
+                          "D_txt:N",
                           title="QA marker (D)",
-                          sort=[str(v) for v in val_order],
-                          legend=alt.Legend(orient="bottom", direction="horizontal",
-                                            columns=5, labelLimit=1000, titleLimit=1000,
-                                            symbolType="square"),
+                          sort=cat_order,
+                          # разные цвета для каждого текста
+                          scale=alt.Scale(scheme="category20")
                       ),
-                      order=alt.Order("val:Q", sort="ascending"),
+                      order=alt.Order("count:Q", sort="ascending"),
                       tooltip=[
-                          alt.Tooltip("H:O", title="Month"),
-                          alt.Tooltip("val_str:N", title="D"),
+                          alt.Tooltip("Month:O", title="Month"),
+                          alt.Tooltip("D_txt:N", title="Text"),
                           alt.Tooltip("count:Q", title="Count"),
                           alt.Tooltip("total:Q", title="Total in month"),
-                          alt.Tooltip("count:Q", title="Share", format=".0%", 
-                                      aggregate=None)  # ratio shown via stack axis
                       ],
                   )
                   .properties(height=420)
-            ).configure_legend(labelLimit=1000, titleLimit=1000)
-            st.altair_chart(ch2, use_container_width=True, theme=None)
+            ).configure_legend(labelLimit=1200, titleLimit=1200, symbolType="square")
+        
+            st.altair_chart(ch, use_container_width=True, theme=None)
 
-        st.markdown("---")
 
         # ---------- Chart 3: Average F over time (by lesson date B, bucketed; line) ----------
         st.markdown("**Average QA marker (F) over time**")
