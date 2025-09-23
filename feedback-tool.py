@@ -2677,62 +2677,63 @@ with qa_tab:
 
         st.markdown("---")
 
+        # === QA (LatAm) — D text distribution by Month (H) ===
         st.markdown("**QA marker (D) — distribution by Month (100%)**")
         
-        # Источник для QA: dqa (у тебя он уже получен из "QA for analytics")
+        dqa = load_qa_df_cached()  # уже определена выше
+        
+        # Гарантируем нужные колонки
+        need = ["H", "D", "I", "B"]   # Month, QA marker (text), Course, Lesson date
+        for c in need:
+            if c not in dqa.columns:
+                dqa[c] = pd.NA
+        
         src = dqa.copy()
         
-        # 1) Месяц: сначала пробуем взять из H как число, при пустоте — из даты B
-        src["H_num"] = pd.to_numeric(src.get("H"), errors="coerce")
-        if src["H_num"].isna().all():
-            src["B_dt"] = pd.to_datetime(src.get("B"), errors="coerce")
-            src["H_num"] = src["B_dt"].dt.month
+        # Месяц только из H:
+        src["H_raw"] = src["H"].astype(str).str.strip()
+        h_num = pd.to_numeric(src["H_raw"], errors="coerce")
+        src["MonthNum"] = h_num.astype("Int64")
+        # Лейбл месяца: если H — число -> используем его, иначе оставляем исходную строку
+        src["Month"] = np.where(h_num.notna(), h_num.astype("Int64").astype(str), src["H_raw"])
         
-        # 2) Текстовая категория из D
-        src["D_txt"] = (
-            src.get("D")
-               .astype(str)
-               .fillna("")
-               .str.strip()
-               .replace({"nan": ""})
-        )
+        # Текст категории из D:
+        src["D_txt"] = src["D"].astype(str).fillna("").str.strip().replace({"nan": ""})
         
-        # Срез по курсам, если есть выбранные
-        if selected_courses and "I" in src.columns:
+        # Фильтр по курсам (I), если выбран
+        if selected_courses:
             src = src[src["I"].astype(str).isin(selected_courses)]
         
-        # Фильтр по месяцам: только по пересечению (чтобы не обнулить всё при несовпадении)
-        if selected_months:
-            qa_months_present = (
-                pd.to_numeric(dqa.get("H"), errors="coerce")
-                  .dropna().astype(int).unique().tolist()
-            )
-            inter = sorted(set(selected_months) & set(qa_months_present))
-            if inter:
-                src = src[src["H_num"].astype("Int64").isin(pd.Series(inter, dtype="Int64"))]
-            # если пересечения нет — ничего не режем по месяцам
+        # Фильтр по месяцам — только когда MonthNum числовой
+        if selected_months and src["MonthNum"].notna().any():
+            src = src[src["MonthNum"].isin(pd.Series(selected_months, dtype="Int64"))]
         
-        # 3) чистим пустые
-        df_dist = src.dropna(subset=["H_num"]).copy()
-        df_dist = df_dist[df_dist["D_txt"] != ""]
-        if df_dist.empty:
+        # Чистим пустые
+        src = src[(src["Month"].astype(str).str.len() > 0) & (src["D_txt"] != "")]
+        if src.empty:
             st.info("No data for distribution (text D) by Month.")
         else:
-            df_dist["Month"] = df_dist["H_num"].astype(int)
-        
-            # Группировка и расчёт total по месяцу
+            # Группировка и totals
             grp = (
-                df_dist.groupby(["Month", "D_txt"], as_index=False)
-                       .size().rename(columns={"size": "count"})
+                src.groupby(["Month", "D_txt"], as_index=False)
+                   .size().rename(columns={"size": "count"})
             )
-            totals = (
-                grp.groupby("Month", as_index=False)["count"]
-                   .sum().rename(columns={"count": "total"})
-            )
+            totals = grp.groupby("Month", as_index=False)["count"] \
+                        .sum().rename(columns={"count": "total"})
             out = grp.merge(totals, on="Month", how="left")
         
-            month_order = sorted(out["Month"].unique().tolist())
-            # порядок категорий — по общей частоте (сверху вниз)
+            # Порядок месяцев: по числовому MonthNum, если он есть; иначе — алфавит
+            if src["MonthNum"].notna().any():
+                month_order = (
+                    src[["Month", "MonthNum"]]
+                      .dropna(subset=["MonthNum"])
+                      .drop_duplicates()
+                      .sort_values("MonthNum")["Month"].tolist()
+                )
+            else:
+                month_order = sorted(out["Month"].unique().tolist(), key=lambda x: str(x))
+        
+            # Порядок категорий — по общей частоте
             cat_order = (
                 out.groupby("D_txt", as_index=False)["count"]
                    .sum().sort_values("count", ascending=False)["D_txt"].tolist()
@@ -2742,7 +2743,7 @@ with qa_tab:
                 alt.Chart(out)
                   .mark_bar(size=28, stroke=None, strokeWidth=0)
                   .encode(
-                      x=alt.X("Month:O", title="Month", sort=month_order),
+                      x=alt.X("Month:N", title="Month", sort=month_order),
                       y=alt.Y(
                           "count:Q",
                           stack="normalize",
@@ -2753,12 +2754,11 @@ with qa_tab:
                           "D_txt:N",
                           title="QA marker (D)",
                           sort=cat_order,
-                          # разные цвета для каждого текста
-                          scale=alt.Scale(scheme="category20")
+                          scale=alt.Scale(scheme="category20")  # разные цвета
                       ),
                       order=alt.Order("count:Q", sort="ascending"),
                       tooltip=[
-                          alt.Tooltip("Month:O", title="Month"),
+                          alt.Tooltip("Month:N", title="Month"),
                           alt.Tooltip("D_txt:N", title="Text"),
                           alt.Tooltip("count:Q", title="Count"),
                           alt.Tooltip("total:Q", title="Total in month"),
@@ -2768,6 +2768,7 @@ with qa_tab:
             ).configure_legend(labelLimit=1200, titleLimit=1200, symbolType="square")
         
             st.altair_chart(ch, use_container_width=True, theme=None)
+
 
 
         # ---------- Chart 3: Average F over time (by lesson date B, bucketed; line) ----------
