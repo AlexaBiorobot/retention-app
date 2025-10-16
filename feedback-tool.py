@@ -27,11 +27,15 @@ REFUNDS_SHEET_ID = "1ITOBSlVk4trLSKAkc5vobQrdTz6ve1Z5ljf1CnQfDJo"
 REFUNDS_TAB_NAME = "Refunds - LatAm"
 
 # ---- Авторизация через st.secrets (строка JSON) ----
-scope = ["https://spreadsheets.google.com/feeds",
-         "https://www.googleapis.com/auth/drive"]
-sa_info = json.loads(st.secrets["GCP_SERVICE_ACCOUNT"])
-creds = ServiceAccountCredentials.from_json_keyfile_dict(sa_info, scope)
-client = gspread.authorize(creds)
+@st.cache_resource
+def get_gs_client():
+    scope = ["https://www.googleapis.com/auth/spreadsheets.readonly",
+             "https://www.googleapis.com/auth/drive.readonly"]
+    sa_info = json.loads(st.secrets["GCP_SERVICE_ACCOUNT"])
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(sa_info, scope)
+    return gspread.authorize(creds)
+
+client = get_gs_client()
 
 # ==================== УТИЛИТЫ ====================
 
@@ -47,21 +51,21 @@ def _excel_cols(n_cols: int) -> list[str]:
                 return cols
     return cols[:n_cols]
 
-@st.cache_data(ttl=300)
+@st.cache_data(show_spinner=False)
 def load_sheet_as_letter_df_cached(sheet_name: str) -> pd.DataFrame:
     ws = client.open_by_key(SPREADSHEET_ID).worksheet(sheet_name)
-    values = ws.get_all_values()
+    values = ws.get('A:R')  # читаем только до R (хватает FR1/FR2)
     if not values or len(values) < 2:
         return pd.DataFrame()
     num_cols = len(values[0])
-    letters = _excel_cols(num_cols)   # A..Z, AA.., AB.. и т.д.
+    letters = _excel_cols(num_cols)
     return pd.DataFrame(values[1:], columns=letters)
 
-@st.cache_data(ttl=300)
+@st.cache_data(show_spinner=False)
 def load_refunds_letter_df_cached() -> pd.DataFrame:
     try:
         ws = client.open_by_key(REFUNDS_SHEET_ID).worksheet(REFUNDS_TAB_NAME)
-        vals = ws.get_all_values()
+        vals = ws.get('A:AV')  # до AV включительно (нужны L/AV/AS/AU)
     except Exception:
         return pd.DataFrame()
     if not vals or len(vals) < 2:
@@ -69,12 +73,11 @@ def load_refunds_letter_df_cached() -> pd.DataFrame:
     cols = _excel_cols(len(vals[0]))
     return pd.DataFrame(vals[1:], columns=cols)
 
-@st.cache_data(ttl=300)
+@st.cache_data(show_spinner=False)
 def load_qa_letter_df_cached() -> pd.DataFrame:
-    """QA for analytics: возвращает DataFrame с буквенными колонками A,B,C..."""
     try:
         ws = client.open_by_key(REFUNDS_SHEET_ID).worksheet("QA for analytics")
-        vals = ws.get_all_values()
+        vals = ws.get('A:Z')  # QA используют B/D/F/H/I → Z достаточно
     except Exception:
         return pd.DataFrame()
     if not vals or len(vals) < 2:
@@ -159,6 +162,7 @@ def ensure_bucket_and_label(dff: pd.DataFrame, date_col: str, granularity: str) 
     out["bucket_label"] = out["bucket"].dt.strftime(fmt)
     return out
 
+@st.cache_data(show_spinner=False)
 def prep_distribution(df_f: pd.DataFrame, value_col: str, allowed_values: list, label_title: str):
     if df_f.empty:
         return pd.DataFrame(), [], [], label_title
@@ -244,6 +248,7 @@ def prep_distribution_text_fr2(df_f: pd.DataFrame, text_col: str, granularity: s
 
     return out, bucket_order, cat_order, title
 
+@st.cache_data(show_spinner=False)
 def _to_percentile_0_100(df: pd.DataFrame, val_col: str) -> pd.Series:
     """
     Возвращает Series с перцентилем (0–100) для каждого значения val_col в df,
@@ -253,6 +258,7 @@ def _to_percentile_0_100(df: pd.DataFrame, val_col: str) -> pd.Series:
         return pd.Series([], dtype=float)
     return df[val_col].rank(pct=True, method="average") * 100.0
 
+@st.cache_data(show_spinner=False)
 def _pack_full_tooltip(df_src: pd.DataFrame, x_col: str, legend_title: str):
     """
     Готовит DF для «общего» тултипа по целому столбику.
@@ -371,6 +377,7 @@ def _norm_local(s: str) -> str:
     return s
 
 # универсальная сборка для произвольного списка аспектов [(es, en), ...]
+@st.cache_data(show_spinner=False)
 def build_aspects_counts_generic(df: pd.DataFrame, text_col: str, date_col: str,
                                  granularity: str, aspects_es_en: list[tuple[str, str]]):
     need_cols = [date_col, text_col]
@@ -426,6 +433,7 @@ FR2_E_TEMPL_ES_EN = [
     ("No hubo clase", "There was no class"),
 ]
 
+@st.cache_data(show_spinner=False)
 def build_template_counts(
     df: pd.DataFrame,
     text_col: str,
@@ -433,6 +441,10 @@ def build_template_counts(
     granularity: str,
     templates_es_en: list[tuple[str, str]],
 ):
+    """
+    FR2:D/E. Быстро: split+explode, нормализация, матч по eq/contains.
+    ВАЖНО: запятую НЕ используем как разделитель (чтобы не ломать 'Sí, todo a tiempo').
+    """
     need_cols = [date_col, text_col]
     if df.empty or not all(c in df.columns for c in need_cols):
         return pd.DataFrame(columns=["bucket","bucket_label","templ_es","templ_en","count"])
@@ -443,38 +455,50 @@ def build_template_counts(
     if d.empty:
         return pd.DataFrame(columns=["bucket","bucket_label","templ_es","templ_en","count"])
 
-    tmpl_norm = [(_norm_local(es), es, en) for es, en in templates_es_en]
-
     d = d.rename(columns={date_col: "A", text_col: "TXT"})
     d = add_bucket(d, "A", granularity)
     d = ensure_bucket_and_label(d, "A", granularity)
 
+    # split + explode (БЕЗ запятой!) — корректный вариант
+    d["TXT"] = d["TXT"].astype(str).str.strip().replace({"nan": ""})
+    d["piece"] = d["TXT"].str.split(r"[;\/\n|]+", regex=True)
+    d = d.explode("piece")
+    d["piece"] = d["piece"].astype(str).str.strip()
+    d = d[d["piece"] != ""]
+
+    if d.empty:
+        return pd.DataFrame(columns=["bucket","bucket_label","templ_es","templ_en","count"])
+
+    norm = (d["piece"].str.normalize("NFKD")
+                    .str.encode("ascii","ignore").str.decode("ascii")
+                    .str.lower().str.replace(r"[^\w\s]", " ", regex=True)
+                    .str.replace(r"\s+", " ", regex=True).str.strip())
+    d["norm"] = norm
+
     rows = []
-    # ⚠️ запятую НЕ используем как разделитель, чтобы не ломать "Sí, todo a tiempo"
-    splitter = re.compile(r"[;\/\n|]+")  # ; / | и перенос строки
-    for _, r in d.iterrows():
-        raw = str(r["TXT"] or "").strip()
-        if not raw:
-            continue
-        parts = splitter.split(raw) if splitter.search(raw) else [raw]
-        for p in parts:
-            t = _norm_local(p.strip())
-            if not t:
-                continue
-            for es_norm, es, en in tmpl_norm:
-                if t == es_norm or es_norm in t:
-                    rows.append((r["bucket"], r["bucket_label"], es, en))
-                    break
+    for es, en in templates_es_en:
+        es_norm = _norm_local(es)
+        mask = d["norm"].eq(es_norm) | d["norm"].str.contains(es_norm, na=False)
+        if mask.any():
+            tmp = d.loc[mask, ["bucket","bucket_label"]].copy()
+            tmp["templ_es"] = es
+            tmp["templ_en"] = en
+            rows.append(tmp)
 
     if not rows:
         return pd.DataFrame(columns=["bucket","bucket_label","templ_es","templ_en","count"])
 
-    out = (pd.DataFrame(rows, columns=["bucket","bucket_label","templ_es","templ_en"])
+    out = (pd.concat(rows, ignore_index=True)
              .groupby(["bucket","bucket_label","templ_es","templ_en"], as_index=False)
              .size().rename(columns={"size":"count"}))
     return out
 
+@st.cache_data(show_spinner=False)
 def build_aspects_counts(df: pd.DataFrame, text_col: str, date_col: str, granularity: str):
+    """
+    FR1:E. Быстро: split+explode, нормализация, матч по eq/contains, без циклов по строкам.
+    Запятая ИСПОЛЬЗУЕТСЯ как разделитель (как в твоей исходной версии).
+    """
     need_cols = [date_col, text_col]
     if df.empty or not all(c in df.columns for c in need_cols):
         return (pd.DataFrame(columns=["bucket","bucket_label","aspect","count"]),
@@ -491,42 +515,54 @@ def build_aspects_counts(df: pd.DataFrame, text_col: str, date_col: str, granula
     d = add_bucket(d, "A", granularity)
     d = ensure_bucket_and_label(d, "A", granularity)
 
-    rows, unknown = [], []
-    for _, r in d.iterrows():
-        txt = str(r["TXT"]).strip()
-        if not txt:
-            continue
-        parts = re.split(r"[;,/\n|]+", txt) if re.search(r"[;,/\n|]", txt) else [txt]
-        for p in parts:
-            t = _norm(p.strip())
-            if not t:
-                continue
-            matched = False
-            for es_norm, es, en in _ASPECTS_NORM:
-                if t == es_norm or es_norm in t:
-                    rows.append((r["bucket"], r["bucket_label"], f"{es} (EN: {en})", 1))
-                    matched = True
-                    break
-            if not matched:
-                unknown.append(p.strip())
+    # split + explode (С ЗАПЯТОЙ)
+    d["TXT"] = d["TXT"].astype(str).str.strip().replace({"nan": ""})
+    d["piece"] = d["TXT"].str.split(r"[;,/\n|]+", regex=True)
+    d = d.explode("piece")
+    d["piece"] = d["piece"].astype(str).str.strip()
+    d = d[d["piece"] != ""]
 
-    counts = pd.DataFrame(rows, columns=["bucket","bucket_label","aspect","count"])
-    if not counts.empty:
-        counts = counts.groupby(["bucket","bucket_label","aspect"], as_index=False)["count"].sum()
+    if d.empty:
+        return (pd.DataFrame(columns=["bucket","bucket_label","aspect","count"]),
+                pd.DataFrame(columns=["en","mention","total"]))
 
-    unknown_df = pd.DataFrame(unknown, columns=["mention"])
-    if not unknown_df.empty:
-        unknown_df["mention"] = unknown_df["mention"].str.strip()
-        unknown_df = (unknown_df.groupby("mention", as_index=False)
-                      .size().rename(columns={"size": "total"})
-                      .sort_values("total", ascending=False))
-        unknown_df["en"] = unknown_df["mention"].apply(translate_es_to_en)
-        unknown_df = unknown_df[["en", "mention", "total"]]
+    # нормализация
+    norm = (d["piece"].str.normalize("NFKD")
+                    .str.encode("ascii","ignore").str.decode("ascii")
+                    .str.lower().str.replace(r"[^\w\s]", " ", regex=True)
+                    .str.replace(r"\s+", " ", regex=True).str.strip())
+    d["norm"] = norm
+
+    # матчим по eq или contains для каждого шаблона (их немного → быстро)
+    rows = []
+    known_mask = pd.Series(False, index=d.index)
+    for es_norm, es, en in _ASPECTS_NORM:
+        m = d["norm"].eq(es_norm) | d["norm"].str.contains(es_norm, na=False)
+        if m.any():
+            tmp = d.loc[m, ["bucket","bucket_label"]].copy()
+            tmp["aspect"] = es + " (EN: " + en + ")"
+            rows.append(tmp)
+            known_mask |= m
+
+    if rows:
+        counts = (pd.concat(rows, ignore_index=True)
+                    .groupby(["bucket","bucket_label","aspect"], as_index=False)
+                    .size().rename(columns={"size":"count"}))
     else:
-        unknown_df = pd.DataFrame(columns=["en", "mention", "total"])
+        counts = pd.DataFrame(columns=["bucket","bucket_label","aspect","count"])
+
+    # неизвестные — всё, что не сматчилось
+    unk = d.loc[~known_mask, "piece"].astype(str)
+    if unk.empty:
+        unknown_df = pd.DataFrame(columns=["en","mention","total"])
+    else:
+        unknown_df = (unk.value_counts().rename_axis("mention").reset_index(name="total"))
+        unknown_df["en"] = unknown_df["mention"].apply(translate_es_to_en_safe)
+        unknown_df = unknown_df[["en","mention","total"]]
 
     return counts, unknown_df
 
+@st.cache_data(show_spinner=False)
 def build_aspects_counts_by_S(df: pd.DataFrame) -> pd.DataFrame:
     """Счётчики аспектов по урокам S (только шаблонные аспекты, EN)."""
     if df.empty or not {"S","E"}.issubset(df.columns):
@@ -557,6 +593,7 @@ def build_aspects_counts_by_S(df: pd.DataFrame) -> pd.DataFrame:
     out = out.groupby(["S","aspect_en"], as_index=False)["count"].sum()
     return out
 
+@st.cache_data(show_spinner=False)
 def build_aspects_counts_by_month(df: pd.DataFrame) -> pd.DataFrame:
     """Счётчики аспектов по месяцам R (EN-лейблы). Возвращает [R, aspect_en, count]."""
     if df.empty or not {"R","E"}.issubset(df.columns):
@@ -591,6 +628,7 @@ def aspect_to_en_label(s: str) -> str:
     m = re.search(r"\(EN:\s*(.*?)\)\s*$", str(s))
     return m.group(1).strip() if m else str(s)
 
+@st.cache_data(show_spinner=False)
 def build_dislike_counts_by_S(df: pd.DataFrame) -> pd.DataFrame:
     """Счётчики dislike-аспектов по урокам S из колонки F (FR1)."""
     if df.empty or not {"S", "F"}.issubset(df.columns):
@@ -625,6 +663,7 @@ def build_dislike_counts_by_S(df: pd.DataFrame) -> pd.DataFrame:
     out = out.groupby(["S", "aspect_en"], as_index=False)["count"].sum()
     return out
 
+@st.cache_data(show_spinner=False)
 def build_template_counts_by_R(
     df: pd.DataFrame,
     text_col: str,
@@ -733,7 +772,13 @@ AX_NAME = "Month"
 
 # ==================== ЕДИНЫЕ ФИЛЬТРЫ ====================
 
-st.sidebar.header("Фильтры")
+st.sidebar.header("Filters")
+
+if st.sidebar.button("Refresh data"):
+    load_sheet_as_letter_df_cached.clear()
+    load_refunds_letter_df_cached.clear()
+    load_qa_letter_df_cached.clear()
+    st.rerun()
 
 # Курсы
 courses_union = sorted(list(set(
@@ -874,9 +919,9 @@ fr2_out, fr2_bucket_order, fr2_val_order, fr2_title = prep_distribution(df2_f, "
 # ==================== ОТРИСОВКА ====================
 
 # === Tabs ===
-feedback_tab, refunds_tab, qa_tab = st.tabs(["Feedback", "Refunds (LatAm)", "QA (analytics)"])
+section = st.sidebar.radio("Раздел", ["Feedback", "Refunds (LatAm)", "QA (analytics)"], index=0)
 
-with feedback_tab:
+if section == "Feedback":
 
     # ---------- ЕДИНАЯ «РЕАЛИСТИЧНАЯ» ШКАЛА (перцентиль 0–100) ПО УРОКАМ ----------
     st.subheader("Lesson scores (percentile 0–100)")
@@ -1027,7 +1072,8 @@ with feedback_tab:
     # ---------- РАСПРЕДЕЛЕНИЕ ПО месяцам (в %) ДЛЯ ТЕХ ЖЕ ШКАЛ ----------
     st.markdown("---")
     st.subheader("Scores — distribution throughout the course")
-    
+
+    @st.cache_data(show_spinner=False)
     def _build_numeric_counts_by_axis(df_src: pd.DataFrame, axis_col: str, val_col: str, allowed_vals: list[int] | None):
         if df_src.empty or axis_col not in df_src.columns or val_col not in df_src.columns:
             return pd.DataFrame(columns=[axis_col, "val", "val_str", "count", "total"])
@@ -1054,7 +1100,8 @@ with feedback_tab:
                     .sum().rename(columns={"count": "total"}))
         out = grp.merge(totals, on=axis_col, how="left")
         return out
-    
+
+    @st.cache_data(show_spinner=False)
     def _pack_full_tooltip_axis(df_src: pd.DataFrame, x_col: str, legend_title: str):
         need = {x_col, "val", "count"}
         if df_src.empty or not need.issubset(df_src.columns):
@@ -1561,7 +1608,7 @@ with feedback_tab:
             else:
                 comm_txt = ""
     
-            total_all = total_aspects_all + total_dis_all + total_comm
+            total_all = total_aspects_all + total_dis_all + total_comm + total_refunds_l
     
             # --- Refunds: только тексты из L (AU=TRUE), сгруппированные по месяцу ---
             l_counter = refunds_L_texts_by_month.get(m, Counter())
@@ -2306,7 +2353,7 @@ with feedback_tab:
         st.altair_chart(chart, use_container_width=True, theme=None)
     
     with colF:
-        _make_avg_chart(aggF, "Were the material and explainations clear?")
+        _make_avg_chart(aggF, "Were the material and explanations clear?")
     
     with colG2:
         _make_avg_chart(aggG_2, "Did the teacher explain calmly and in a way that was easy to follow?")
@@ -2372,6 +2419,7 @@ with feedback_tab:
                 st.altair_chart(chH.properties(height=460), use_container_width=True, theme=None)
     
     # ---------- FR2: распределения по F / G / H (по типу "Распределение значений") ----------
+    @st.cache_data(show_spinner=False)
     def _prep_df2_numeric_dist(df_src: pd.DataFrame, value_col: str, granularity: str):
         """Готовим df с bucket’ами и списком допустимых значений (инт)."""
         if df_src.empty or value_col not in df_src.columns:
@@ -2460,7 +2508,7 @@ with feedback_tab:
     
         _draw_fr2_dist_block(
             cF, df2_numeric_src, "F",
-            "Were the material and explainations clear?"
+            "Were the material and explanations clear?"
         )
         _draw_fr2_dist_block(
             cG, df2_numeric_src, "G",
@@ -2473,7 +2521,7 @@ with feedback_tab:
 
 # ==================== Refunds (LatAm) — single page (2 charts) ====================
 
-with refunds_tab:
+elif section == "Refunds (LatAm)":
     st.subheader("Refunds — LatAm")
 
     # читаем из кеша
@@ -2607,7 +2655,7 @@ with refunds_tab:
             st.altair_chart(ch_stack, use_container_width=True, theme=None)
 
 # ==================== QA (analytics) — 3 charts ====================
-with qa_tab:
+else:
     st.subheader("QA analytics")
 
     # Load
