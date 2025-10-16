@@ -784,126 +784,202 @@ AX_FR1 = "R"  # FR1: номер месяца
 AX_FR2 = "Q"  # FR2: номер месяца
 AX_NAME = "Month"
 
-# ==================== ЕДИНЫЕ ФИЛЬТРЫ ====================
+def _section_key(section: str) -> str:
+    return {
+        "Feedback": "fb",
+        "Detailed feedback": "df",
+        "Refunds (LatAm)": "rf",
+        "QA (analytics)": "qa",
+    }.get(section, "fb")
+
+def render_section_filters(section: str):
+    """
+    Рисует и возвращает фильтры, независимые для каждого раздела.
+    Возвращает: selected_courses, date_range, granularity, selected_months
+    """
+    prefix = _section_key(section)
+
+    # ---- Источники и опции по разделам ----
+    if section in ("Feedback", "Detailed feedback"):
+        # Курсы из FR1:N и FR2:M
+        course_options = sorted(list(set(
+            ([] if df1.empty else df1["N"].dropna().astype(str).unique().tolist()) +
+            ([] if df2.empty else df2["M"].dropna().astype(str).unique().tolist())
+        )))
+        # Даты из FR1:A и FR2:A
+        min1, max1 = (df1["A"].min(), df1["A"].max()) if not df1.empty else (pd.NaT, pd.NaT)
+        min2, max2 = (df2["A"].min(), df2["A"].max()) if not df2.empty else (pd.NaT, pd.NaT)
+        glob_min, glob_max = safe_minmax(min1, max1, min2, max2)
+
+    elif section == "Refunds (LatAm)":
+        dref = load_refunds_letter_df_cached()
+        course_options = []
+        if not dref.empty and "AV" in dref.columns:
+            course_options = sorted([c for c in dref["AV"].dropna().astype(str).str.strip().unique().tolist() if c])
+        dt = pd.to_datetime(dref["AS"], errors="coerce") if not dref.empty else pd.Series([], dtype="datetime64[ns]")
+        glob_min, glob_max = (dt.min(), dt.max()) if len(dt) else (pd.NaT, pd.NaT)
+
+    elif section == "QA (analytics)":
+        dqa = load_qa_letter_df_cached()
+        course_options = []
+        if not dqa.empty and "I" in dqa.columns:
+            course_options = sorted([c for c in dqa["I"].dropna().astype(str).str.strip().unique().tolist() if c])
+        dt = pd.to_datetime(dqa["B"], errors="coerce") if not dqa.empty else pd.Series([], dtype="datetime64[ns]")
+        glob_min, glob_max = (dt.min(), dt.max()) if len(dt) else (pd.NaT, pd.NaT)
+
+    else:
+        course_options, glob_min, glob_max = [], pd.NaT, pd.NaT
+
+    # ---- Courses (персональные стейты) ----
+    state_key_courses = f"{prefix}_courses_selected"
+    if state_key_courses not in st.session_state:
+        st.session_state[state_key_courses] = course_options.copy()
+    # санитизация, если опции изменились
+    st.session_state[state_key_courses] = [c for c in st.session_state[state_key_courses] if c in course_options]
+
+    c1, c2 = st.sidebar.columns(2)
+    if c1.button("Select all", key=f"{prefix}_courses_all"):
+        st.session_state[state_key_courses] = course_options.copy()
+        st.rerun()
+    if c2.button("Clear", key=f"{prefix}_courses_clear"):
+        st.session_state[state_key_courses] = []
+        st.rerun()
+
+    selected_courses = st.sidebar.multiselect(
+        "Courses",
+        options=course_options,
+        default=st.session_state[state_key_courses],
+        key=state_key_courses,
+        help="Independent per section",
+        disabled=(len(course_options) == 0),
+    )
+    st.sidebar.caption(f"Выбрано: {len(selected_courses)} из {len(course_options)}")
+
+    # ---- Date range (персональный стейт) ----
+    if pd.isna(glob_min) or pd.isna(glob_max):
+        date_range = st.sidebar.date_input("Date", key=f"{prefix}_date", value=[])
+    else:
+        date_range = st.sidebar.date_input(
+            "Date", key=f"{prefix}_date",
+            value=[glob_min.date(), glob_max.date()]
+        )
+
+    # ---- Granularity (персональный стейт) ----
+    BAR_SIZE = {"Day": 18, "Week": 44, "Month": 56, "Year": 64}  # используется дальше
+    granularity = st.sidebar.selectbox(
+        "Step",
+        ["Day", "Week", "Month", "Year"],
+        index=1,
+        key=f"{prefix}_granularity"
+    )
+
+    # ---- Months options зависят от раздела + выбранных courses/date ----
+    if section in ("Feedback", "Detailed feedback"):
+        # базовые фильтры для вычисления доступных месяцев
+        d1_tmp = filter_df(df1, "N", "A", selected_courses, date_range)
+        d2_tmp = filter_df(df2, "M", "A", selected_courses, date_range)
+
+        if not d1_tmp.empty and "R" in d1_tmp.columns:
+            fr1_vals = pd.to_numeric(d1_tmp["R"], errors="coerce").dropna().astype(int).unique().tolist()
+        else:
+            fr1_vals = []
+        if not d2_tmp.empty and "Q" in d2_tmp.columns:
+            fr2_vals = pd.to_numeric(d2_tmp["Q"], errors="coerce").dropna().astype(int).unique().tolist()
+        else:
+            fr2_vals = []
+        months_options = sorted(list(set(fr1_vals + fr2_vals)))
+
+    elif section == "Refunds (LatAm)":
+        dref = load_refunds_letter_df_cached()
+        if dref.empty:
+            months_options = []
+        else:
+            d = dref.copy()
+            # курс-фильтр: точное совпадение или подстрока
+            if selected_courses and "AV" in d.columns:
+                av = d["AV"].astype(str).str.strip()
+                patt = "|".join([re.escape(c) for c in selected_courses])
+                d = d[av.isin(selected_courses) | av.str.contains(patt, case=False, na=False)]
+            # дат-фильтр
+            dt = pd.to_datetime(d["AS"], errors="coerce")
+            if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
+                start_dt = pd.to_datetime(date_range[0]); end_dt = pd.to_datetime(date_range[1])
+                d = d[dt.between(start_dt, end_dt, inclusive="both")]
+                dt = pd.to_datetime(d["AS"], errors="coerce")
+            elif isinstance(date_range, (list, tuple)) and len(date_range) == 1:
+                only = pd.to_datetime(date_range[0])
+                d = d[dt.dt.date == only.date()]
+                dt = pd.to_datetime(d["AS"], errors="coerce")
+            # месяцы из дат и из числовых значений
+            mm_dt = dt.dt.month.dropna().astype(int).tolist()
+            mm_num = pd.to_numeric(d["AS"], errors="coerce").dropna().astype(int).tolist() if "AS" in d.columns else []
+            mm_num = [m for m in mm_num if 1 <= m <= 12]
+            months_options = sorted(list(set(mm_dt + mm_num)))
+
+    elif section == "QA (analytics)":
+        dqa = load_qa_letter_df_cached()
+        if dqa.empty:
+            months_options = []
+        else:
+            d = dqa.copy()
+            # курс-фильтр
+            if selected_courses and "I" in d.columns:
+                d = d[d["I"].astype(str).isin(selected_courses)]
+            # дат-фильтр
+            if isinstance(date_range, (list, tuple)) and len(date_range) == 2 and "B" in d.columns:
+                start_dt = pd.to_datetime(date_range[0]); end_dt = pd.to_datetime(date_range[1])
+                b = pd.to_datetime(d["B"], errors="coerce")
+                d = d[(b >= start_dt) & (b <= end_dt)]
+            elif isinstance(date_range, (list, tuple)) and len(date_range) == 1 and "B" in d.columns:
+                only = pd.to_datetime(date_range[0]); b = pd.to_datetime(d["B"], errors="coerce")
+                d = d[b.dt.date == only.date()]
+            months_options = sorted(pd.to_numeric(d.get("H", pd.Series(dtype="object")), errors="coerce")
+                                      .dropna().astype(int).unique().tolist())
+    else:
+        months_options = []
+
+    # ---- Months (персональные стейты) ----
+    state_key_months = f"{prefix}_months_selected"
+    if state_key_months not in st.session_state:
+        st.session_state[state_key_months] = months_options.copy()
+    # санитизация, чтобы не висели отсутствующие
+    st.session_state[state_key_months] = [int(m) for m in st.session_state[state_key_months] if m in months_options]
+
+    m1, m2 = st.sidebar.columns(2)
+    if m1.button("All months", key=f"{prefix}_months_all"):
+        st.session_state[state_key_months] = months_options.copy()
+        st.rerun()
+    if m2.button("Clear months", key=f"{prefix}_months_clear"):
+        st.session_state[state_key_months] = []
+        st.rerun()
+
+    selected_months = st.sidebar.multiselect(
+        "Месяцы",
+        options=months_options,
+        default=st.session_state[state_key_months],
+        key=state_key_months,
+        help="Independent per section",
+        disabled=(len(months_options) == 0),
+    )
+
+    return selected_courses, date_range, granularity, selected_months
+
+# ==================== ФИЛЬТРЫ ДЛЯ ТЕКУЩЕГО РАЗДЕЛА ====================
 
 st.sidebar.header("Filters")
 
-if st.sidebar.button("Refresh data"):
+if st.sidebar.button("Refresh data", key="refresh_all"):
     load_sheet_as_letter_df_cached.clear()
     load_refunds_letter_df_cached.clear()
     load_qa_letter_df_cached.clear()
     st.rerun()
 
-# Курсы
-courses_union = sorted(list(set(
-    ([] if df1.empty else df1["N"].dropna().unique().tolist()) +
-    ([] if df2.empty else df2["M"].dropna().unique().tolist())
-)))
-if "courses_selected" not in st.session_state:
-    st.session_state["courses_selected"] = courses_union.copy()
+# Независимые фильтры для активного раздела
+selected_courses, date_range, granularity, selected_months = render_section_filters(section)
 
-# — САНИТИЗАЦИЯ: удаляем из default то, чего нет в options
-cs_current = st.session_state.get("courses_selected", [])
-cs_sanitized = [c for c in cs_current if c in courses_union]
-if cs_sanitized != cs_current:
-    st.session_state["courses_selected"] = cs_sanitized
-
-b1, b2 = st.sidebar.columns(2)
-if b1.button("Select all"):
-    st.session_state["courses_selected"] = courses_union.copy()
-    st.rerun()
-if b2.button("Clear"):
-    st.session_state["courses_selected"] = []
-    st.rerun()
-
-selected_courses = st.sidebar.multiselect(
-    "Courses",
-    options=courses_union,
-    default=st.session_state["courses_selected"],
-    key="courses_selected",
-    help="Can choose several; search is available.",
-    disabled=(len(courses_union) == 0),   # на всякий
-)
-
-st.sidebar.caption(f"Выбрано: {len(selected_courses)} из {len(courses_union)}")
-
-# Дата
-min1, max1 = (df1["A"].min(), df1["A"].max()) if not df1.empty else (pd.NaT, pd.NaT)
-min2, max2 = (df2["A"].min(), df2["A"].max()) if not df2.empty else (pd.NaT, pd.NaT)
-glob_min, glob_max = safe_minmax(min1, max1, min2, max2)
-if pd.isna(glob_min) or pd.isna(glob_max):
-    date_range = st.sidebar.date_input("Дата фидбека (A)", [])
-else:
-    date_range = st.sidebar.date_input("Дата фидбека (A)", [glob_min.date(), glob_max.date()])
-
-# Гранулярность
-granularity = st.sidebar.selectbox(
-    "Step",
-    ["Day", "Week", "Month", "Year"],
-    index=1  # по умолчанию Неделя
-)
+# Вспомогательные
 BAR_SIZE = {"Day": 18, "Week": 44, "Month": 56, "Year": 64}
 bar_size = BAR_SIZE.get(granularity, 36)
-
-TOP_K = 6
-
-def _apply_q_filter(df_src: pd.DataFrame) -> pd.DataFrame:
-    """
-    Возвращает df_src, отфильтрованный по выбранным месяцам (FR2: Q),
-    если список selected_months не пуст. Приводит Q к int.
-    """
-    if df_src.empty or "Q" not in df_src.columns:
-        return df_src.copy()
-    d = df_src.copy()
-    d["Q"] = pd.to_numeric(d["Q"], errors="coerce")
-    d = d.dropna(subset=["Q"])
-    d["Q"] = d["Q"].astype(int)
-    if selected_months:
-        d = d[d["Q"].isin(selected_months)]
-    return d
-
-# ---- БАЗОВЫЕ ФИЛЬТРЫ ПО КУРСАМ/ДАТЕ ДЛЯ ОБОИХ ЛИСТОВ ----
-df1_base = filter_df(df1, "N", "A", selected_courses, date_range)
-df2_base = filter_df(df2, "M", "A", selected_courses, date_range)
-
-# ---- ЕДИНЫЙ ФИЛЬТР МЕСЯЦЕВ (union FR1:R и FR2:Q) ----
-if not df1_base.empty and AX_FR1 in df1_base.columns:
-    fr1_vals = pd.to_numeric(df1_base[AX_FR1], errors="coerce").dropna().astype(int).unique().tolist()
-else:
-    fr1_vals = []
-if not df2_base.empty and AX_FR2 in df2_base.columns:
-    fr2_vals = pd.to_numeric(df2_base[AX_FR2], errors="coerce").dropna().astype(int).unique().tolist()
-else:
-    fr2_vals = []
-
-months_options = sorted(list(set(fr1_vals + fr2_vals)))
-
-if "months_selected" not in st.session_state:
-    st.session_state["months_selected"] = months_options.copy()
-
-# — САНИТИЗАЦИЯ: оставить только те месяцы, которые есть в options
-ms_current = st.session_state.get("months_selected", [])
-ms_sanitized = [int(m) for m in ms_current if m in months_options]
-if ms_sanitized != ms_current:
-    st.session_state["months_selected"] = ms_sanitized
-
-sb1, sb2 = st.sidebar.columns(2)
-if sb1.button("All months"):
-    st.session_state["months_selected"] = months_options.copy()
-    st.rerun()
-if sb2.button("Clear months"):
-    st.session_state["months_selected"] = []
-    st.rerun()
-
-selected_months = st.sidebar.multiselect(
-    "Месяцы (FR1:R / FR2:Q)",
-    options=months_options,
-    default=st.session_state["months_selected"],
-    key="months_selected",
-    help="Unified filter",
-    disabled=(len(months_options) == 0),   # когда опций нет — безопасно отключаем
-)
-
 selected_lessons: list[int] = []
 
 # ==================== ПРИМЕНЕНИЕ ФИЛЬТРОВ ====================
