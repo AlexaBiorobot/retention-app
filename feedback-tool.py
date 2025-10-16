@@ -2209,9 +2209,9 @@ elif section == "Refunds (LatAm)":
     # читаем из кеша
     df_ref = load_refunds_letter_df_cached()
     if df_ref.empty:
-        df_ref = pd.DataFrame(columns=["AS", "AU", "K"])
-
-    for c in ["AS", "AU", "K"]:
+        df_ref = pd.DataFrame(columns=["AS", "AU", "K", "AV"])  # AV = курс
+    
+    for c in ["AS", "AU", "K", "AV"]:
         if c not in df_ref.columns:
             df_ref[c] = pd.NA
 
@@ -2225,29 +2225,38 @@ elif section == "Refunds (LatAm)":
         if dff.empty:
             st.info("No rows with AU=TRUE.")
         else:
-            # 2) Month key/label from AS (date or numeric month)
-            dt = pd.to_datetime(dff["AS"], errors="coerce")
-            as_num = pd.to_numeric(dff["AS"], errors="coerce")
-
-            # numeric sort key: YYYYMM for dates, else integer AS
-            month_key = (dt.dt.year * 100 + dt.dt.month).where(dt.notna(), as_num)
-            month_key = pd.to_numeric(month_key, errors="coerce")
-
-            month_label = dt.dt.to_period("M").astype(str).where(
-                dt.notna(), as_num.astype("Int64").astype(str)
-            )
-
-            dff = dff.assign(MonthKey=month_key, Month=month_label)
-            dff = dff.dropna(subset=["MonthKey"]).copy()
-            dff["MonthKey"] = pd.to_numeric(dff["MonthKey"], errors="coerce")
-            dff = dff.dropna(subset=["MonthKey"])
-
-            # 3) Reason column (K) -> fill blanks
-            if "K" in dff.columns:
-                dff["K"] = dff["K"].astype(str).str.strip()
-                dff.loc[dff["K"].eq("") | dff["K"].str.lower().eq("nan"), "K"] = "Unspecified"
+            # --- фильтр по курсам (мягкий: точное совпадение ИЛИ подстрока) ---
+            if selected_courses and "AV" in dff.columns:
+                av = dff["AV"].astype(str).str.strip()
+                patt = "|".join([re.escape(c) for c in selected_courses])
+                dff = dff[av.isin(selected_courses) | av.str.contains(patt, case=False, na=False)]
+        
+            if dff.empty:
+                st.info("No data after course filter.")
             else:
-                dff["K"] = "Unspecified"
+                # 2) Month key/label from AS (date or numeric month)
+                dt = pd.to_datetime(dff["AS"], errors="coerce")
+                as_num = pd.to_numeric(dff["AS"], errors="coerce")
+        
+                # numeric sort key: YYYYMM for dates, else integer AS
+                month_key = (dt.dt.year * 100 + dt.dt.month).where(dt.notna(), as_num)
+                month_key = pd.to_numeric(month_key, errors="coerce")
+        
+                month_label = dt.dt.to_period("M").astype(str).where(
+                    dt.notna(), as_num.astype("Int64").astype(str)
+                )
+        
+                dff = dff.assign(MonthKey=month_key, Month=month_label)
+                dff = dff.dropna(subset=["MonthKey"]).copy()
+                dff["MonthKey"] = pd.to_numeric(dff["MonthKey"], errors="coerce")
+                dff = dff.dropna(subset=["MonthKey"])
+        
+                # 3) Reason column (K) -> fill blanks
+                if "K" in dff.columns:
+                    dff["K"] = dff["K"].astype(str).str.strip()
+                    dff.loc[dff["K"].eq("") | dff["K"].str.lower().eq("nan"), "K"] = "Unspecified"
+                else:
+                    dff["K"] = "Unspecified"
 
             # ---------- CHART 1: simple count by month ----------
             st.markdown("**Refunds — by month (count)**")
