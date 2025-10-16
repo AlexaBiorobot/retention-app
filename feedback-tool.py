@@ -2928,7 +2928,24 @@ elif section == "Detailed feedback":
                 "Total mentions (all)": total_all,
             })
 
-        out = pd.DataFrame(rows_out).sort_values("Month").reset_index(drop=True)
+                # ---- БЕЗОПАСНЫЙ ВОЗВРАТ, если данных нет ----
+        cols = [
+            "Month",
+            "Score with argumentation", "Total scores",
+            "What liked", "Total liked",
+            "What disliked", "Total disliked",
+            "Other comments", "Total comments",
+            "Refunds", "Total refunds",
+            "Total mentions (all)",
+        ]
+        if not rows_out:
+            return pd.DataFrame(columns=cols)
+
+        out = (
+            pd.DataFrame(rows_out)
+              .sort_values("Month")
+              .reset_index(drop=True)
+        )
         return out
 
     # Вызов (данные уже отфильтрованы глобально по курсам/датам в df1_base/df2_base)
