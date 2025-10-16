@@ -129,13 +129,20 @@ def add_bucket(dff: pd.DataFrame, date_col: str, granularity: str) -> pd.DataFra
     out = dff.copy()
     if out.empty:
         return out
-    if granularity == "День":
+
+    g = (granularity or "").strip().lower()
+    is_day    = g in ("day", "день")
+    is_week   = g in ("week", "неделя")
+    is_month  = g in ("month", "месяц")
+    is_year   = g in ("year", "год")
+
+    if is_day:
         out["bucket"] = out[date_col].dt.floor("D")
-    elif granularity == "Неделя":
+    elif is_week:
         out["bucket"] = out[date_col].dt.to_period("W-MON").dt.start_time
-    elif granularity == "Месяц":
+    elif is_month:
         out["bucket"] = out[date_col].dt.to_period("M").dt.to_timestamp()
-    elif granularity == "Год":
+    elif is_year:
         out["bucket"] = out[date_col].dt.to_period("Y").dt.to_timestamp()
     else:
         out["bucket"] = out[date_col].dt.floor("D")
@@ -145,16 +152,23 @@ def ensure_bucket_and_label(dff: pd.DataFrame, date_col: str, granularity: str) 
     if dff.empty:
         return dff.copy()
     out = dff.copy()
+
+    g = (granularity or "").strip().lower()
+    is_day    = g in ("day", "день")
+    is_week   = g in ("week", "неделя")
+    is_month  = g in ("month", "месяц")
+    is_year   = g in ("year", "год")
+
     if "bucket" not in out.columns or not pd.api.types.is_datetime64_any_dtype(out["bucket"]):
         out = add_bucket(out, date_col, granularity)
 
-    if granularity == "День":
+    if is_day:
         fmt = "%Y-%m-%d"
-    elif granularity == "Неделя":
+    elif is_week:
         fmt = "W%W (%Y-%m-%d)"
-    elif granularity == "Месяц":
+    elif is_month:
         fmt = "%Y-%m"
-    elif granularity == "Год":
+    elif is_year:
         fmt = "%Y"
     else:
         fmt = "%Y-%m-%d"
@@ -2216,167 +2230,183 @@ elif section == "Refunds (LatAm)":
     df_ref = load_refunds_letter_df_cached()
     if df_ref.empty:
         df_ref = pd.DataFrame(columns=["AS", "AU", "K", "AV"])  # AV = курс
-    
+
+    # гарантируем нужные колонки
     for c in ["AS", "AU", "K", "AV"]:
         if c not in df_ref.columns:
             df_ref[c] = pd.NA
 
     if df_ref.empty or not {"AS", "AU"}.issubset(df_ref.columns):
         st.info("No data (expected columns: AS — month/date, AU — boolean flag).")
-    else:
-        # 1) Keep only AU == TRUE
-        dff = df_ref.copy()
-        dff["AU"] = dff["AU"].astype(str).str.strip().str.lower().isin(["true", "1", "yes"])
-        dff = dff[dff["AU"]]
-        if dff.empty:
-            st.info("No rows with AU=TRUE.")
+        st.stop()
+
+    # 1) Оставляем только AU == TRUE
+    dff = df_ref.copy()
+    dff["AU"] = dff["AU"].astype(str).str.strip().str.lower().isin(["true", "1", "yes"])
+    dff = dff[dff["AU"]]
+    if dff.empty:
+        st.info("No rows with AU=TRUE.")
+        st.stop()
+
+    # 2) Фильтр по курсам (точное совпадение ИЛИ подстрока)
+    if selected_courses and "AV" in dff.columns:
+        av = dff["AV"].astype(str).str.strip()
+        patt = "|".join([re.escape(c) for c in selected_courses])
+        dff = dff[av.isin(selected_courses) | av.str.contains(patt, case=False, na=False)]
+
+    if dff.empty:
+        st.info("No data after course filter.")
+        st.stop()
+
+    # 3) Фильтр по датам/месяцам
+    dt = pd.to_datetime(dff["AS"], errors="coerce")                     # если AS — дата
+    as_num = pd.to_numeric(dff["AS"], errors="coerce").astype("Int64")  # если AS — номер месяца (1..12 или 202401 и т.п.)
+
+    # если задан date_range — применим его и к числовым месяцам (по месяцу из диапазона)
+    if isinstance(date_range, (list, tuple)) and len(date_range) in (1, 2) and len(date_range) > 0:
+        if len(date_range) == 2:
+            start_dt = pd.to_datetime(date_range[0])
+            end_dt   = pd.to_datetime(date_range[1])
         else:
-            # --- фильтр по курсам (мягкий: точное совпадение ИЛИ подстрока) ---
-            if selected_courses and "AV" in dff.columns:
-                av = dff["AV"].astype(str).str.strip()
-                patt = "|".join([re.escape(c) for c in selected_courses])
-                dff = dff[av.isin(selected_courses) | av.str_contains(patt, case=False, na=False)]
-            
-            if dff.empty:
-                st.info("No data after course filter.")
-            else:
-                # --- фильтр по датам (date_range) и/или выбранным месяцам ---
-                dt = pd.to_datetime(dff["AS"], errors="coerce")                    # если AS — дата
-                as_num = pd.to_numeric(dff["AS"], errors="coerce").astype("Int64") # если AS — номер месяца
-            
-                # 1) date_range по распарсенной дате
-                if isinstance(date_range, (list, tuple)) and len(date_range) in (1, 2):
-                    if len(date_range) == 2:
-                        start_dt = pd.to_datetime(date_range[0])
-                        end_dt   = pd.to_datetime(date_range[1])
-                        mask_dt  = dt.between(start_dt, end_dt, inclusive="both")
-                    else:
-                        only_dt  = pd.to_datetime(date_range[0])
-                        mask_dt  = (dt.dt.date == only_dt.date())
-            
-                    if selected_months:
-                        # добираем строки, где дата не распарсилась (NaT), но месяц совпал
-                        mask_m = as_num.isin(pd.Series(selected_months, dtype="Int64"))
-                        dff = dff[mask_dt | (dt.isna() & mask_m)]
-                    else:
-                        dff = dff[mask_dt]
-            
-                # 2) только месяцы (если заданы) и нет date_range
-                elif selected_months:
-                    month_from_dt = dt.dt.month.astype("Int64")
-                    month_num = month_from_dt.fillna(as_num)
-                    dff = dff[month_num.isin(pd.Series(selected_months, dtype="Int64"))]
-            
-                if dff.empty:
-                    st.info("No data after date/month filter.")
-                else:
-                    # 2) Month key/label from AS (date or numeric month)
-                    # (dt и as_num уже посчитаны выше)
-                    month_key = (dt.dt.year * 100 + dt.dt.month).where(dt.notna(), as_num)
-                    month_key = pd.to_numeric(month_key, errors="coerce")
-            
-                    month_label = dt.dt.to_period("M").astype(str).where(
-                        dt.notna(), as_num.astype("Int64").astype(str)
-                    )
-            
-                    dff = dff.assign(MonthKey=month_key, Month=month_label)
-                    dff = dff.dropna(subset=["MonthKey"]).copy()
-                    dff["MonthKey"] = pd.to_numeric(dff["MonthKey"], errors="coerce")
-                    dff = dff.dropna(subset=["MonthKey"])
-            
-                    # 3) Reason column (K) -> fill blanks
-                    if "K" in dff.columns:
-                        dff["K"] = dff["K"].astype(str).str.strip()
-                        dff.loc[dff["K"].eq("") | dff["K"].str.lower().eq("nan"), "K"] = "Unspecified"
-                    else:
-                        dff["K"] = "Unspecified"
+            start_dt = end_dt = pd.to_datetime(date_range[0])
 
-            # ---------- CHART 1: simple count by month ----------
-            st.markdown("**Refunds — by month (count)**")
+        mask_dt = dt.between(start_dt, end_dt, inclusive="both")
 
-            by_month = (
-                dff.groupby(["MonthKey", "Month"], as_index=False)
-                   .size()
-                   .rename(columns={"size": "count"})
-                   .sort_values("MonthKey")
-            )
-            month_order = by_month["Month"].tolist()
+        # месяцы, попадающие в выбранный датадиапазон
+        months_in_range = pd.period_range(start_dt, end_dt, freq="M").month.tolist()
+        if not months_in_range:  # если период в пределах одного месяца, period_range может вернуться пустым
+            months_in_range = [start_dt.month]
 
-            ch_counts = (
-                alt.Chart(by_month)
-                   .mark_bar(size=36)
-                   .encode(
-                       x=alt.X("Month:N", sort=month_order, title="Month"),
-                       y=alt.Y("count:Q", title="Refunds (count)"),
-                       tooltip=[
-                           alt.Tooltip("Month:N", title="Month"),
-                           alt.Tooltip("count:Q", title="Refunds"),
-                       ],
-                   )
-                   .properties(height=420)
-            )
-            st.altair_chart(ch_counts, use_container_width=True, theme=None)
+        mask_num_by_daterange = as_num.isin(pd.Series(months_in_range, dtype="Int64"))
 
-            # ---------- CHART 2: 100% stacked by reason (distinct colors) ----------
-            st.markdown("**Refund reasons — share by month (100%)**")
+        # если ещё заданы выбранные месяцы — усиливаем фильтр
+        if selected_months:
+            month_from_dt = dt.dt.month.astype("Int64")
+            month_num_combined = month_from_dt.fillna(as_num)
+            mask_selected = month_num_combined.isin(pd.Series(selected_months, dtype="Int64"))
+        else:
+            mask_selected = False
 
-            grp = (
-                dff.groupby(["MonthKey", "Month", "K"], as_index=False)
-                   .size()
-                   .rename(columns={"size": "count"})
-            )
-            totals = (
-                grp.groupby(["MonthKey", "Month"], as_index=False)["count"]
-                   .sum()
-                   .rename(columns={"count": "total"})
-            )
-            out = grp.merge(totals, on=["MonthKey", "Month"], how="left")
-            month_order = (
-                out[["MonthKey", "Month"]]
-                .drop_duplicates()
-                .sort_values("MonthKey")["Month"]
-                .tolist()
-            )
+        dff = dff[mask_dt | (dt.isna() & mask_num_by_daterange)]
+        if selected_months:
+            dff = dff[mask_selected]
 
-            # фиксируем порядок категорий и даём «разные» цвета (категориальная палитра)
-            reason_order = (
-                out.groupby("K", as_index=False)["count"]
-                   .sum()
-                   .sort_values("count", ascending=False)["K"]
-                   .tolist()
-            )
+    # если date_range НЕ задан, но заданы месяцы
+    elif selected_months:
+        month_from_dt = dt.dt.month.astype("Int64")
+        month_num = month_from_dt.fillna(as_num)
+        dff = dff[month_num.isin(pd.Series(selected_months, dtype="Int64"))]
 
-            ch_stack = (
-                alt.Chart(out)
-                   .transform_calculate(pct="datum.count / datum.total")
-                   .mark_bar(size=36)
-                   .encode(
-                       x=alt.X("Month:N", sort=month_order, title="Month"),
-                       y=alt.Y(
-                           "count:Q",
-                           stack="normalize",
-                           axis=alt.Axis(format="%", title="Share of refunds (100%)"),
-                           scale=alt.Scale(domain=[0, 1], nice=False, clamp=True),
-                       ),
-                       color=alt.Color(
-                           "K:N",
-                           title="Refund reason",
-                           sort=reason_order,
-                           # палитра с большим числом различимых цветов
-                           scale=alt.Scale(scheme="category20")
-                       ),
-                       order=alt.Order("count:Q", sort="ascending"),
-                       tooltip=[
-                           alt.Tooltip("Month:N", title="Month"),
-                           alt.Tooltip("K:N", title="Reason"),
-                           alt.Tooltip("count:Q", title="Count"),
-                           alt.Tooltip("pct:Q", title="Share", format=".0%"),
-                           alt.Tooltip("total:Q", title="Total in month"),
-                       ],
-                   )
-                   .properties(height=420)
-            )
-            st.altair_chart(ch_stack, use_container_width=True, theme=None)
+    if dff.empty:
+        st.info("No data after date/month filter.")
+        st.stop()
+
+    # 4) Month key/label: из даты (YYYYMM/‘YYYY-MM’) либо из числового месяца
+    month_key = (dt.dt.year * 100 + dt.dt.month).where(dt.notna(), as_num)
+    month_key = pd.to_numeric(month_key, errors="coerce")
+
+    month_label = dt.dt.to_period("M").astype(str).where(
+        dt.notna(), as_num.astype("Int64").astype(str)
+    )
+
+    dff = dff.assign(MonthKey=month_key, Month=month_label).dropna(subset=["MonthKey"]).copy()
+    dff["MonthKey"] = pd.to_numeric(dff["MonthKey"], errors="coerce")
+    dff = dff.dropna(subset=["MonthKey"])
+    if dff.empty:
+        st.info("No data after month key/label build.")
+        st.stop()
+
+    # 5) Reason column (K) -> fill blanks
+    if "K" in dff.columns:
+        dff["K"] = dff["K"].astype(str).str.strip()
+        dff.loc[dff["K"].eq("") | dff["K"].str.lower().eq("nan"), "K"] = "Unspecified"
+    else:
+        dff["K"] = "Unspecified"
+
+    # ---------- CHART 1: simple count by month ----------
+    st.markdown("**Refunds — by month (count)**")
+
+    by_month = (
+        dff.groupby(["MonthKey", "Month"], as_index=False)
+           .size()
+           .rename(columns={"size": "count"})
+           .sort_values("MonthKey")
+    )
+    month_order = by_month["Month"].tolist()
+
+    ch_counts = (
+        alt.Chart(by_month)
+           .mark_bar(size=36)
+           .encode(
+               x=alt.X("Month:N", sort=month_order, title="Month"),
+               y=alt.Y("count:Q", title="Refunds (count)"),
+               tooltip=[
+                   alt.Tooltip("Month:N", title="Month"),
+                   alt.Tooltip("count:Q", title="Refunds"),
+               ],
+           )
+           .properties(height=420)
+    )
+    st.altair_chart(ch_counts, use_container_width=True, theme=None)
+
+    # ---------- CHART 2: 100% stacked by reason ----------
+    st.markdown("**Refund reasons — share by month (100%)**")
+
+    grp = (
+        dff.groupby(["MonthKey", "Month", "K"], as_index=False)
+           .size()
+           .rename(columns={"size": "count"})
+    )
+    totals = (
+        grp.groupby(["MonthKey", "Month"], as_index=False)["count"]
+           .sum()
+           .rename(columns={"count": "total"})
+    )
+    out = grp.merge(totals, on=["MonthKey", "Month"], how="left")
+    month_order = (
+        out[["MonthKey", "Month"]]
+          .drop_duplicates()
+          .sort_values("MonthKey")["Month"]
+          .tolist()
+    )
+
+    reason_order = (
+        out.groupby("K", as_index=False)["count"]
+           .sum()
+           .sort_values("count", ascending=False)["K"]
+           .tolist()
+    )
+
+    ch_stack = (
+        alt.Chart(out)
+           .transform_calculate(pct="datum.count / datum.total")
+           .mark_bar(size=36)
+           .encode(
+               x=alt.X("Month:N", sort=month_order, title="Month"),
+               y=alt.Y(
+                   "count:Q",
+                   stack="normalize",
+                   axis=alt.Axis(format="%", title="Share of refunds (100%)"),
+                   scale=alt.Scale(domain=[0, 1], nice=False, clamp=True),
+               ),
+               color=alt.Color(
+                   "K:N",
+                   title="Refund reason",
+                   sort=reason_order,
+                   scale=alt.Scale(scheme="category20")
+               ),
+               order=alt.Order("count:Q", sort="ascending"),
+               tooltip=[
+                   alt.Tooltip("Month:N", title="Month"),
+                   alt.Tooltip("K:N", title="Reason"),
+                   alt.Tooltip("count:Q", title="Count"),
+                   alt.Tooltip("pct:Q", title="Share", format=".0%"),
+                   alt.Tooltip("total:Q", title="Total in month"),
+               ],
+           )
+           .properties(height=420)
+    )
+    st.altair_chart(ch_stack, use_container_width=True, theme=None)
 
 elif section == "Detailed feedback":
     st.subheader("Detailed feedback (lazy)")
