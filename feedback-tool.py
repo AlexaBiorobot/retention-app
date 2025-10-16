@@ -788,6 +788,12 @@ courses_union = sorted(list(set(
 if "courses_selected" not in st.session_state:
     st.session_state["courses_selected"] = courses_union.copy()
 
+# — САНИТИЗАЦИЯ: удаляем из default то, чего нет в options
+cs_current = st.session_state.get("courses_selected", [])
+cs_sanitized = [c for c in cs_current if c in courses_union]
+if cs_sanitized != cs_current:
+    st.session_state["courses_selected"] = cs_sanitized
+
 b1, b2 = st.sidebar.columns(2)
 if b1.button("Select all"):
     st.session_state["courses_selected"] = courses_union.copy()
@@ -797,12 +803,14 @@ if b2.button("Clear"):
     st.rerun()
 
 selected_courses = st.sidebar.multiselect(
-    "Курсы",
+    "Courses",
     options=courses_union,
     default=st.session_state["courses_selected"],
     key="courses_selected",
-    help="Можно выбрать несколько; поиск поддерживается."
+    help="Can choose several; search is available.",
+    disabled=(len(courses_union) == 0),   # на всякий
 )
+
 st.sidebar.caption(f"Выбрано: {len(selected_courses)} из {len(courses_union)}")
 
 # Дата
@@ -816,11 +824,11 @@ else:
 
 # Гранулярность
 granularity = st.sidebar.selectbox(
-    "Гранулярность для распределения",
-    ["День", "Неделя", "Месяц", "Год"],
+    "Step",
+    ["Day", "Week", "Month", "Year"],
     index=1  # по умолчанию Неделя
 )
-BAR_SIZE = {"День": 18, "Неделя": 44, "Месяц": 56, "Год": 64}
+BAR_SIZE = {"Day": 18, "Week": 44, "Month": 56, "Year": 64}
 bar_size = BAR_SIZE.get(granularity, 36)
 
 TOP_K = 6
@@ -859,6 +867,12 @@ months_options = sorted(list(set(fr1_vals + fr2_vals)))
 if "months_selected" not in st.session_state:
     st.session_state["months_selected"] = months_options.copy()
 
+# — САНИТИЗАЦИЯ: оставить только те месяцы, которые есть в options
+ms_current = st.session_state.get("months_selected", [])
+ms_sanitized = [int(m) for m in ms_current if m in months_options]
+if ms_sanitized != ms_current:
+    st.session_state["months_selected"] = ms_sanitized
+
 sb1, sb2 = st.sidebar.columns(2)
 if sb1.button("All months"):
     st.session_state["months_selected"] = months_options.copy()
@@ -872,7 +886,8 @@ selected_months = st.sidebar.multiselect(
     options=months_options,
     default=st.session_state["months_selected"],
     key="months_selected",
-    help="Единый фильтр по номеру месяца"
+    help="Unified filter",
+    disabled=(len(months_options) == 0),   # когда опций нет — безопасно отключаем
 )
 
 selected_lessons: list[int] = []
