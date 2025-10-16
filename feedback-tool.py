@@ -2995,91 +2995,91 @@ elif section == "Detailed feedback":
         df1_base, df2_base, dfr_src, tuple(sorted(selected_months or []))
     )
 
-if table_df.empty:
-    st.info("No data")
-else:
-    height = min(1000, 140 + 28 * len(table_df))
-
-    display_cols = [
-        "Month",
-        "Score with argumentation", "Total scores",
-        "What liked", "Total liked",
-        "What disliked", "Total disliked",
-        "Other comments", "Total comments",
-        "Total mentions (all)",
-    ]
-    display_cols = [c for c in display_cols if c in table_df.columns]
-
-    st.dataframe(
-        table_df[display_cols],
-        use_container_width=True,
-        height=height
-    )
-
-    # ===== Отдельная таблица рефандов (под текущие фильтры) =====
-    st.markdown("---")
-    st.subheader("Refunds — details (current filters)")
-
-    # возьмём подготовленный выше dfr_src; если его нет — загрузим
-    dfr_view = dfr_src.copy() if "dfr_src" in locals() else load_refunds_letter_df_cached()
-
-    # гарантируем нужные колонки
-    for c in ["AS", "AU", "AV", "K", "L"]:
-        if c not in dfr_view.columns:
-            dfr_view[c] = pd.NA
-
-    # оставляем только AU = TRUE
-    dfr_view["AU"] = (
-        dfr_view["AU"].astype(str).str.strip().str.lower().isin(["true", "1", "yes"])
-    )
-    dfr_view = dfr_view[dfr_view["AU"]]
-
-    if dfr_view.empty:
-        st.info("No refunds for current filters.")
+    if table_df.empty:
+        st.info("No data")
     else:
-        as_dt  = pd.to_datetime(dfr_view["AS"], errors="coerce")
-        as_num = pd.to_numeric(dfr_view["AS"], errors="coerce")
-
-        # месяц: если AS — дата, берём месяц даты; иначе — числовое значение
-        month_num = as_dt.dt.month.where(as_dt.notna(), as_num)
-        dfr_view["Month"] = pd.to_numeric(month_num, errors="coerce").astype("Int64")
-
-        dfr_view["Reason"]  = dfr_view["K"].astype(str).str.strip().replace({"nan": "", "None": ""})
-        dfr_view.loc[dfr_view["Reason"].eq(""), "Reason"] = "Unspecified"
-        dfr_view["Comment"] = dfr_view["L"].astype(str).str.strip().replace({"nan": ""})
-        dfr_view["Course"]  = dfr_view["AV"].astype(str).str.strip()
-
-        # фильтр по выбранным месяцам (если есть)
-        if selected_months:
-            dfr_view = dfr_view[dfr_view["Month"].isin(pd.Series(selected_months, dtype="Int64"))]
-
+        height = min(1000, 140 + 28 * len(table_df))
+    
+        display_cols = [
+            "Month",
+            "Score with argumentation", "Total scores",
+            "What liked", "Total liked",
+            "What disliked", "Total disliked",
+            "Other comments", "Total comments",
+            "Total mentions (all)",
+        ]
+        display_cols = [c for c in display_cols if c in table_df.columns]
+    
+        st.dataframe(
+            table_df[display_cols],
+            use_container_width=True,
+            height=height
+        )
+    
+        # ===== Отдельная таблица рефандов (под текущие фильтры) =====
+        st.markdown("---")
+        st.subheader("Refunds — details (current filters)")
+    
+        # возьмём подготовленный выше dfr_src; если его нет — загрузим
+        dfr_view = dfr_src.copy() if "dfr_src" in locals() else load_refunds_letter_df_cached()
+    
+        # гарантируем нужные колонки
+        for c in ["AS", "AU", "AV", "K", "L"]:
+            if c not in dfr_view.columns:
+                dfr_view[c] = pd.NA
+    
+        # оставляем только AU = TRUE
+        dfr_view["AU"] = (
+            dfr_view["AU"].astype(str).str.strip().str.lower().isin(["true", "1", "yes"])
+        )
+        dfr_view = dfr_view[dfr_view["AU"]]
+    
         if dfr_view.empty:
-            st.info("No refunds for current filters/months.")
+            st.info("No refunds for current filters.")
         else:
-            # компактная агрегация: Месяц × Причина
-            tbl = dfr_view.assign(Date=as_dt.dt.date.astype("string"))[
-                ["Date", "Month", "Course", "Reason", "Comment"]
-            ].copy()
-
-            grp = (
-                tbl.groupby(["Month", "Reason"], as_index=False)
-                   .size().rename(columns={"size": "count"})
-                   .sort_values(["Month", "count"], ascending=[True, False])
-            )
-
-            st.markdown("**By month & reason (count)**")
-            st.dataframe(
-                grp,
-                use_container_width=True,
-                height=min(600, 120 + 26 * max(1, len(grp)))
-            )
-
-            with st.expander("Raw refunds rows — show/hide", expanded=False):
-                st.dataframe(
-                    tbl.sort_values(["Month", "Date", "Course"]).reset_index(drop=True),
-                    use_container_width=True,
-                    height=min(600, 160 + 26 * max(1, len(tbl)))
+            as_dt  = pd.to_datetime(dfr_view["AS"], errors="coerce")
+            as_num = pd.to_numeric(dfr_view["AS"], errors="coerce")
+    
+            # месяц: если AS — дата, берём месяц даты; иначе — числовое значение
+            month_num = as_dt.dt.month.where(as_dt.notna(), as_num)
+            dfr_view["Month"] = pd.to_numeric(month_num, errors="coerce").astype("Int64")
+    
+            dfr_view["Reason"]  = dfr_view["K"].astype(str).str.strip().replace({"nan": "", "None": ""})
+            dfr_view.loc[dfr_view["Reason"].eq(""), "Reason"] = "Unspecified"
+            dfr_view["Comment"] = dfr_view["L"].astype(str).str.strip().replace({"nan": ""})
+            dfr_view["Course"]  = dfr_view["AV"].astype(str).str.strip()
+    
+            # фильтр по выбранным месяцам (если есть)
+            if selected_months:
+                dfr_view = dfr_view[dfr_view["Month"].isin(pd.Series(selected_months, dtype="Int64"))]
+    
+            if dfr_view.empty:
+                st.info("No refunds for current filters/months.")
+            else:
+                # компактная агрегация: Месяц × Причина
+                tbl = dfr_view.assign(Date=as_dt.dt.date.astype("string"))[
+                    ["Date", "Month", "Course", "Reason", "Comment"]
+                ].copy()
+    
+                grp = (
+                    tbl.groupby(["Month", "Reason"], as_index=False)
+                       .size().rename(columns={"size": "count"})
+                       .sort_values(["Month", "count"], ascending=[True, False])
                 )
+    
+                st.markdown("**By month & reason (count)**")
+                st.dataframe(
+                    grp,
+                    use_container_width=True,
+                    height=min(600, 120 + 26 * max(1, len(grp)))
+                )
+    
+                with st.expander("Raw refunds rows — show/hide", expanded=False):
+                    st.dataframe(
+                        tbl.sort_values(["Month", "Date", "Course"]).reset_index(drop=True),
+                        use_container_width=True,
+                        height=min(600, 160 + 26 * max(1, len(tbl)))
+                    )
 
 # ==================== QA (analytics) — 3 charts ====================
 else:
