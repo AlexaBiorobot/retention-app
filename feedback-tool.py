@@ -919,7 +919,11 @@ fr2_out, fr2_bucket_order, fr2_val_order, fr2_title = prep_distribution(df2_f, "
 # ==================== ОТРИСОВКА ====================
 
 # === Tabs ===
-section = st.sidebar.radio("Раздел", ["Feedback", "Refunds (LatAm)", "QA (analytics)"], index=0)
+section = st.sidebar.radio(
+    "Section",
+    ["Feedback", "Detailed feedback", "Refunds (LatAm)", "QA (analytics)"],
+    index=0
+)
 
 if section == "Feedback":
 
@@ -1337,343 +1341,6 @@ if section == "Feedback":
                         .configure_view(clip=False, stroke=None),
                     use_container_width=True, theme=None
                 )
-            
-    # --------- ЕДИНАЯ ТАБЛИЦА ПО МЕСЯЦАМ (Month) — I–J / Aspects / Dislike / Comments + итоги ---------
-    st.markdown("---")
-    st.subheader("Detailed feedback")
-    
-    KEY_COL_FR1 = "R"   # FR1: Month #
-    KEY_COL_FR2 = "Q"   # FR2: Month #
-    KEY_LABEL    = "Month"  # имя колонки в выходной таблице
-    
-    # === Подготовка данных ДЛЯ СВОДНОЙ ТАБЛИЦЫ по МЕСЯЦАМ ===
-    
-    # 0) FR2 — пары I–J по месяцам (Q)
-    ij_pairs_per_m = {}
-    if not df2_base.empty and {KEY_COL_FR2, "I", "J"}.issubset(df2_base.columns):
-        df2_IJ_src = df2_base.copy()
-        dIJ = df2_IJ_src[[KEY_COL_FR2, "I", "J"]].copy()
-        dIJ[KEY_COL_FR2] = pd.to_numeric(dIJ[KEY_COL_FR2], errors="coerce")
-        dIJ["I"] = pd.to_numeric(dIJ["I"], errors="coerce")
-        dIJ = dIJ.dropna(subset=[KEY_COL_FR2, "I", "J"])
-        if not dIJ.empty:
-            dIJ[KEY_COL_FR2] = dIJ[KEY_COL_FR2].astype(int)
-            dIJ["I"] = dIJ["I"].astype(int)
-            splitter_ij = re.compile(r"[;\/\n|]+")  # без запятой
-            for _, rr in dIJ.iterrows():
-                m = int(rr[KEY_COL_FR2])
-                score = int(rr["I"])
-                raw = str(rr["J"] or "").strip()
-                if not raw:
-                    continue
-                parts = splitter_ij.split(raw) if splitter_ij.search(raw) else [raw]
-                for p in parts:
-                    t = p.strip()
-                    if not t:
-                        continue
-                    key = (score, translate_es_to_en_safe(t))
-                    ij_pairs_per_m.setdefault(m, Counter())[key] += 1
-    
-    # 1) Aspects (FR1:E) по месяцам (R)
-    rows_aspects = []
-    unknown_per_m = {}
-    if not df1_base.empty and {KEY_COL_FR1, "E"}.issubset(df1_base.columns):
-        d1 = df1_base[[KEY_COL_FR1, "E"]].copy()
-        d1[KEY_COL_FR1] = pd.to_numeric(d1[KEY_COL_FR1], errors="coerce")
-        d1 = d1.dropna(subset=[KEY_COL_FR1])
-        d1[KEY_COL_FR1] = d1[KEY_COL_FR1].astype(int)
-        for _, rr in d1.iterrows():
-            m_val = int(rr[KEY_COL_FR1])
-            txt = str(rr["E"] or "").strip()
-            if not txt:
-                continue
-            parts = re.split(r"[;,/\n|]+", txt) if re.search(r"[;,/\n|]", txt) else [txt]
-            for p in parts:
-                p_clean = p.strip()
-                t = _norm(p_clean)
-                if not t:
-                    continue
-                matched = False
-                for es_norm, es, en in _ASPECTS_NORM:
-                    if t == es_norm or es_norm in t:
-                        rows_aspects.append((m_val, en))
-                        matched = True
-                        break
-                if not matched:
-                    unknown_per_m.setdefault(m_val, Counter())[p_clean] += 1
-    df_as = (pd.DataFrame(rows_aspects, columns=[KEY_LABEL, "aspect_en"])
-             if rows_aspects else pd.DataFrame(columns=[KEY_LABEL, "aspect_en"]))
-    df_as.rename(columns={KEY_LABEL: KEY_LABEL}, inplace=True)
-    
-    # 2) Dislike (FR1:F) по месяцам (R)
-    rows_dislike = []
-    unknown_dislike_per_m = {}
-    if not df1_base.empty and {KEY_COL_FR1, "F"}.issubset(df1_base.columns):
-        d1d = df1_base[[KEY_COL_FR1, "F"]].copy()
-        d1d[KEY_COL_FR1] = pd.to_numeric(d1d[KEY_COL_FR1], errors="coerce")
-        d1d = d1d.dropna(subset=[KEY_COL_FR1])
-        d1d[KEY_COL_FR1] = d1d[KEY_COL_FR1].astype(int)
-        dislike_norm = [(_norm_local(es), en) for es, en in DISLIKE_ES_EN]
-        for _, rr in d1d.iterrows():
-            m_val = int(rr[KEY_COL_FR1])
-            txt = str(rr["F"] or "").strip()
-            if not txt:
-                continue
-            parts = re.split(r"[;,/\n|]+", txt) if re.search(r"[;,/\n|]", txt) else [txt]
-            for p in parts:
-                p_clean = p.strip()
-                t = _norm_local(p_clean)
-                if not t:
-                    continue
-                matched = False
-                for es_norm, en in dislike_norm:
-                    if t == es_norm or es_norm in t:
-                        rows_dislike.append((m_val, en))
-                        matched = True
-                        break
-                if not matched:
-                    unknown_dislike_per_m.setdefault(m_val, Counter())[p_clean] += 1
-    df_dis = (pd.DataFrame(rows_dislike, columns=[KEY_LABEL, "aspect_en"])
-              if rows_dislike else pd.DataFrame(columns=[KEY_LABEL, "aspect_en"]))
-    
-    # 3) Comments — FR1:H по R + FR2:K по Q (обе в Month)
-    comments_per_month = {}
-    splitter = re.compile(r"[;\/\n|]+")  # без запятой
-    
-    # FR1:H по R
-    if not df1_base.empty and {KEY_COL_FR1, "H"}.issubset(df1_base.columns):
-        d1c = df1_base[[KEY_COL_FR1, "H"]].copy()
-        d1c[KEY_COL_FR1] = pd.to_numeric(d1c[KEY_COL_FR1], errors="coerce")
-        d1c = d1c.dropna(subset=[KEY_COL_FR1])
-        d1c[KEY_COL_FR1] = d1c[KEY_COL_FR1].astype(int)
-        for _, rr in d1c.iterrows():
-            m = int(rr[KEY_COL_FR1])
-            raw = str(rr["H"] or "").strip()
-            if not raw:
-                continue
-            parts = splitter.split(raw) if splitter.search(raw) else [raw]
-            for p in parts:
-                t = p.strip()
-                if t:
-                    comments_per_month.setdefault(m, Counter())[t] += 1
-    
-    # FR2:K по Q
-    if not df2_base.empty and {KEY_COL_FR2, "K"}.issubset(df2_base.columns):
-        d2c = df2_base[[KEY_COL_FR2, "K"]].copy()
-        d2c[KEY_COL_FR2] = pd.to_numeric(d2c[KEY_COL_FR2], errors="coerce")
-        d2c = d2c.dropna(subset=[KEY_COL_FR2])
-        d2c[KEY_COL_FR2] = d2c[KEY_COL_FR2].astype(int)
-        for _, rr in d2c.iterrows():
-            m = int(rr[KEY_COL_FR2])
-            raw = str(rr["K"] or "").strip()
-            if not raw:
-                continue
-            parts = splitter.split(raw) if splitter.search(raw) else [raw]
-            for p in parts:
-                t = p.strip()
-                if t:
-                    comments_per_month.setdefault(m, Counter())[t] += 1
-    
-    # === Refunds (LatAm) → тексты L по месяцам для Detailed feedback ===
-    # Берем: AS (дата/месяц), AU (флаг), AV (курс — опционально фильтруем), L (ТЕКСТ!)
-    refunds_L_texts_by_month = {}
-    
-    # Refunds (LatAm) — читаем через кеш-функцию и страхуем колонки
-    dfr = load_refunds_letter_df_cached()
-    if dfr.empty:
-        dfr = pd.DataFrame(columns=["AS", "AU", "L", "AV"])
-    
-    # подстрахуемся: создадим пустые нужные колонки, если их нет
-    for c in ["AS", "AU", "L", "AV"]:
-        if c not in dfr.columns:
-            dfr[c] = pd.NA
-    
-    # дальше оставляй твой код обработки без изменений:
-    # AU == TRUE, мягкий фильтр по AV, MonthNum из AS, сбор refunds_L_texts_by_month ...
-    if not dfr.empty and {"AS", "AU", "L"}.issubset(dfr.columns):
-        dfr["AU"] = dfr["AU"].astype(str).str.strip().str.lower().isin(["true", "1", "yes"])
-        dfr = dfr[dfr["AU"]]
-        if "AV" in dfr.columns and selected_courses:
-            av = dfr["AV"].astype(str).str.strip()
-            patt = "|".join([re.escape(c) for c in selected_courses]) if selected_courses else ""
-            dfr = dfr[av.isin(selected_courses) | av.str.contains(patt, case=False, na=False)]
-        dt = pd.to_datetime(dfr["AS"], errors="coerce")
-        as_num = pd.to_numeric(dfr["AS"], errors="coerce")
-        dfr["MonthNum"] = dt.dt.month.where(dt.notna(), as_num)
-        dfr["MonthNum"] = pd.to_numeric(dfr["MonthNum"], errors="coerce").astype("Int64")
-        dfr["L_text"] = dfr["L"].astype(str).str.strip()
-        dfr = dfr[dfr["L_text"] != ""]
-        for m, grp in dfr.groupby("MonthNum"):
-            cnt = Counter()
-            for t in grp["L_text"]:
-                cnt[translate_es_to_en_safe(t)] += 1
-            refunds_L_texts_by_month[int(m)] = cnt
-    
-    # === Формирование сводной таблицы ===
-    all_months = sorted(set(
-        list(ij_pairs_per_m.keys()) +
-        (df_as[KEY_LABEL].unique().tolist() if not df_as.empty else []) +
-        list(unknown_per_m.keys()) +
-        (df_dis[KEY_LABEL].unique().tolist() if not df_dis.empty else []) +
-        list(unknown_dislike_per_m.keys()) +
-        list(comments_per_month.keys()) +
-        list(refunds_L_texts_by_month.keys())    # ← тут ДОЛЖЕН быть refunds_L_texts_by_month
-    ))
-    
-    if not all_months:
-        st.info("Нет данных для сводной таблицы по выбранным фильтрам.")
-    else:
-        unified_rows = []
-        for m in all_months:
-            # I—J
-            ij_counter = ij_pairs_per_m.get(m, Counter())
-            total_pairs = int(sum(ij_counter.values()))
-            if ij_counter:
-                ij_items = sorted(
-                    ij_counter.items(),
-                    key=lambda kv: (-kv[1], -int(kv[0][0]), _safe_text(kv[0][1]).casefold())
-                )
-                ij_bullets = []
-                for (score, txt_en), c in ij_items:
-                    pct = (c / total_pairs) if total_pairs else 0.0
-                    ij_bullets.append(f"• {score} — {txt_en} — {c} ({pct:.0%})")
-                ij_text = "\n".join(ij_bullets)
-            else:
-                ij_text = ""
-    
-            # Aspects + Unknown
-            if not df_as.empty and m in df_as[KEY_LABEL].values:
-                cnt_aspects = (df_as[df_as[KEY_LABEL] == m]["aspect_en"]
-                               .value_counts()
-                               .sort_values(ascending=False))
-                total_aspects_known = int(cnt_aspects.sum())
-            else:
-                cnt_aspects = pd.Series(dtype=int)
-                total_aspects_known = 0
-    
-            unk_as = unknown_per_m.get(m, Counter())
-            total_aspects_unknown = int(sum(unk_as.values()))
-            unk_as_items = sorted(unk_as.items(), key=lambda x: (-x[1], _safe_text(x[0]).casefold()))[:10]
-            rest_as_unk = total_aspects_unknown - sum(c for _, c in unk_as_items)
-            total_aspects_all = total_aspects_known + total_aspects_unknown
-    
-            aspects_bul = []
-            for en_name, c in cnt_aspects.items():
-                pct = (c / total_aspects_all) if total_aspects_all else 0.0
-                aspects_bul.append(f"• {en_name} — {c} ({pct:.0%})")
-            if unk_as_items:
-                if aspects_bul: aspects_bul.append("")
-                for raw_txt, c in unk_as_items:
-                    pct = (c / total_aspects_all) if total_aspects_all else 0.0
-                    aspects_bul.append(f"• {translate_es_to_en_safe(raw_txt)} — {c} ({pct:.0%})")
-                if rest_as_unk > 0:
-                    aspects_bul.append(f"• … (+{rest_as_unk})")
-    
-            # Dislike + Unknown
-            if not df_dis.empty and m in df_dis[KEY_LABEL].values:
-                cnt_dis = (df_dis[df_dis[KEY_LABEL] == m]["aspect_en"]
-                           .value_counts()
-                           .sort_values(ascending=False))
-                total_dis_known = int(cnt_dis.sum())
-            else:
-                cnt_dis = pd.Series(dtype=int)
-                total_dis_known = 0
-    
-            unk_dis = unknown_dislike_per_m.get(m, Counter())
-            total_dis_unknown = int(sum(unk_dis.values()))
-            unk_dis_items = sorted(unk_dis.items(), key=lambda x: (-x[1], _safe_text(x[0]).casefold()))[:10]
-            rest_dis_unk = total_dis_unknown - sum(c for _, c in unk_dis_items)
-            total_dis_all = total_dis_known + total_dis_unknown
-    
-            dis_bul = []
-            for en_name, c in cnt_dis.items():
-                pct = (c / total_dis_all) if total_dis_all else 0.0
-                dis_bul.append(f"• {en_name} — {c} ({pct:.0%})")
-            if unk_dis_items:
-                if dis_bul: dis_bul.append("")
-                for raw_txt, c in unk_dis_items:
-                    pct = (c / total_dis_all) if total_dis_all else 0.0
-                    dis_bul.append(f"• {translate_es_to_en_safe(raw_txt)} — {c} ({pct:.0%})")
-                if rest_dis_unk > 0:
-                    dis_bul.append(f"• … (+{rest_dis_unk})")
-    
-            # Comments (EN)
-            comm = comments_per_month.get(m, Counter())
-            total_comm = int(sum(comm.values()))
-            if comm:
-                comm_items = sorted(comm.items(), key=lambda x: (-x[1], _safe_text(x[0]).casefold()))
-                comm_bul = [f"• {translate_es_to_en_safe(txt)} — {c} ({(c/total_comm if total_comm else 0):.0%})"
-                            for txt, c in comm_items]
-                comm_txt = "\n".join(comm_bul)
-            else:
-                comm_txt = ""
-    
-            total_all = total_aspects_all + total_dis_all + total_comm + total_refunds_l
-    
-            # --- Refunds: только тексты из L (AU=TRUE), сгруппированные по месяцу ---
-            l_counter = refunds_L_texts_by_month.get(m, Counter())
-            total_refunds_l = int(sum(l_counter.values()))
-            if l_counter:
-                l_items = sorted(
-                    l_counter.items(),
-                    key=lambda kv: (-kv[1], _safe_text(kv[0]).casefold())
-                )
-                refunds_l_text = "\n".join(
-                    f"• {phrase_en} — {c} ({(c/total_refunds_l if total_refunds_l else 0):.0%})"
-                    for phrase_en, c in l_items
-                )
-            else:
-                refunds_l_text = ""
-    
-            # --- Refunds: тексты L по месяцу (EN + count + %) ---
-            L_counter = refunds_L_texts_by_month.get(m, Counter())
-            total_L = int(sum(L_counter.values()))
-            if L_counter:
-                L_items = sorted(L_counter.items(), key=lambda kv: (-kv[1], _safe_text(kv[0]).casefold()))
-                # можно ограничить верхушку TOP_N
-                TOP_N = 12
-                L_items = L_items[:TOP_N]
-                L_bullets = [f"• {txt_en} — {c} ({(c/total_L if total_L else 0):.0%})"
-                             for txt_en, c in L_items]
-                if total_L > sum(c for _, c in L_items):
-                    L_bullets.append(f"• … (+{total_L - sum(c for _, c in L_items)})")
-                L_text_block = "\n".join(L_bullets)
-            else:
-                L_text_block = ""
-        
-            unified_rows.append({
-                KEY_LABEL: int(m),
-                "Score with argumentation": ij_text,
-                "Total scores": total_pairs,
-                "What liked": "\n".join(aspects_bul),
-                "Total liked": total_aspects_all,
-                "What disliked": "\n".join(dis_bul),
-                "Total disliked": total_dis_all,
-                "Other comments": comm_txt,
-                "Total comments": total_comm,
-                "Refunds": refunds_l_text,       # ← новое поле с буллетами по L
-                "Total refunds": total_refunds_l,  # ← общее число строк-рефандов в месяце
-                "Total mentions (all)": total_all,
-            })
-    
-        unified_table = pd.DataFrame(unified_rows).sort_values(KEY_LABEL).reset_index(drop=True)
-        height = min(1000, 140 + 28 * len(unified_table))
-        st.dataframe(
-            unified_table[
-                [
-                    KEY_LABEL,
-                    "Score with argumentation", "Total scores",
-                    "What liked", "Total liked",
-                    "What disliked", "Total disliked",
-                    "Other comments", "Total comments",
-                    "Refunds",             # ← новое
-                    "Total refunds",      # ← новое
-                    "Total mentions (all)",
-                ]
-            ],
-            use_container_width=True,
-            height=height
-        )
     
     # --------- ГРАФИК «Распределение по месяцам (ось X — R)» В % ---------
     st.markdown("---")
@@ -2653,6 +2320,339 @@ elif section == "Refunds (LatAm)":
                    .properties(height=420)
             )
             st.altair_chart(ch_stack, use_container_width=True, theme=None)
+
+elif section == "Detailed feedback":
+    st.subheader("Detailed feedback (lazy)")
+
+    # Быстрые векторные помощники
+    SPLIT_RX_WITH_COMMA = r"[;,/\n|]+"
+    SPLIT_RX_NO_COMMA   = r"[;\/\n|]+"
+
+    def _to_int_series(s):
+        s = pd.to_numeric(s, errors="coerce")
+        return s.astype("Int64")
+
+    @st.cache_data(show_spinner=True)
+    def _compute_detailed_table(df1_src, df2_src, refunds_src,
+                                months_tuple: tuple[int, ...]):
+        # === 0) Фильтры по месяцам (если заданы) ===
+        d1 = df1_src.copy()
+        d2 = df2_src.copy()
+
+        if months_tuple:
+            if "R" in d1.columns:
+                d1["R_num"] = _to_int_series(d1["R"])
+                d1 = d1[d1["R_num"].isin(months_tuple)]
+            if "Q" in d2.columns:
+                d2["Q_num"] = _to_int_series(d2["Q"])
+                d2 = d2[d2["Q_num"].isin(months_tuple)]
+
+        # ========== I–J (FR2) ==========
+        ij = pd.DataFrame(columns=["Month","I","txt","count"])
+        if not d2.empty and {"Q","I","J"}.issubset(d2.columns):
+            t = d2[["Q","I","J"]].dropna(subset=["Q","I","J"]).copy()
+            t["Q"] = _to_int_series(t["Q"])
+            t["I"] = _to_int_series(t["I"])
+            t = t.dropna(subset=["Q","I"])
+            t["J"] = t["J"].astype(str).str.strip().replace({"nan": ""})
+            t = t[t["J"] != ""]
+            t["piece"] = t["J"].str.split(SPLIT_RX_NO_COMMA, regex=True)
+            t = t.explode("piece")
+            t["piece"] = t["piece"].astype(str).str.strip()
+            t = t[t["piece"] != ""]
+            # переводим только уникальные
+            uniq = t["piece"].unique().tolist()
+            m_en = {u: translate_es_to_en_safe(u) for u in uniq}
+            t["txt_en"] = t["piece"].map(m_en)
+            ij = (t.groupby(["Q","I","txt_en"], as_index=False)
+                    .size().rename(columns={"size":"count"})
+                    .rename(columns={"Q":"Month","txt_en":"txt"}))
+
+        # ========== Aspects (FR1:E) — known/unknown ==========
+        asp_known = pd.DataFrame(columns=["Month","aspect_en","count"])
+        asp_unknown = pd.DataFrame(columns=["Month","raw","count"])
+        if not d1.empty and {"R","E"}.issubset(d1.columns):
+            e = d1[["R","E"]].copy()
+            e["R"] = _to_int_series(e["R"])
+            e = e.dropna(subset=["R"])
+            e["E"] = e["E"].astype(str).str.strip().replace({"nan": ""})
+            e = e[e["E"] != ""]
+            e["piece"] = e["E"].str.split(SPLIT_RX_WITH_COMMA, regex=True)
+            e = e.explode("piece")
+            e["piece"] = e["piece"].astype(str).str.strip()
+            e = e[e["piece"] != ""]
+            # нормализованный текст
+            norm = (e["piece"].str.normalize("NFKD")
+                              .str.encode("ascii","ignore").str.decode("ascii")
+                              .str.lower().str.replace(r"[^\w\s]"," ",regex=True)
+                              .str.replace(r"\s+"," ",regex=True).str.strip())
+            e["norm"] = norm
+
+            # матч по небольшому списку шаблонов — векторно по маскам
+            known_mask = pd.Series(False, index=e.index)
+            rows = []
+            for es, en in ASPECTS_ES_EN:
+                es_norm = _norm_local(es)
+                m = e["norm"].eq(es_norm) | e["norm"].str.contains(es_norm, na=False)
+                if m.any():
+                    tmp = e.loc[m, ["R"]].copy()
+                    tmp["aspect_en"] = en
+                    rows.append(tmp)
+                    known_mask |= m
+            if rows:
+                asp_known = (pd.concat(rows, ignore_index=True)
+                               .groupby(["R","aspect_en"], as_index=False)
+                               .size().rename(columns={"size":"count"})
+                               .rename(columns={"R":"Month"}))
+
+            # unknown per month
+            unk = e.loc[~known_mask, ["R","piece"]].copy()
+            if not unk.empty:
+                asp_unknown = (unk.groupby(["R","piece"], as_index=False)
+                                 .size().rename(columns={"size":"count"})
+                                 .rename(columns={"R":"Month","piece":"raw"}))
+
+        # ========== Dislike (FR1:F) — known/unknown ==========
+        dis_known = pd.DataFrame(columns=["Month","aspect_en","count"])
+        dis_unknown = pd.DataFrame(columns=["Month","raw","count"])
+        if not d1.empty and {"R","F"}.issubset(d1.columns):
+            f = d1[["R","F"]].copy()
+            f["R"] = _to_int_series(f["R"])
+            f = f.dropna(subset=["R"])
+            f["F"] = f["F"].astype(str).str.strip().replace({"nan": ""})
+            f = f[f["F"] != ""]
+            f["piece"] = f["F"].str.split(SPLIT_RX_WITH_COMMA, regex=True)
+            f = f.explode("piece")
+            f["piece"] = f["piece"].astype(str).str.strip()
+            f = f[f["piece"] != ""]
+            fn = (f["piece"].str.normalize("NFKD")
+                           .str.encode("ascii","ignore").str.decode("ascii")
+                           .str.lower().str.replace(r"[^\w\s]"," ",regex=True)
+                           .str.replace(r"\s+"," ",regex=True).str.strip())
+            f["norm"] = fn
+
+            known_mask_f = pd.Series(False, index=f.index)
+            rows_f = []
+            for es, en in DISLIKE_ES_EN:
+                es_norm = _norm_local(es)
+                m = f["norm"].eq(es_norm) | f["norm"].str.contains(es_norm, na=False)
+                if m.any():
+                    tmp = f.loc[m, ["R"]].copy()
+                    tmp["aspect_en"] = en
+                    rows_f.append(tmp)
+                    known_mask_f |= m
+            if rows_f:
+                dis_known = (pd.concat(rows_f, ignore_index=True)
+                               .groupby(["R","aspect_en"], as_index=False)
+                               .size().rename(columns={"size":"count"})
+                               .rename(columns={"R":"Month"}))
+
+            unk_f = f.loc[~known_mask_f, ["R","piece"]].copy()
+            if not unk_f.empty:
+                dis_unknown = (unk_f.groupby(["R","piece"], as_index=False)
+                                 .size().rename(columns={"size":"count"})
+                                 .rename(columns={"R":"Month","piece":"raw"}))
+
+        # ========== Comments ==========
+        # FR1:H by R
+        comm1 = pd.DataFrame(columns=["Month","txt","count"])
+        if not d1.empty and {"R","H"}.issubset(d1.columns):
+            c1 = d1[["R","H"]].copy()
+            c1["R"] = _to_int_series(c1["R"])
+            c1 = c1.dropna(subset=["R"])
+            c1["H"] = c1["H"].astype(str).str.strip().replace({"nan": ""})
+            c1 = c1[c1["H"] != ""]
+            c1["piece"] = c1["H"].str.split(SPLIT_RX_NO_COMMA, regex=True)
+            c1 = c1.explode("piece")
+            c1["piece"] = c1["piece"].astype(str).str.strip()
+            c1 = c1[c1["piece"] != ""]
+            uniq = c1["piece"].unique().tolist()
+            m_en = {u: translate_es_to_en_safe(u) for u in uniq}
+            c1["txt_en"] = c1["piece"].map(m_en)
+            comm1 = (c1.groupby(["R","txt_en"], as_index=False)
+                        .size().rename(columns={"size":"count"})
+                        .rename(columns={"R":"Month","txt_en":"txt"}))
+
+        # FR2:K by Q
+        comm2 = pd.DataFrame(columns=["Month","txt","count"])
+        if not d2.empty and {"Q","K"}.issubset(d2.columns):
+            c2 = d2[["Q","K"]].copy()
+            c2["Q"] = _to_int_series(c2["Q"])
+            c2 = c2.dropna(subset=["Q"])
+            c2["K"] = c2["K"].astype(str).str.strip().replace({"nan": ""})
+            c2 = c2[c2["K"] != ""]
+            c2["piece"] = c2["K"].str.split(SPLIT_RX_NO_COMMA, regex=True)
+            c2 = c2.explode("piece")
+            c2["piece"] = c2["piece"].astype(str).str.strip()
+            c2 = c2[c2["piece"] != ""]
+            uniq2 = c2["piece"].unique().tolist()
+            m_en2 = {u: translate_es_to_en_safe(u) for u in uniq2}
+            c2["txt_en"] = c2["piece"].map(m_en2)
+            comm2 = (c2.groupby(["Q","txt_en"], as_index=False)
+                        .size().rename(columns={"size":"count"})
+                        .rename(columns={"Q":"Month","txt_en":"txt"}))
+
+        comments = pd.concat([comm1, comm2], ignore_index=True)
+        if not comments.empty:
+            comments = (comments.groupby(["Month","txt"], as_index=False)
+                                 .agg(count=("count","sum")))
+
+        # ========== Refunds L (AU=TRUE) по месяцам ==========
+        refunds = pd.DataFrame(columns=["Month","txt","count"])
+        if not refunds_src.empty:
+            dfr = refunds_src.copy()
+            # подстрахуемся по колонкам
+            for c in ["AS","AU","L","AV"]:
+                if c not in dfr.columns:
+                    dfr[c] = pd.NA
+            dfr["AU"] = dfr["AU"].astype(str).str.strip().str.lower().isin(["true","1","yes"])
+            dfr = dfr[dfr["AU"]]
+            if not dfr.empty:
+                dt = pd.to_datetime(dfr["AS"], errors="coerce")
+                as_num = pd.to_numeric(dfr["AS"], errors="coerce")
+                dfr["Month"] = dt.dt.month.where(dt.notna(), as_num)
+                dfr["Month"] = _to_int_series(dfr["Month"])
+                dfr = dfr.dropna(subset=["Month"])
+                dfr["L_text"] = dfr["L"].astype(str).str.strip()
+                dfr = dfr[dfr["L_text"] != ""]
+                uniqL = dfr["L_text"].unique().tolist()
+                m_enL = {u: translate_es_to_en_safe(u) for u in uniqL}
+                dfr["txt_en"] = dfr["L_text"].map(m_enL)
+                refunds = (dfr.groupby(["Month","txt_en"], as_index=False)
+                              .size().rename(columns={"size":"count"})
+                              .rename(columns={"txt_en":"txt"}))
+
+        # ========== Сборка единой таблицы ==========
+        all_months = sorted(set(
+            ij["Month"].unique().tolist()
+            + asp_known["Month"].unique().tolist()
+            + asp_unknown["Month"].unique().tolist()
+            + dis_known["Month"].unique().tolist()
+            + dis_unknown["Month"].unique().tolist()
+            + comments["Month"].unique().tolist()
+            + refunds["Month"].unique().tolist()
+        ))
+
+        rows_out = []
+        for m in all_months:
+            # IJ
+            ij_m = ij[ij["Month"] == m].copy()
+            ij_total = int(ij_m["count"].sum()) if not ij_m.empty else 0
+            if not ij_m.empty:
+                ij_m = ij_m.sort_values(["count","I"], ascending=[False, False])
+                ij_lines = [
+                    f"• {int(r.I)} — {r.txt} — {int(r.count)} ({(r.count/ij_total if ij_total else 0):.0%})"
+                    for r in ij_m.itertuples(index=False)
+                ]
+                ij_text = "\n".join(ij_lines)
+            else:
+                ij_text = ""
+
+            # Aspects
+            ak = asp_known[asp_known["Month"] == m]
+            au = asp_unknown[asp_unknown["Month"] == m]
+            total_as_k = int(ak["count"].sum()) if not ak.empty else 0
+            total_as_u = int(au["count"].sum()) if not au.empty else 0
+            total_as_all = total_as_k + total_as_u
+
+            as_lines = []
+            if not ak.empty:
+                for r in ak.sort_values("count", ascending=False).itertuples(index=False):
+                    as_lines.append(f"• {r.aspect_en} — {int(r.count)} ({(r.count/total_as_all if total_as_all else 0):.0%})")
+            if not au.empty:
+                au_top = au.sort_values(["count","raw"], ascending=[False, True]).head(10)
+                rest = total_as_u - int(au_top["count"].sum())
+                for r in au_top.itertuples(index=False):
+                    as_lines.append(f"• {translate_es_to_en_safe(r.raw)} — {int(r.count)} ({(r.count/total_as_all if total_as_all else 0):.0%})")
+                if rest > 0:
+                    as_lines.append(f"• … (+{rest})")
+
+            # Dislike
+            dk = dis_known[dis_known["Month"] == m]
+            du = dis_unknown[dis_unknown["Month"] == m]
+            total_dis_k = int(dk["count"].sum()) if not dk.empty else 0
+            total_dis_u = int(du["count"].sum()) if not du.empty else 0
+            total_dis_all = total_dis_k + total_dis_u
+
+            dis_lines = []
+            if not dk.empty:
+                for r in dk.sort_values("count", ascending=False).itertuples(index=False):
+                    dis_lines.append(f"• {r.aspect_en} — {int(r.count)} ({(r.count/total_dis_all if total_dis_all else 0):.0%})")
+            if not du.empty:
+                du_top = du.sort_values(["count","raw"], ascending=[False, True]).head(10)
+                rest = total_dis_u - int(du_top["count"].sum())
+                for r in du_top.itertuples(index=False):
+                    dis_lines.append(f"• {translate_es_to_en_safe(r.raw)} — {int(r.count)} ({(r.count/total_dis_all if total_dis_all else 0):.0%})")
+                if rest > 0:
+                    dis_lines.append(f"• … (+{rest})")
+
+            # Comments
+            cm = comments[comments["Month"] == m]
+            cm_total = int(cm["count"].sum()) if not cm.empty else 0
+            if not cm.empty:
+                cm = cm.sort_values(["count","txt"], ascending=[False, True])
+                cm_lines = [f"• {r.txt} — {int(r.count)} ({(r.count/cm_total if cm_total else 0):.0%})"
+                            for r in cm.itertuples(index=False)]
+                cm_text = "\n".join(cm_lines)
+            else:
+                cm_text = ""
+
+            # Refunds
+            rf = refunds[refunds["Month"] == m]
+            rf_total = int(rf["count"].sum()) if not rf.empty else 0
+            if not rf.empty:
+                rf = rf.sort_values(["count","txt"], ascending=[False, True])
+                rf_lines = [f"• {r.txt} — {int(r.count)} ({(r.count/rf_total if rf_total else 0):.0%})"
+                            for r in rf.itertuples(index=False)]
+                rf_text = "\n".join(rf_lines)
+            else:
+                rf_text = ""
+
+            total_all = total_as_all + total_dis_all + cm_total + rf_total + ij_total
+
+            rows_out.append({
+                "Month": int(m),
+                "Score with argumentation": ij_text,
+                "Total scores": ij_total,
+                "What liked": "\n".join(as_lines),
+                "Total liked": total_as_all,
+                "What disliked": "\n".join(dis_lines),
+                "Total disliked": total_dis_all,
+                "Other comments": cm_text,
+                "Total comments": cm_total,
+                "Refunds": rf_text,
+                "Total refunds": rf_total,
+                "Total mentions (all)": total_all,
+            })
+
+        out = pd.DataFrame(rows_out).sort_values("Month").reset_index(drop=True)
+        return out
+
+    # Вызов (данные уже отфильтрованы глобально по курсам/датам в df1_base/df2_base)
+    dfr_src = load_refunds_letter_df_cached()
+    table_df = _compute_detailed_table(
+        df1_base, df2_base, dfr_src, tuple(sorted(selected_months or []))
+    )
+
+    if table_df.empty:
+        st.info("Нет данных для сводной таблицы при текущих фильтрах.")
+    else:
+        height = min(1000, 140 + 28 * len(table_df))
+        st.dataframe(
+            table_df[
+                [
+                    "Month",
+                    "Score with argumentation", "Total scores",
+                    "What liked", "Total liked",
+                    "What disliked", "Total disliked",
+                    "Other comments", "Total comments",
+                    "Refunds", "Total refunds",
+                    "Total mentions (all)"
+                ]
+            ],
+            use_container_width=True,
+            height=height
+        )
 
 # ==================== QA (analytics) — 3 charts ====================
 else:
