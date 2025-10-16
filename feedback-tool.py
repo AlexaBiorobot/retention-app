@@ -3000,21 +3000,99 @@ elif section == "Detailed feedback":
         st.info("No data")
     else:
         height = min(1000, 140 + 28 * len(table_df))
+        # показываем сводную таблицу без колонок Refunds/Total refunds
+        display_cols = [
+            "Month",
+            "Score with argumentation", "Total scores",
+            "What liked", "Total liked",
+            "What disliked", "Total disliked",
+            "Other comments", "Total comments",
+            "Total mentions (all)",
+        ]
+        
+        # на всякий случай — берём только существующие колонки (чтобы не падать, если что-то отсутствует)
+        display_cols = [c for c in display_cols if c in table_df.columns]
+        
         st.dataframe(
-            table_df[
-                [
-                    "Month",
-                    "Score with argumentation", "Total scores",
-                    "What liked", "Total liked",
-                    "What disliked", "Total disliked",
-                    "Other comments", "Total comments",
-                    "Refunds", "Total refunds",
-                    "Total mentions (all)"
-                ]
-            ],
+            table_df[display_cols],
             use_container_width=True,
             height=height
         )
+
+# ===== Отдельная таблица рефандов (под текущие фильтры) =====
+st.markdown("---")
+st.subheader("Refunds — details (current filters)")
+
+# Берём уже подготовленный выше источник dfr_src (он собирается в этом же разделе перед _compute_detailed_table)
+# Если его нет — соберём быстро здесь
+try:
+    dfr_view = dfr_src.copy()
+except NameError:
+    dfr_view = load_refunds_letter_df_cached()
+
+# Гарантируем нужные колонки
+for c in ["AS", "AU", "AV", "K", "L"]:
+    if c not in dfr_view.columns:
+        dfr_view[c] = pd.NA
+
+# Оставляем только AU = TRUE
+dfr_view["AU"] = dfr_view["AU"].astype(str).str.strip().str.lower().isin(["true", "1", "yes"])
+dfr_view = dfr_view[dfr_view["AU"]]
+
+if dfr_view.empty:
+    st.info("No refunds for current filters.")
+else:
+    # Дата и месяц
+    as_dt  = pd.to_datetime(dfr_view["AS"], errors="coerce")
+    as_num = pd.to_numeric(dfr_view["AS"], errors="coerce")
+    # Месяц: если AS — дата, берём месяц даты; иначе — числовое значение
+    month_num = as_dt.dt.month.where(as_dt.notna(), as_num)
+    dfr_view["Month"] = pd.to_numeric(month_num, errors="coerce").astype("Int64")
+
+    # Причина (K) и комментарий (L)
+    dfr_view["Reason"]   = dfr_view["K"].astype(str).str.strip().replace({"nan": "", "None": ""})
+    dfr_view.loc[dfr_view["Reason"].eq(""), "Reason"] = "Unspecified"
+    dfr_view["Comment"]  = dfr_view["L"].astype(str).str.strip().replace({"nan": ""})
+
+    # Курс
+    dfr_view["Course"] = dfr_view["AV"].astype(str).str.strip()
+
+    # Отфильтруем по выбранным месяцам, если они заданы
+    if selected_months:
+        dfr_view = dfr_view[dfr_view["Month"].isin(pd.Series(selected_months, dtype="Int64"))]
+
+    # Если после фильтра пусто — выводим сообщение
+    if dfr_view.empty:
+        st.info("No refunds for current filters/months.")
+    else:
+        # Делаем удобную «детальную» таблицу
+        tbl = dfr_view.assign(
+            Date=as_dt.dt.date.astype("string")
+        )[["Date", "Month", "Course", "Reason", "Comment"]].copy()
+
+        # Дополнительно — агрегация по Месяц × Причина (вверху, как ориентир)
+        grp = (
+            tbl.groupby(["Month", "Reason"], as_index=False)
+               .size()
+               .rename(columns={"size": "count"})
+               .sort_values(["Month", "count"], ascending=[True, False])
+        )
+
+        # Показать компактную агрегацию
+        st.markdown("**By month & reason (count)**")
+        st.dataframe(
+            grp,
+            use_container_width=True,
+            height=min(600, 120 + 26 * max(1, len(grp)))
+        )
+
+        # И полный список (сырьё) под тогглом
+        with st.expander("Raw refunds rows — show/hide", expanded=False):
+            st.dataframe(
+                tbl.sort_values(["Month", "Date", "Course"]).reset_index(drop=True),
+                use_container_width=True,
+                height=min(600, 160 + 26 * max(1, len(tbl)))
+            )
 
 # ==================== QA (analytics) — 3 charts ====================
 else:
