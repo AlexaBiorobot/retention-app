@@ -933,11 +933,17 @@ fr2_out, fr2_bucket_order, fr2_val_order, fr2_title = prep_distribution(df2_f, "
 
 # ==================== ОТРИСОВКА ====================
 
-# === Tabs ===
+# === Tabs (persistent across reruns) ===
+SECTION_OPTIONS = ["Feedback", "Detailed feedback", "Refunds (LatAm)", "QA (analytics)"]
+
+# задаём стартовое значение только один раз
+if "section" not in st.session_state or st.session_state["section"] not in SECTION_OPTIONS:
+    st.session_state["section"] = "Feedback"  # любой дефолт, можно сменить
+
 section = st.sidebar.radio(
     "Section",
-    ["Feedback", "Detailed feedback", "Refunds (LatAm)", "QA (analytics)"],
-    index=0
+    SECTION_OPTIONS,
+    key="section",   # <— сохраняем выбор в session_state
 )
 
 if section == "Feedback":
@@ -2229,34 +2235,61 @@ elif section == "Refunds (LatAm)":
             if selected_courses and "AV" in dff.columns:
                 av = dff["AV"].astype(str).str.strip()
                 patt = "|".join([re.escape(c) for c in selected_courses])
-                dff = dff[av.isin(selected_courses) | av.str.contains(patt, case=False, na=False)]
-        
+                dff = dff[av.isin(selected_courses) | av.str_contains(patt, case=False, na=False)]
+            
             if dff.empty:
                 st.info("No data after course filter.")
             else:
-                # 2) Month key/label from AS (date or numeric month)
-                dt = pd.to_datetime(dff["AS"], errors="coerce")
-                as_num = pd.to_numeric(dff["AS"], errors="coerce")
-        
-                # numeric sort key: YYYYMM for dates, else integer AS
-                month_key = (dt.dt.year * 100 + dt.dt.month).where(dt.notna(), as_num)
-                month_key = pd.to_numeric(month_key, errors="coerce")
-        
-                month_label = dt.dt.to_period("M").astype(str).where(
-                    dt.notna(), as_num.astype("Int64").astype(str)
-                )
-        
-                dff = dff.assign(MonthKey=month_key, Month=month_label)
-                dff = dff.dropna(subset=["MonthKey"]).copy()
-                dff["MonthKey"] = pd.to_numeric(dff["MonthKey"], errors="coerce")
-                dff = dff.dropna(subset=["MonthKey"])
-        
-                # 3) Reason column (K) -> fill blanks
-                if "K" in dff.columns:
-                    dff["K"] = dff["K"].astype(str).str.strip()
-                    dff.loc[dff["K"].eq("") | dff["K"].str.lower().eq("nan"), "K"] = "Unspecified"
+                # --- фильтр по датам (date_range) и/или выбранным месяцам ---
+                dt = pd.to_datetime(dff["AS"], errors="coerce")                    # если AS — дата
+                as_num = pd.to_numeric(dff["AS"], errors="coerce").astype("Int64") # если AS — номер месяца
+            
+                # 1) date_range по распарсенной дате
+                if isinstance(date_range, (list, tuple)) and len(date_range) in (1, 2):
+                    if len(date_range) == 2:
+                        start_dt = pd.to_datetime(date_range[0])
+                        end_dt   = pd.to_datetime(date_range[1])
+                        mask_dt  = dt.between(start_dt, end_dt, inclusive="both")
+                    else:
+                        only_dt  = pd.to_datetime(date_range[0])
+                        mask_dt  = (dt.dt.date == only_dt.date())
+            
+                    if selected_months:
+                        # добираем строки, где дата не распарсилась (NaT), но месяц совпал
+                        mask_m = as_num.isin(pd.Series(selected_months, dtype="Int64"))
+                        dff = dff[mask_dt | (dt.isna() & mask_m)]
+                    else:
+                        dff = dff[mask_dt]
+            
+                # 2) только месяцы (если заданы) и нет date_range
+                elif selected_months:
+                    month_from_dt = dt.dt.month.astype("Int64")
+                    month_num = month_from_dt.fillna(as_num)
+                    dff = dff[month_num.isin(pd.Series(selected_months, dtype="Int64"))]
+            
+                if dff.empty:
+                    st.info("No data after date/month filter.")
                 else:
-                    dff["K"] = "Unspecified"
+                    # 2) Month key/label from AS (date or numeric month)
+                    # (dt и as_num уже посчитаны выше)
+                    month_key = (dt.dt.year * 100 + dt.dt.month).where(dt.notna(), as_num)
+                    month_key = pd.to_numeric(month_key, errors="coerce")
+            
+                    month_label = dt.dt.to_period("M").astype(str).where(
+                        dt.notna(), as_num.astype("Int64").astype(str)
+                    )
+            
+                    dff = dff.assign(MonthKey=month_key, Month=month_label)
+                    dff = dff.dropna(subset=["MonthKey"]).copy()
+                    dff["MonthKey"] = pd.to_numeric(dff["MonthKey"], errors="coerce")
+                    dff = dff.dropna(subset=["MonthKey"])
+            
+                    # 3) Reason column (K) -> fill blanks
+                    if "K" in dff.columns:
+                        dff["K"] = dff["K"].astype(str).str.strip()
+                        dff.loc[dff["K"].eq("") | dff["K"].str.lower().eq("nan"), "K"] = "Unspecified"
+                    else:
+                        dff["K"] = "Unspecified"
 
             # ---------- CHART 1: simple count by month ----------
             st.markdown("**Refunds — by month (count)**")
@@ -2539,6 +2572,8 @@ elif section == "Detailed feedback":
                 dfr = dfr.dropna(subset=["Month"])
                 dfr["L_text"] = dfr["L"].astype(str).str.strip()
                 dfr = dfr[dfr["L_text"] != ""]
+                if months_tuple:
+                    dfr = dfr[dfr["Month"].isin(months_tuple)]
                 uniqL = dfr["L_text"].unique().tolist()
                 m_enL = {u: translate_es_to_en_safe(u) for u in uniqL}
                 dfr["txt_en"] = dfr["L_text"].map(m_enL)
@@ -2653,10 +2688,52 @@ elif section == "Detailed feedback":
         return out
 
     # Вызов (данные уже отфильтрованы глобально по курсам/датам в df1_base/df2_base)
+# ---- Refunds: применяем глобальные фильтры (courses + date + months) ----
     dfr_src = load_refunds_letter_df_cached()
+    if dfr_src.empty:
+        dfr_src = pd.DataFrame()
+    
+    else:
+        # гарантируем нужные колонки
+        for c in ["AS", "AU", "AV", "L", "K"]:
+            if c not in dfr_src.columns:
+                dfr_src[c] = pd.NA
+    
+        # --- Фильтр по курсам (мягкий: точное совпадение ИЛИ подстрока в AV) ---
+        if selected_courses and "AV" in dfr_src.columns:
+            av = dfr_src["AV"].astype(str).str.strip()
+            patt = "|".join([re.escape(c) for c in selected_courses])
+            dfr_src = dfr_src[av.isin(selected_courses) | av.str.contains(patt, case=False, na=False)]
+    
+        # --- Фильтр по дате (date_range) по столбцу AS (если AS — дата) ---
+        if isinstance(date_range, (list, tuple)) and len(date_range) in (1, 2):
+            dt = pd.to_datetime(dfr_src["AS"], errors="coerce")
+    
+            if len(date_range) == 2:
+                start_dt = pd.to_datetime(date_range[0])
+                end_dt   = pd.to_datetime(date_range[1])
+                mask_dt  = dt.between(start_dt, end_dt, inclusive="both")
+            else:
+                only_dt  = pd.to_datetime(date_range[0])
+                mask_dt  = (dt.dt.date == only_dt.date())
+    
+            # Если AS не дата (NaT), можно добрать по числовому месяцу через selected_months
+            if selected_months:
+                as_num   = pd.to_numeric(dfr_src["AS"], errors="coerce").astype("Int64")
+                mask_num = as_num.isin(pd.Series(selected_months, dtype="Int64"))
+                dfr_src  = dfr_src[mask_dt | (dt.isna() & mask_num)]
+            else:
+                dfr_src  = dfr_src[mask_dt]
+    
+        # --- Если заданы выбранные месяцы, но нет date_range (или AS не дата) ---
+        elif selected_months:
+            as_num  = pd.to_numeric(dfr_src["AS"], errors="coerce").astype("Int64")
+            dfr_src = dfr_src[as_num.isin(pd.Series(selected_months, dtype="Int64"))]
+    
     table_df = _compute_detailed_table(
         df1_base, df2_base, dfr_src, tuple(sorted(selected_months or []))
     )
+
 
     if table_df.empty:
         st.info("No data")
