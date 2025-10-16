@@ -1004,7 +1004,7 @@ if section == "Feedback":
     unified = pd.concat([fr1_u, fr2_u], ignore_index=True)
     
     if unified.empty:
-        st.info("Нет данных для объединённой шкалы (перцентиль 0–100) при текущих фильтрах.")
+        st.info("No data.")
     else:
         ymin = float(unified["avg_score100"].min())
         ymax = float(unified["avg_score100"].max())
@@ -1040,7 +1040,7 @@ if section == "Feedback":
         with col1:
             st.markdown("**Monthly feedback — average lesson score**")  # fix typo: Montly -> Monthly
             if agg1.empty:
-                st.info("Нет данных для выбранных фильтров.")
+                st.info("No data.")
             else:
                 y_min = float(agg1["avg_y"].min()) if len(agg1) else 0.0
                 y_max = float(agg1["avg_y"].max()) if len(agg1) else 5.0
@@ -1068,7 +1068,7 @@ if section == "Feedback":
         with col2:
             st.markdown("**Lesson feedback — average lesson score**")
             if agg2.empty:
-                st.info("Нет данных для выбранных фильтров.")
+                st.info("No data.")
             else:
                 y_min2 = float(agg2["avg_y"].min()) if len(agg2) else 0.0
                 y_max2 = float(agg2["avg_y"].max()) if len(agg2) else 10.0
@@ -1255,7 +1255,7 @@ if section == "Feedback":
         with col3:
             st.markdown("**Monthly feedback**")
             if fr1_out.empty:
-                st.info("Нет данных (FR1).")
+                st.info("No data.")
             else:
                 bars1 = (
                     alt.Chart(fr1_out).mark_bar(size=BAR_SIZE.get(granularity, 36), tooltip=False)
@@ -1308,7 +1308,7 @@ if section == "Feedback":
         with col4:
             st.markdown("**Lesson feedback**")
             if fr2_out.empty:
-                st.info("Нет данных (FR2).")
+                st.info("No data.")
             else:
                 bars2 = (
                     alt.Chart(fr2_out).mark_bar(size=BAR_SIZE.get(granularity, 36), tooltip=False)
@@ -1370,7 +1370,7 @@ if section == "Feedback":
     cnt_by_m_all = build_aspects_counts_by_month(df_aspects_m)
     
     if cnt_by_m_all.empty:
-        st.info("Нет данных для графика по месяцам.")
+        st.info("No data")
     else:
         base = (
             alt.Chart(cnt_by_m_all)
@@ -1547,7 +1547,7 @@ if section == "Feedback":
         )
     
     if cnt_by_m_dis.empty:
-        st.info("Нет данных для графика по месяцам (Disliked).")
+        st.info("No data.")
     else:
         base = (
             alt.Chart(cnt_by_m_dis)
@@ -1605,7 +1605,7 @@ if section == "Feedback":
         )
     
         if dis_counts.empty:
-            st.info("Нет данных для графика Dislike in time (Form Responses 1, колонка F).")
+            st.info("No data.")
         else:
             # порядок периодов
             bucket_order = (
@@ -1690,13 +1690,13 @@ if section == "Feedback":
     with col_left:
         st.markdown("**Did the class start in time?**")
         if df2_months.empty:
-            st.info("Нет данных для графика по D.")
+            st.info("No data.")
         else:
             dfD = df2_months.copy()
             dfD["R"] = pd.to_numeric(dfD["Q"], errors="coerce")  # временно переименовали ось
             cnt_by_m_D = build_template_counts_by_R(dfD, text_col="D", templates_es_en=FR2_D_TEMPL_ES_EN)
             if cnt_by_m_D.empty:
-                st.info("Нет данных для графика по D.")
+                st.info("No data")
             else:
                 # --- D ---
                 legend_domain_D = [en for _, en in FR2_D_TEMPL_ES_EN]
@@ -1747,13 +1747,13 @@ if section == "Feedback":
     with col_right:
         st.markdown("**Was the class the right length?**")
         if df2_months.empty:
-            st.info("Нет данных для графика по E.")
+            st.info("No data.")
         else:
             dfE = df2_months.copy()
             dfE["R"] = pd.to_numeric(dfE["Q"], errors="coerce")  # временно переименовали ось
             cnt_by_m_E = build_template_counts_by_R(dfE, text_col="E", templates_es_en=FR2_E_TEMPL_ES_EN)
             if cnt_by_m_E.empty:
-                st.info("Нет данных для графика по E.")
+                st.info("No data.")
             else:
                 # --- E ---
                 legend_domain_E = [en for _, en in FR2_E_TEMPL_ES_EN]
@@ -1808,7 +1808,7 @@ if section == "Feedback":
         # ===== D: Did the class start in time? =====
         st.markdown("**Did the class start in time?**")
         if df2_text_src.empty or "D" not in df2_text_src.columns:
-            st.info("Нет данных (колонка D отсутствует или фильтры пустые).")
+            st.info("No data")
         else:
             d_cnt = build_template_counts(
                 df2_text_src, text_col="D", date_col="A",
@@ -1892,7 +1892,7 @@ if section == "Feedback":
         # ===== E: Was the class the right length? =====
         st.markdown("**Was the class the right length?**")
         if df2_text_src.empty or "E" not in df2_text_src.columns:
-            st.info("Нет данных (колонка E отсутствует или фильтры пустые).")
+            st.info("No data")
         else:
             e_cnt = build_template_counts(
                 df2_text_src, text_col="E", date_col="A",
@@ -2014,7 +2014,7 @@ if section == "Feedback":
     
     def _make_avg_chart(df_avg: pd.DataFrame, title_panel: str):
         if df_avg.empty or len(df_avg) == 0:
-            return st.info("Нет данных для выбранных фильтров.")
+            return st.info("No data")
         y_min = float(df_avg["avg_y"].min())
         y_max = float(df_avg["avg_y"].max())
         pad = (y_max - y_min) * 0.1 if y_max > y_min else 0.5
@@ -2132,7 +2132,7 @@ if section == "Feedback":
             st.markdown(f"**{title}**")
             out, bucket_order, val_order, _ = _prep_df2_numeric_dist(df_src, value_col, granularity)
             if out.empty:
-                st.info(f"Нет данных по колонке {value_col} для выбранных фильтров.")
+                st.info(f"No data")
                 return
     
             # Базовые бары — как в эталоне (без tooltip)
@@ -2650,7 +2650,7 @@ elif section == "Detailed feedback":
     )
 
     if table_df.empty:
-        st.info("Нет данных для сводной таблицы при текущих фильтрах.")
+        st.info("No data")
     else:
         height = min(1000, 140 + 28 * len(table_df))
         st.dataframe(
