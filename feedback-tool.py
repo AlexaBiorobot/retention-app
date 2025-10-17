@@ -2600,9 +2600,7 @@ elif section == "Refunds (LatAm)":
 elif section == "Detailed feedback":
     st.subheader("Detailed feedback (lazy)")
 
-    # Локальные фильтры только для этой таблицы
-    st.markdown("**Filters — this table only**")
-
+    # ===== Категории — фильтр в САЙДБАРЕ (рядом с остальными) =====
     cat_options = [
         "Score with argumentation",
         "What liked",
@@ -2613,36 +2611,15 @@ elif section == "Detailed feedback":
     if cat_key not in st.session_state:
         st.session_state[cat_key] = cat_options.copy()
 
-    selected_cats = st.multiselect(
-        "Category",
+    selected_cats = st.sidebar.multiselect(
+        "Category (Detailed feedback)",
         options=cat_options,
         default=st.session_state[cat_key],
         key=cat_key,
-        help="Filter rows by category in the table below",
+        help="Filter rows in the Detailed feedback table",
     )
 
-    # Диапазон дат для локального фильтра (по A), зависящий от выбранных курсов
-    def _minmax_for_local_date():
-        d1 = filter_df(df1, "N", "A", selected_courses, [])  # только курс
-        d2 = filter_df(df2, "M", "A", selected_courses, [])
-        a1 = pd.to_datetime(d1["A"], errors="coerce") if not d1.empty else pd.Series([], dtype="datetime64[ns]")
-        a2 = pd.to_datetime(d2["A"], errors="coerce") if not d2.empty else pd.Series([], dtype="datetime64[ns]")
-        mins = [x for x in [a1.min() if len(a1) else pd.NaT, a2.min() if len(a2) else pd.NaT] if pd.notna(x)]
-        maxs = [x for x in [a1.max() if len(a1) else pd.NaT, a2.max() if len(a2) else pd.NaT] if pd.notna(x)]
-        return (min(mins) if mins else pd.NaT, max(maxs) if maxs else pd.NaT)
-
-    dt_min_loc, dt_max_loc = _minmax_for_local_date()
-    det_date_key = _section_key(section, "det_date")
-    if pd.isna(dt_min_loc) or pd.isna(dt_max_loc):
-        local_date_range = st.date_input("Date (A) — this table", [], key=det_date_key)
-    else:
-        local_date_range = st.date_input(
-            "Date (A) — this table",
-            [dt_min_loc.date(), dt_max_loc.date()],
-            key=det_date_key
-        )
-
-    # Хелперы
+    # Быстрые векторные помощники
     SPLIT_RX_WITH_COMMA = r"[;,/\n|]+"
     SPLIT_RX_NO_COMMA   = r"[;\/\n|]+"
 
@@ -2655,10 +2632,12 @@ elif section == "Detailed feedback":
         """
         Возвращает «длинную» таблицу — одна реплика = одна строка:
         Date | Month | Course | Category | Item
+        (только FR1/FR2; без рефандов)
         """
         d1 = df1_src.copy()
         d2 = df2_src.copy()
 
+        # Фильтр по месяцам (общий months filter)
         if months_tuple:
             if "R" in d1.columns:
                 d1["R_num"] = _to_int_series(d1["R"])
@@ -2846,16 +2825,13 @@ elif section == "Detailed feedback":
         out = out.sort_values(["Date", "Month", "Course", "Category", "Item"], na_position="last").reset_index(drop=True)
         return out
 
-    # ---- Локальная дата-фильтрация источников (A) ----
-    df1_local = filter_df(df1, "N", "A", selected_courses, local_date_range)
-    df2_local = filter_df(df2, "M", "A", selected_courses, local_date_range)
-
-    # ---- Подготовка таблицы (FR1/FR2, без рефандов) ----
+    # ---- Источники уже отфильтрованы глобальными курсами/датами ----
+    # df1_base / df2_base получены выше в коде приложения
     table_df = _compute_detailed_rows(
-        df1_local, df2_local, tuple(sorted(selected_months or []))
+        df1_base, df2_base, tuple(sorted(selected_months or []))
     )
 
-    # ---- Локальный фильтр по категории ----
+    # ---- Фильтр по категориям (из сайдбара) ----
     if selected_cats:
         table_df = table_df[table_df["Category"].isin(selected_cats)]
     else:
@@ -2866,7 +2842,7 @@ elif section == "Detailed feedback":
         st.info("No data")
     else:
         view = table_df.copy()
-        view["Date"] = view["Date"].dt.date  # показываем только дату (без времени)
+        view["Date"] = view["Date"].dt.date  # только дата
         height = min(1000, 140 + 26 * len(view))
         st.dataframe(
             view[["Date","Month","Course","Category","Item"]],
