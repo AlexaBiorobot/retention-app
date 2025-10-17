@@ -2589,6 +2589,49 @@ elif section == "Refunds (LatAm)":
     )
     st.altair_chart(ch_stack, use_container_width=True, theme=None)
 
+    # --- Детальная таблица по текущим фильтрам ---
+    st.markdown("---")
+    st.subheader("Refunds — details (current filters)")
+    
+    # dff — уже отфильтрованный датафрейм (AU=TRUE, courses, months)
+    # здесь просто аккуратно формируем таблицы
+    tbl = dff.copy()
+    
+    # Чистим/нормализуем поля
+    tbl["Reason"]  = tbl["K"].astype(str).str.strip().replace({"nan": "", "None": ""})
+    tbl.loc[tbl["Reason"].eq(""), "Reason"] = "Unspecified"
+    tbl["Comment"] = tbl["L"].astype(str).str.strip().replace({"nan": ""})
+    tbl["Course"]  = tbl["AV"].astype(str).str.strip()
+    
+    # На странице рефандов мы уже посчитали MonthKey/Month выше — используем их
+    # Если нужно строго числовой месяц (когда AS действительно число), можно добавить колонку:
+    # tbl["MonthNum"] = pd.to_numeric(tbl["AS"], errors="coerce").astype("Int64")
+    
+    # Агрегация: Доля причин по месяцам (с сортировкой по времени)
+    grp = (
+        tbl.groupby(["MonthKey", "Month", "Reason"], as_index=False)
+           .size().rename(columns={"size": "count"})
+           .sort_values(["MonthKey", "count"], ascending=[True, False])
+    )
+    
+    st.markdown("**By month & reason (count)**")
+    st.dataframe(
+        grp[["Month", "Reason", "count"]],
+        use_container_width=True,
+        height=min(600, 120 + 26 * max(1, len(grp)))
+    )
+    
+    with st.expander("Raw refunds rows — show/hide", expanded=False):
+        st.dataframe(
+            tbl[["Month", "Course", "Reason", "Comment"]]
+                .sort_values(["Month", "Course", "Reason"])
+                .reset_index(drop=True),
+            use_container_width=True,
+            height=min(600, 160 + 26 * max(1, len(tbl)))
+        )
+
+
+#--------------- ДЕТАЛЬНЫЙ ФИДБЕК-------------------
 elif section == "Detailed feedback":
     st.subheader("Detailed feedback (lazy)")
 
@@ -2965,66 +3008,6 @@ elif section == "Detailed feedback":
             use_container_width=True,
             height=height
         )
-    
-        # ===== Отдельная таблица рефандов (под текущие фильтры) =====
-        st.markdown("---")
-        st.subheader("Refunds — details (current filters)")
-    
-        # возьмём подготовленный выше dfr_src; если его нет — загрузим
-        dfr_view = dfr_src.copy() if "dfr_src" in locals() else load_refunds_letter_df_cached()
-    
-        # гарантируем нужные колонки
-        for c in ["AS", "AU", "AV", "K", "L"]:
-            if c not in dfr_view.columns:
-                dfr_view[c] = pd.NA
-    
-        # оставляем только AU = TRUE
-        dfr_view["AU"] = (
-            dfr_view["AU"].astype(str).str.strip().str.lower().isin(["true", "1", "yes"])
-        )
-        dfr_view = dfr_view[dfr_view["AU"]]
-    
-        if dfr_view.empty:
-            st.info("No refunds for current filters.")
-        else:
-            dfr_view["Month"] = pd.to_numeric(dfr_view["AS"], errors="coerce").astype("Int64")
-
-    
-            dfr_view["Reason"]  = dfr_view["K"].astype(str).str.strip().replace({"nan": "", "None": ""})
-            dfr_view.loc[dfr_view["Reason"].eq(""), "Reason"] = "Unspecified"
-            dfr_view["Comment"] = dfr_view["L"].astype(str).str.strip().replace({"nan": ""})
-            dfr_view["Course"]  = dfr_view["AV"].astype(str).str.strip()
-    
-            # фильтр по выбранным месяцам (если есть)
-            if selected_months:
-                dfr_view = dfr_view[dfr_view["Month"].isin(pd.Series(selected_months, dtype="Int64"))]
-    
-            if dfr_view.empty:
-                st.info("No refunds for current filters/months.")
-            else:
-                # компактная агрегация: Месяц × Причина
-                tbl = dfr_view[["Month", "Course", "Reason", "Comment"]].copy()
-                tbl["Month"] = tbl["Month"].astype("Int64")  # на всякий случай
-                
-                grp = (
-                    tbl.groupby(["Month", "Reason"], as_index=False)
-                       .size().rename(columns={"size": "count"})
-                       .sort_values(["Month", "count"], ascending=[True, False])
-                )
-                
-                st.markdown("**By month & reason (count)**")
-                st.dataframe(
-                    grp,
-                    use_container_width=True,
-                    height=min(600, 120 + 26 * max(1, len(grp)))
-                )
-                
-                with st.expander("Raw refunds rows — show/hide", expanded=False):
-                    st.dataframe(
-                        tbl.sort_values(["Month", "Course", "Reason"]).reset_index(drop=True),
-                        use_container_width=True,
-                        height=min(600, 160 + 26 * max(1, len(tbl)))
-                    )
 
 
 # ==================== QA (analytics) — 3 charts ====================
