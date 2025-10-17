@@ -935,16 +935,17 @@ def render_section_filters(section: str):
     # ===================== REFUNDS =====================
     if section == "Refunds (LatAm)":
         dfr = load_refunds_letter_df_cached()
+    
         # Курсы (AV)
         if dfr.empty or "AV" not in dfr.columns:
             courses_union = []
         else:
             courses_union = sorted(dfr["AV"].dropna().astype(str).unique().tolist())
-
+    
         c_key = _section_key(section, "courses_selected")
         if c_key not in st.session_state:
             st.session_state[c_key] = courses_union.copy()
-
+    
         cb1, cb2 = st.sidebar.columns(2)
         if cb1.button("Select all", key=_section_key(section, "btn_selall")):
             st.session_state[c_key] = courses_union.copy()
@@ -952,7 +953,7 @@ def render_section_filters(section: str):
         if cb2.button("Clear", key=_section_key(section, "btn_clear")):
             st.session_state[c_key] = []
             st.rerun()
-
+    
         selected_courses = st.sidebar.multiselect(
             "Courses",
             options=courses_union,
@@ -962,54 +963,19 @@ def render_section_filters(section: str):
             disabled=(len(courses_union) == 0),
         )
         st.sidebar.caption(f"Выбрано: {len(selected_courses)} из {len(courses_union)}")
-
-        # Даты: по AS
-        if dfr.empty or "AS" not in dfr.columns:
-            date_range = st.sidebar.date_input("Дата (AS)", [], key=_section_key(section, "date"))
-        else:
-            dt = pd.to_datetime(dfr["AS"], errors="coerce")
-            if dt.notna().any():
-                date_range = st.sidebar.date_input(
-                    "Дата (AS)",
-                    [dt.min().date(), dt.max().date()],
-                    key=_section_key(section, "date")
-                )
-            else:
-                date_range = st.sidebar.date_input("Дата (AS)", [], key=_section_key(section, "date"))
-
-        # Месяцы: из AS (дата -> month) или числового AS
-        dff = dfr.copy()
-        # Фильтр по курсам для построения options
-        if selected_courses and "AV" in dff.columns:
-            av = dff["AV"].astype(str).str.strip()
-            patt = "|".join([re.escape(c) for c in selected_courses])
-            dff = dff[av.isin(selected_courses) | av.str.contains(patt, case=False, na=False)]
-        # Фильтр по датам (если AS распарсилась)
-        if isinstance(date_range, (list, tuple)) and len(date_range) in (1, 2) and "AS" in dff.columns:
-            dt = pd.to_datetime(dff["AS"], errors="coerce")
-            if len(date_range) == 2:
-                start_dt = pd.to_datetime(date_range[0])
-                end_dt   = pd.to_datetime(date_range[1])
-                mask_dt  = dt.between(start_dt, end_dt, inclusive="both")
-            else:
-                only_dt  = pd.to_datetime(date_range[0])
-                mask_dt  = (dt.dt.date == only_dt.date())
-            dff = dff[mask_dt | dt.isna()]
-
-        # Собираем месяцы
-        month_set = set()
-        if "AS" in dff.columns:
-            dt2 = pd.to_datetime(dff["AS"], errors="coerce")
-            month_set |= set(dt2.dt.month.dropna().astype(int).tolist())
-            as_num = pd.to_numeric(dff["AS"], errors="coerce")
-            month_set |= set(as_num.dropna().astype(int).tolist())
-        months_options = sorted(list(month_set))
-
+    
+        # В Refunds нет дат: AS — это номер месяца → НЕ показываем date_input
+        date_range = []
+    
+        # Месяцы: прямо из AS (целые 1..12)
+        as_num_all = pd.to_numeric(dfr.get("AS"), errors="coerce")
+        months_options = sorted(as_num_all.dropna().astype(int).unique().tolist())
+    
         m_key = _section_key(section, "months_selected")
         if m_key not in st.session_state:
             st.session_state[m_key] = months_options.copy()
         st.session_state[m_key] = [int(m) for m in st.session_state[m_key] if m in months_options]
-
+    
         mb1, mb2 = st.sidebar.columns(2)
         if mb1.button("All months", key=_section_key(section, "btn_m_all")):
             st.session_state[m_key] = months_options.copy()
@@ -1017,7 +983,7 @@ def render_section_filters(section: str):
         if mb2.button("Clear months", key=_section_key(section, "btn_m_clear")):
             st.session_state[m_key] = []
             st.rerun()
-
+    
         selected_months = st.sidebar.multiselect(
             "Месяцы (AS)",
             options=months_options,
@@ -1026,8 +992,9 @@ def render_section_filters(section: str):
             help="Filter months for refunds",
             disabled=(len(months_options) == 0),
         )
-
+    
         return selected_courses, date_range, granularity, selected_months
+
 
     # ===================== QA =====================
     if section == "QA (analytics)":
@@ -2809,10 +2776,8 @@ elif section == "Detailed feedback":
             dfr["AU"] = dfr["AU"].astype(str).str.strip().str.lower().isin(["true","1","yes"])
             dfr = dfr[dfr["AU"]]
             if not dfr.empty:
-                dt = pd.to_datetime(dfr["AS"], errors="coerce")
-                as_num = pd.to_numeric(dfr["AS"], errors="coerce")
-                dfr["Month"] = dt.dt.month.where(dt.notna(), as_num)
-                dfr["Month"] = _to_int_series(dfr["Month"])
+                as_num = pd.to_numeric(dfr["AS"], errors="coerce").astype("Int64")
+                dfr["Month"] = as_num
                 dfr = dfr.dropna(subset=["Month"])
                 dfr["L_text"] = dfr["L"].astype(str).str.strip()
                 dfr = dfr[dfr["L_text"] != ""]
@@ -2948,52 +2913,37 @@ elif section == "Detailed feedback":
         )
         return out
 
-    # Вызов (данные уже отфильтрованы глобально по курсам/датам в df1_base/df2_base)
-# ---- Refunds: применяем глобальные фильтры (courses + date + months) ----
+    # ---- Refunds: применяем глобальные фильтры (courses + months; AS — числовой месяц) ----
     dfr_src = load_refunds_letter_df_cached()
     if dfr_src.empty:
         dfr_src = pd.DataFrame()
-    
     else:
         # гарантируем нужные колонки
         for c in ["AS", "AU", "AV", "L", "K"]:
             if c not in dfr_src.columns:
                 dfr_src[c] = pd.NA
     
-        # --- Фильтр по курсам (мягкий: точное совпадение ИЛИ подстрока в AV) ---
+        # оставляем только AU = TRUE
+        dfr_src["AU"] = dfr_src["AU"].astype(str).str.strip().str.lower().isin(["true", "1", "yes"])
+        dfr_src = dfr_src[dfr_src["AU"]]
+    
+        # фильтр по курсам (точное совпадение ИЛИ подстрока)
         if selected_courses and "AV" in dfr_src.columns:
             av = dfr_src["AV"].astype(str).str.strip()
             patt = "|".join([re.escape(c) for c in selected_courses])
             dfr_src = dfr_src[av.isin(selected_courses) | av.str.contains(patt, case=False, na=False)]
     
-        # --- Фильтр по дате (date_range) по столбцу AS (если AS — дата) ---
-        if isinstance(date_range, (list, tuple)) and len(date_range) in (1, 2):
-            dt = pd.to_datetime(dfr_src["AS"], errors="coerce")
-    
-            if len(date_range) == 2:
-                start_dt = pd.to_datetime(date_range[0])
-                end_dt   = pd.to_datetime(date_range[1])
-                mask_dt  = dt.between(start_dt, end_dt, inclusive="both")
-            else:
-                only_dt  = pd.to_datetime(date_range[0])
-                mask_dt  = (dt.dt.date == only_dt.date())
-    
-            # Если AS не дата (NaT), можно добрать по числовому месяцу через selected_months
-            if selected_months:
-                as_num   = pd.to_numeric(dfr_src["AS"], errors="coerce").astype("Int64")
-                mask_num = as_num.isin(pd.Series(selected_months, dtype="Int64"))
-                dfr_src  = dfr_src[mask_dt | (dt.isna() & mask_num)]
-            else:
-                dfr_src  = dfr_src[mask_dt]
-    
-        # --- Если заданы выбранные месяцы, но нет date_range (или AS не дата) ---
-        elif selected_months:
-            as_num  = pd.to_numeric(dfr_src["AS"], errors="coerce").astype("Int64")
+        # фильтр по месяцам (AS — всегда числовой месяц 1..12)
+        if selected_months:
+            as_num = pd.to_numeric(dfr_src["AS"], errors="coerce").astype("Int64")
             dfr_src = dfr_src[as_num.isin(pd.Series(selected_months, dtype="Int64"))]
     
+    # ⬇️ ВАЖНО: создаём таблицу (её дальше используешь в if table_df.empty)
     table_df = _compute_detailed_table(
         df1_base, df2_base, dfr_src, tuple(sorted(selected_months or []))
     )
+
+
 
     if table_df.empty:
         st.info("No data")
@@ -3037,12 +2987,8 @@ elif section == "Detailed feedback":
         if dfr_view.empty:
             st.info("No refunds for current filters.")
         else:
-            as_dt  = pd.to_datetime(dfr_view["AS"], errors="coerce")
-            as_num = pd.to_numeric(dfr_view["AS"], errors="coerce")
-    
-            # месяц: если AS — дата, берём месяц даты; иначе — числовое значение
-            month_num = as_dt.dt.month.where(as_dt.notna(), as_num)
-            dfr_view["Month"] = pd.to_numeric(month_num, errors="coerce").astype("Int64")
+            dfr_view["Month"] = pd.to_numeric(dfr_view["AS"], errors="coerce").astype("Int64")
+
     
             dfr_view["Reason"]  = dfr_view["K"].astype(str).str.strip().replace({"nan": "", "None": ""})
             dfr_view.loc[dfr_view["Reason"].eq(""), "Reason"] = "Unspecified"
@@ -3057,29 +3003,29 @@ elif section == "Detailed feedback":
                 st.info("No refunds for current filters/months.")
             else:
                 # компактная агрегация: Месяц × Причина
-                tbl = dfr_view.assign(Date=as_dt.dt.date.astype("string"))[
-                    ["Date", "Month", "Course", "Reason", "Comment"]
-                ].copy()
-    
+                tbl = dfr_view[["Month", "Course", "Reason", "Comment"]].copy()
+                tbl["Month"] = tbl["Month"].astype("Int64")  # на всякий случай
+                
                 grp = (
                     tbl.groupby(["Month", "Reason"], as_index=False)
                        .size().rename(columns={"size": "count"})
                        .sort_values(["Month", "count"], ascending=[True, False])
                 )
-    
+                
                 st.markdown("**By month & reason (count)**")
                 st.dataframe(
                     grp,
                     use_container_width=True,
                     height=min(600, 120 + 26 * max(1, len(grp)))
                 )
-    
+                
                 with st.expander("Raw refunds rows — show/hide", expanded=False):
                     st.dataframe(
-                        tbl.sort_values(["Month", "Date", "Course"]).reset_index(drop=True),
+                        tbl.sort_values(["Month", "Course", "Reason"]).reset_index(drop=True),
                         use_container_width=True,
                         height=min(600, 160 + 26 * max(1, len(tbl)))
                     )
+
 
 # ==================== QA (analytics) — 3 charts ====================
 else:
