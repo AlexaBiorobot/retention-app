@@ -964,12 +964,44 @@ def render_section_filters(section: str):
         )
         st.sidebar.caption(f"Выбрано: {len(selected_courses)} из {len(courses_union)}")
     
-        # В Refunds нет дат: AS — это номер месяца → НЕ показываем date_input
-        date_range = []
-    
-        # Месяцы: прямо из AS (целые 1..12)
-        as_num_all = pd.to_numeric(dfr.get("AS"), errors="coerce")
+        # Дата рефанда по колонке AR
+        if dfr.empty or "AR" not in dfr.columns:
+            date_range = st.sidebar.date_input("Refund date (AR)", [], key=_section_key(section, "date"))
+        else:
+            ar_dt_all = pd.to_datetime(dfr["AR"], errors="coerce")
+            if ar_dt_all.notna().any():
+                date_range = st.sidebar.date_input(
+                    "Refund date (AR)",
+                    [ar_dt_all.min().date(), ar_dt_all.max().date()],
+                    key=_section_key(section, "date")
+                )
+            else:
+                date_range = st.sidebar.date_input("Refund date (AR)", [], key=_section_key(section, "date"))
+        
+        # Опции месяцев (AS — 1..12) С УЧЁТОМ выбранных курсов и date_range по AR
+        base = dfr.copy()
+        
+        # фильтр курсов для опций месяцев
+        if selected_courses and "AV" in base.columns:
+            av = base["AV"].astype(str).str.strip()
+            patt = "|".join([re.escape(c) for c in selected_courses])
+            base = base[av.isin(selected_courses) | av.str.contains(patt, case=False, na=False)]
+        
+        # фильтр дат по AR для опций месяцев
+        if isinstance(date_range, (list, tuple)) and len(date_range) in (1, 2) and "AR" in base.columns:
+            ar_dt = pd.to_datetime(base["AR"], errors="coerce")
+            if len(date_range) == 2:
+                start_dt = pd.to_datetime(date_range[0]); end_dt = pd.to_datetime(date_range[1])
+                mask = ar_dt.between(start_dt, end_dt, inclusive="both")
+            else:
+                only_dt = pd.to_datetime(date_range[0])
+                mask = (ar_dt.dt.date == only_dt.date())
+            base = base[mask]
+        
+        # месяцы из AS после фильтров
+        as_num_all = pd.to_numeric(base.get("AS"), errors="coerce")
         months_options = sorted(as_num_all.dropna().astype(int).unique().tolist())
+
     
         m_key = _section_key(section, "months_selected")
         if m_key not in st.session_state:
@@ -2410,15 +2442,14 @@ elif section == "Refunds (LatAm)":
     # читаем из кеша
     df_ref = load_refunds_letter_df_cached()
     if df_ref.empty:
-        df_ref = pd.DataFrame(columns=["AS", "AU", "K", "AV"])  # AV = курс
-
+        df_ref = pd.DataFrame(columns=["AS", "AU", "K", "AV", "AR", "L"])  # AS=месяц, AR=дата рефанда, L=комментарий
     # гарантируем нужные колонки
-    for c in ["AS", "AU", "K", "AV"]:
+    for c in ["AS", "AU", "K", "AV", "AR", "L"]:
         if c not in df_ref.columns:
             df_ref[c] = pd.NA
 
     if df_ref.empty or not {"AS", "AU"}.issubset(df_ref.columns):
-        st.info("No data (expected columns: AS — month/date, AU — boolean flag).")
+        st.info("No data (expected columns: AS — month (1..12), AU — boolean flag).")
         st.stop()
 
     # 1) Оставляем только AU == TRUE
@@ -2434,95 +2465,56 @@ elif section == "Refunds (LatAm)":
         av = dff["AV"].astype(str).str.strip()
         patt = "|".join([re.escape(c) for c in selected_courses])
         dff = dff[av.isin(selected_courses) | av.str.contains(patt, case=False, na=False)]
+        if dff.empty:
+            st.info("No data after course filter.")
+            st.stop()
 
-    if dff.empty:
-        st.info("No data after course filter.")
-        st.stop()
-
-    # 3) Фильтр по датам/месяцам
-    dt = pd.to_datetime(dff["AS"], errors="coerce")                     # если AS — дата
-    as_num = pd.to_numeric(dff["AS"], errors="coerce").astype("Int64")  # если AS — номер месяца (1..12 или 202401 и т.п.)
-
-    # если задан date_range — применим его и к числовым месяцам (по месяцу из диапазона)
+    # 3) Фильтр по дате рефанда (AR) из сайдбара (если date_range задан)
     if isinstance(date_range, (list, tuple)) and len(date_range) in (1, 2) and len(date_range) > 0:
+        ar_dt = pd.to_datetime(dff["AR"], errors="coerce")
         if len(date_range) == 2:
-            start_dt = pd.to_datetime(date_range[0])
-            end_dt   = pd.to_datetime(date_range[1])
+            start_dt = pd.to_datetime(date_range[0]); end_dt = pd.to_datetime(date_range[1])
+            mask_ar = ar_dt.between(start_dt, end_dt, inclusive="both")
         else:
-            start_dt = end_dt = pd.to_datetime(date_range[0])
+            only_dt = pd.to_datetime(date_range[0])
+            mask_ar = (ar_dt.dt.date == only_dt.date())
+        dff = dff[mask_ar]
+        if dff.empty:
+            st.info("No data after refund date (AR) filter.")
+            st.stop()
 
-        mask_dt = dt.between(start_dt, end_dt, inclusive="both")
+    # 4) Месяц: из AS (всегда 1..12) → числовой столбец Month; доп. фильтр по selected_months
+    dff["Month"] = pd.to_numeric(dff["AS"], errors="coerce").astype("Int64")
+    dff = dff.dropna(subset=["Month"])
+    if selected_months:
+        dff = dff[dff["Month"].isin(pd.Series(selected_months, dtype="Int64"))]
+        if dff.empty:
+            st.info("No data after month (AS) filter.")
+            st.stop()
 
-        # месяцы, попадающие в выбранный датадиапазон
-        months_in_range = pd.period_range(start_dt, end_dt, freq="M").month.tolist()
-        if not months_in_range:  # если период в пределах одного месяца, period_range может вернуться пустым
-            months_in_range = [start_dt.month]
+    # 5) Reason/Comment/Course — нормализация
+    dff["Reason"]  = dff["K"].astype(str).str.strip().replace({"nan": "", "None": ""})
+    dff.loc[dff["Reason"].eq(""), "Reason"] = "Unspecified"
+    dff["Comment"] = dff["L"].astype(str).str.strip().replace({"nan": ""})
+    dff["Course"]  = dff["AV"].astype(str).str.strip()
 
-        mask_num_by_daterange = as_num.isin(pd.Series(months_in_range, dtype="Int64"))
-
-        # если ещё заданы выбранные месяцы — усиливаем фильтр
-        if selected_months:
-            month_from_dt = dt.dt.month.astype("Int64")
-            month_num_combined = month_from_dt.fillna(as_num)
-            mask_selected = month_num_combined.isin(pd.Series(selected_months, dtype="Int64"))
-        else:
-            mask_selected = False
-
-        dff = dff[mask_dt | (dt.isna() & mask_num_by_daterange)]
-        if selected_months:
-            dff = dff[mask_selected]
-
-    # если date_range НЕ задан, но заданы месяцы
-    elif selected_months:
-        month_from_dt = dt.dt.month.astype("Int64")
-        month_num = month_from_dt.fillna(as_num)
-        dff = dff[month_num.isin(pd.Series(selected_months, dtype="Int64"))]
-
-    if dff.empty:
-        st.info("No data after date/month filter.")
-        st.stop()
-
-    # 4) Month key/label: из даты (YYYYMM/‘YYYY-MM’) либо из числового месяца
-    month_key = (dt.dt.year * 100 + dt.dt.month).where(dt.notna(), as_num)
-    month_key = pd.to_numeric(month_key, errors="coerce")
-
-    month_label = dt.dt.to_period("M").astype(str).where(
-        dt.notna(), as_num.astype("Int64").astype(str)
-    )
-
-    dff = dff.assign(MonthKey=month_key, Month=month_label).dropna(subset=["MonthKey"]).copy()
-    dff["MonthKey"] = pd.to_numeric(dff["MonthKey"], errors="coerce")
-    dff = dff.dropna(subset=["MonthKey"])
-    if dff.empty:
-        st.info("No data after month key/label build.")
-        st.stop()
-
-    # 5) Reason column (K) -> fill blanks
-    if "K" in dff.columns:
-        dff["K"] = dff["K"].astype(str).str.strip()
-        dff.loc[dff["K"].eq("") | dff["K"].str.lower().eq("nan"), "K"] = "Unspecified"
-    else:
-        dff["K"] = "Unspecified"
-
-    # ---------- CHART 1: simple count by month ----------
+    # ---------- CHART 1: Refunds — by month (count) ----------
     st.markdown("**Refunds — by month (count)**")
 
     by_month = (
-        dff.groupby(["MonthKey", "Month"], as_index=False)
-           .size()
-           .rename(columns={"size": "count"})
-           .sort_values("MonthKey")
+        dff.groupby("Month", as_index=False)
+           .size().rename(columns={"size": "count"})
+           .sort_values("Month")
     )
-    month_order = by_month["Month"].tolist()
 
     ch_counts = (
         alt.Chart(by_month)
            .mark_bar(size=36)
            .encode(
-               x=alt.X("Month:N", sort=month_order, title="Month"),
+               x=alt.X("Month:O", sort="ascending", title="Month"),
                y=alt.Y("count:Q", title="Refunds (count)"),
                tooltip=[
-                   alt.Tooltip("Month:N", title="Month"),
+                   alt.Tooltip("Month:O", title="Month"),
                    alt.Tooltip("count:Q", title="Refunds"),
                ],
            )
@@ -2530,31 +2522,22 @@ elif section == "Refunds (LatAm)":
     )
     st.altair_chart(ch_counts, use_container_width=True, theme=None)
 
-    # ---------- CHART 2: 100% stacked by reason ----------
+    # ---------- CHART 2: Refund reasons — share by month (100%) ----------
     st.markdown("**Refund reasons — share by month (100%)**")
 
-    grp = (
-        dff.groupby(["MonthKey", "Month", "K"], as_index=False)
-           .size()
-           .rename(columns={"size": "count"})
+    out = (
+        dff.groupby(["Month", "Reason"], as_index=False)
+           .size().rename(columns={"size": "count"})
     )
     totals = (
-        grp.groupby(["MonthKey", "Month"], as_index=False)["count"]
-           .sum()
-           .rename(columns={"count": "total"})
+        out.groupby("Month", as_index=False)["count"]
+           .sum().rename(columns={"count": "total"})
     )
-    out = grp.merge(totals, on=["MonthKey", "Month"], how="left")
-    month_order = (
-        out[["MonthKey", "Month"]]
-          .drop_duplicates()
-          .sort_values("MonthKey")["Month"]
-          .tolist()
-    )
+    out = out.merge(totals, on="Month", how="left")
 
     reason_order = (
-        out.groupby("K", as_index=False)["count"]
-           .sum()
-           .sort_values("count", ascending=False)["K"]
+        out.groupby("Reason", as_index=False)["count"]
+           .sum().sort_values("count", ascending=False)["Reason"]
            .tolist()
     )
 
@@ -2563,73 +2546,53 @@ elif section == "Refunds (LatAm)":
            .transform_calculate(pct="datum.count / datum.total")
            .mark_bar(size=36)
            .encode(
-               x=alt.X("Month:N", sort=month_order, title="Month"),
+               x=alt.X("Month:O", sort="ascending", title="Month"),
                y=alt.Y(
                    "count:Q",
                    stack="normalize",
                    axis=alt.Axis(format="%", title="Share of refunds (100%)"),
                    scale=alt.Scale(domain=[0, 1], nice=False, clamp=True),
                ),
-               color=alt.Color(
-                   "K:N",
-                   title="Refund reason",
-                   sort=reason_order,
-                   scale=alt.Scale(scheme="category20")
-               ),
+               color=alt.Color("Reason:N", title="Refund reason", sort=reason_order),
                order=alt.Order("count:Q", sort="ascending"),
                tooltip=[
-                   alt.Tooltip("Month:N", title="Month"),
-                   alt.Tooltip("K:N", title="Reason"),
-                   alt.Tooltip("count:Q", title="Count"),
-                   alt.Tooltip("pct:Q", title="Share", format=".0%"),
-                   alt.Tooltip("total:Q", title="Total in month"),
+                   alt.Tooltip("Month:O",  title="Month"),
+                   alt.Tooltip("Reason:N", title="Reason"),
+                   alt.Tooltip("count:Q",  title="Count"),
+                   alt.Tooltip("pct:Q",    title="Share", format=".0%"),
+                   alt.Tooltip("total:Q",  title="Total in month"),
                ],
            )
            .properties(height=420)
     )
     st.altair_chart(ch_stack, use_container_width=True, theme=None)
 
-    # --- Детальная таблица по текущим фильтрам ---
+    # ---------- Детальная таблица под текущие фильтры ----------
     st.markdown("---")
     st.subheader("Refunds — details (current filters)")
-    
-    # dff — уже отфильтрованный датафрейм (AU=TRUE, courses, months)
-    # здесь просто аккуратно формируем таблицы
-    tbl = dff.copy()
-    
-    # Чистим/нормализуем поля
-    tbl["Reason"]  = tbl["K"].astype(str).str.strip().replace({"nan": "", "None": ""})
-    tbl.loc[tbl["Reason"].eq(""), "Reason"] = "Unspecified"
-    tbl["Comment"] = tbl["L"].astype(str).str.strip().replace({"nan": ""})
-    tbl["Course"]  = tbl["AV"].astype(str).str.strip()
-    
-    # На странице рефандов мы уже посчитали MonthKey/Month выше — используем их
-    # Если нужно строго числовой месяц (когда AS действительно число), можно добавить колонку:
-    # tbl["MonthNum"] = pd.to_numeric(tbl["AS"], errors="coerce").astype("Int64")
-    
-    # Агрегация: Доля причин по месяцам (с сортировкой по времени)
+
+    tbl = dff[["Month", "Course", "Reason", "Comment"]].copy()
+
+    # Агрегация: Месяц × Причина
     grp = (
-        tbl.groupby(["MonthKey", "Month", "Reason"], as_index=False)
+        tbl.groupby(["Month", "Reason"], as_index=False)
            .size().rename(columns={"size": "count"})
-           .sort_values(["MonthKey", "count"], ascending=[True, False])
+           .sort_values(["Month", "count"], ascending=[True, False])
     )
-    
+
     st.markdown("**By month & reason (count)**")
     st.dataframe(
-        grp[["Month", "Reason", "count"]],
+        grp,
         use_container_width=True,
         height=min(600, 120 + 26 * max(1, len(grp)))
     )
-    
+
     with st.expander("Raw refunds rows — show/hide", expanded=False):
         st.dataframe(
-            tbl[["Month", "Course", "Reason", "Comment"]]
-                .sort_values(["Month", "Course", "Reason"])
-                .reset_index(drop=True),
+            tbl.sort_values(["Month", "Course", "Reason"]).reset_index(drop=True),
             use_container_width=True,
             height=min(600, 160 + 26 * max(1, len(tbl)))
         )
-
 
 #--------------- ДЕТАЛЬНЫЙ ФИДБЕК-------------------
 elif section == "Detailed feedback":
