@@ -2442,7 +2442,7 @@ elif section == "Refunds (LatAm)":
     # читаем из кеша
     df_ref = load_refunds_letter_df_cached()
     if df_ref.empty:
-        df_ref = pd.DataFrame(columns=["AS", "AU", "K", "AV", "AR", "L"])  # AS=месяц, AR=дата рефанда, L=комментарий
+        df_ref = pd.DataFrame(columns=["AS", "AU", "K", "AV", "AR", "L"])  # AS=месяц, AR=дата рефанда, L=коммент
     # гарантируем нужные колонки
     for c in ["AS", "AU", "K", "AV", "AR", "L"]:
         if c not in df_ref.columns:
@@ -2483,7 +2483,7 @@ elif section == "Refunds (LatAm)":
             st.info("No data after refund date (AR) filter.")
             st.stop()
 
-    # 4) Месяц: из AS (всегда 1..12) → числовой столбец Month; доп. фильтр по selected_months
+    # 4) Месяц из AS (всегда 1..12) → числовой столбец Month; доп. фильтр по selected_months
     dff["Month"] = pd.to_numeric(dff["AS"], errors="coerce").astype("Int64")
     dff = dff.dropna(subset=["Month"])
     if selected_months:
@@ -2492,11 +2492,12 @@ elif section == "Refunds (LatAm)":
             st.info("No data after month (AS) filter.")
             st.stop()
 
-    # 5) Reason/Comment/Course — нормализация
-    dff["Reason"]  = dff["K"].astype(str).str.strip().replace({"nan": "", "None": ""})
+    # 5) Reason/Comment/Course/Request date — нормализация
+    dff["Reason"]       = dff["K"].astype(str).str.strip().replace({"nan": "", "None": ""})
     dff.loc[dff["Reason"].eq(""), "Reason"] = "Unspecified"
-    dff["Comment"] = dff["L"].astype(str).str.strip().replace({"nan": ""})
-    dff["Course"]  = dff["AV"].astype(str).str.strip()
+    dff["Comment"]      = dff["L"].astype(str).str.strip().replace({"nan": ""})
+    dff["Course"]       = dff["AV"].astype(str).str.strip()
+    dff["Request date"] = pd.to_datetime(dff["AR"], errors="coerce").dt.date  # ⬅️ новая колонка
 
     # ---------- CHART 1: Refunds — by month (count) ----------
     st.markdown("**Refunds — by month (count)**")
@@ -2571,7 +2572,8 @@ elif section == "Refunds (LatAm)":
     st.markdown("---")
     st.subheader("Refunds — details (current filters)")
 
-    tbl = dff[["Month", "Course", "Reason", "Comment"]].copy()
+    # теперь включаем колонку с датой реквеста
+    tbl = dff[["Month", "Request date", "Course", "Reason", "Comment"]].copy()
 
     # Агрегация: Месяц × Причина
     grp = (
@@ -2589,7 +2591,7 @@ elif section == "Refunds (LatAm)":
 
     with st.expander("Raw refunds rows — show/hide", expanded=False):
         st.dataframe(
-            tbl.sort_values(["Month", "Course", "Reason"]).reset_index(drop=True),
+            tbl.sort_values(["Month", "Request date", "Course", "Reason"]).reset_index(drop=True),
             use_container_width=True,
             height=min(600, 160 + 26 * max(1, len(tbl)))
         )
