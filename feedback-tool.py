@@ -2600,7 +2600,49 @@ elif section == "Refunds (LatAm)":
 elif section == "Detailed feedback":
     st.subheader("Detailed feedback (lazy)")
 
-    # Быстрые векторные помощники
+    # Локальные фильтры только для этой таблицы
+    st.markdown("**Filters — this table only**")
+
+    cat_options = [
+        "Score with argumentation",
+        "What liked",
+        "What disliked",
+        "Other comments",
+    ]
+    cat_key = _section_key(section, "det_categories")
+    if cat_key not in st.session_state:
+        st.session_state[cat_key] = cat_options.copy()
+
+    selected_cats = st.multiselect(
+        "Category",
+        options=cat_options,
+        default=st.session_state[cat_key],
+        key=cat_key,
+        help="Filter rows by category in the table below",
+    )
+
+    # Диапазон дат для локального фильтра (по A), зависящий от выбранных курсов
+    def _minmax_for_local_date():
+        d1 = filter_df(df1, "N", "A", selected_courses, [])  # только курс
+        d2 = filter_df(df2, "M", "A", selected_courses, [])
+        a1 = pd.to_datetime(d1["A"], errors="coerce") if not d1.empty else pd.Series([], dtype="datetime64[ns]")
+        a2 = pd.to_datetime(d2["A"], errors="coerce") if not d2.empty else pd.Series([], dtype="datetime64[ns]")
+        mins = [x for x in [a1.min() if len(a1) else pd.NaT, a2.min() if len(a2) else pd.NaT] if pd.notna(x)]
+        maxs = [x for x in [a1.max() if len(a1) else pd.NaT, a2.max() if len(a2) else pd.NaT] if pd.notna(x)]
+        return (min(mins) if mins else pd.NaT, max(maxs) if maxs else pd.NaT)
+
+    dt_min_loc, dt_max_loc = _minmax_for_local_date()
+    det_date_key = _section_key(section, "det_date")
+    if pd.isna(dt_min_loc) or pd.isna(dt_max_loc):
+        local_date_range = st.date_input("Date (A) — this table", [], key=det_date_key)
+    else:
+        local_date_range = st.date_input(
+            "Date (A) — this table",
+            [dt_min_loc.date(), dt_max_loc.date()],
+            key=det_date_key
+        )
+
+    # Хелперы
     SPLIT_RX_WITH_COMMA = r"[;,/\n|]+"
     SPLIT_RX_NO_COMMA   = r"[;\/\n|]+"
 
@@ -2609,17 +2651,11 @@ elif section == "Detailed feedback":
         return s.astype("Int64")
 
     @st.cache_data(show_spinner=True)
-    def _compute_detailed_table(df1_src, df2_src, months_tuple: tuple[int, ...]):
+    def _compute_detailed_rows(df1_src, df2_src, months_tuple: tuple[int, ...]) -> pd.DataFrame:
         """
-        Возвращает «длинную» таблицу:
-        Month | Category | Item | Count | Share
-
-        Category ∈ {
-          "Score with argumentation", "What liked",
-          "What disliked", "Other comments"
-        }
+        Возвращает «длинную» таблицу — одна реплика = одна строка:
+        Date | Month | Course | Category | Item
         """
-        # === 0) Фильтры по месяцам (если заданы) ===
         d1 = df1_src.copy()
         d2 = df2_src.copy()
 
@@ -2631,120 +2667,128 @@ elif section == "Detailed feedback":
                 d2["Q_num"] = _to_int_series(d2["Q"])
                 d2 = d2[d2["Q_num"].isin(months_tuple)]
 
-        # ========== I–J (FR2) ==========
-        ij = pd.DataFrame(columns=["Month","I","txt","count"])
-        if not d2.empty and {"Q","I","J"}.issubset(d2.columns):
-            t = d2[["Q","I","J"]].dropna(subset=["Q","I","J"]).copy()
+        rows = []
+
+        # ---------- FR2: I–J (оценка + аргументация) ----------
+        if not d2.empty and {"A","Q","I","J","M"}.issubset(d2.columns):
+            t = d2[["A","Q","I","J","M"]].dropna(subset=["A","Q","I","J"]).copy()
+            t["A"] = pd.to_datetime(t["A"], errors="coerce")
             t["Q"] = _to_int_series(t["Q"])
             t["I"] = _to_int_series(t["I"])
-            t = t.dropna(subset=["Q","I"])
+            t = t.dropna(subset=["A","Q","I"])
             t["J"] = t["J"].astype(str).str.strip().replace({"nan": ""})
             t = t[t["J"] != ""]
             t["piece"] = t["J"].str.split(SPLIT_RX_NO_COMMA, regex=True)
             t = t.explode("piece")
             t["piece"] = t["piece"].astype(str).str.strip()
             t = t[t["piece"] != ""]
-            # переводим только уникальные
             uniq = t["piece"].unique().tolist()
             m_en = {u: translate_es_to_en_safe(u) for u in uniq}
             t["txt_en"] = t["piece"].map(m_en)
-            ij = (t.groupby(["Q","I","txt_en"], as_index=False)
-                    .size().rename(columns={"size":"count"})
-                    .rename(columns={"Q":"Month","txt_en":"txt"}))
 
-        # ========== Aspects (FR1:E) — known/unknown ==========
-        asp_known = pd.DataFrame(columns=["Month","item","count"])
-        asp_unknown = pd.DataFrame(columns=["Month","item","count"])
-        if not d1.empty and {"R","E"}.issubset(d1.columns):
-            e = d1[["R","E"]].copy()
+            for r in t.itertuples(index=False):
+                rows.append({
+                    "Date": r.A,
+                    "Month": int(r.Q),
+                    "Course": _safe_text(r.M).strip(),
+                    "Category": "Score with argumentation",
+                    "Item": f"{int(r.I)} — {r.txt_en}",
+                })
+
+        # ---------- FR1: E (liked) ----------
+        if not d1.empty and {"A","R","E","N"}.issubset(d1.columns):
+            e = d1[["A","R","E","N"]].copy()
+            e["A"] = pd.to_datetime(e["A"], errors="coerce")
             e["R"] = _to_int_series(e["R"])
-            e = e.dropna(subset=["R"])
+            e = e.dropna(subset=["A","R"])
             e["E"] = e["E"].astype(str).str.strip().replace({"nan": ""})
             e = e[e["E"] != ""]
             e["piece"] = e["E"].str.split(SPLIT_RX_WITH_COMMA, regex=True)
             e = e.explode("piece")
             e["piece"] = e["piece"].astype(str).str.strip()
             e = e[e["piece"] != ""]
-            # нормализованный текст
-            norm = (e["piece"].str.normalize("NFKD")
-                              .str.encode("ascii","ignore").str.decode("ascii")
-                              .str.lower().str.replace(r"[^\w\s]"," ",regex=True)
-                              .str.replace(r"\s+"," ",regex=True).str.strip())
+            # нормализация
+            norm = (e["piece"].str.normalize("NFKD").str.encode("ascii","ignore").str.decode("ascii")
+                           .str.lower().str.replace(r"[^\w\s]"," ",regex=True)
+                           .str.replace(r"\s+"," ",regex=True).str.strip())
             e["norm"] = norm
 
             known_mask = pd.Series(False, index=e.index)
-            rows = []
             for es, en in ASPECTS_ES_EN:
                 es_norm = _norm_local(es)
                 m = e["norm"].eq(es_norm) | e["norm"].str.contains(es_norm, na=False)
                 if m.any():
-                    tmp = e.loc[m, ["R"]].copy()
-                    tmp["item"] = en
-                    rows.append(tmp)
+                    for r in e.loc[m, ["A","R","N"]].itertuples(index=False):
+                        rows.append({
+                            "Date": r.A,
+                            "Month": int(r.R),
+                            "Course": _safe_text(r.N).strip(),
+                            "Category": "What liked",
+                            "Item": en,
+                        })
                     known_mask |= m
-            if rows:
-                asp_known = (pd.concat(rows, ignore_index=True)
-                               .groupby(["R","item"], as_index=False)
-                               .size().rename(columns={"size":"count"})
-                               .rename(columns={"R":"Month"}))
 
-            # unknown → переводим всё, БЕЗ усечения top-10
-            unk = e.loc[~known_mask, ["R","piece"]].copy()
+            # неизвестные → переводим
+            unk = e.loc[~known_mask, ["A","R","N","piece"]].copy()
             if not unk.empty:
-                unk["item"] = unk["piece"].apply(translate_es_to_en_safe)
-                asp_unknown = (unk.groupby(["R","item"], as_index=False)
-                                 .size().rename(columns={"size":"count"})
-                                 .rename(columns={"R":"Month"}))
+                for r in unk.itertuples(index=False):
+                    rows.append({
+                        "Date": r.A,
+                        "Month": int(r.R),
+                        "Course": _safe_text(r.N).strip(),
+                        "Category": "What liked",
+                        "Item": translate_es_to_en_safe(r.piece),
+                    })
 
-        # ========== Dislike (FR1:F) — known/unknown ==========
-        dis_known = pd.DataFrame(columns=["Month","item","count"])
-        dis_unknown = pd.DataFrame(columns=["Month","item","count"])
-        if not d1.empty and {"R","F"}.issubset(d1.columns):
-            f = d1[["R","F"]].copy()
+        # ---------- FR1: F (disliked) ----------
+        if not d1.empty and {"A","R","F","N"}.issubset(d1.columns):
+            f = d1[["A","R","F","N"]].copy()
+            f["A"] = pd.to_datetime(f["A"], errors="coerce")
             f["R"] = _to_int_series(f["R"])
-            f = f.dropna(subset=["R"])
+            f = f.dropna(subset=["A","R"])
             f["F"] = f["F"].astype(str).str.strip().replace({"nan": ""})
             f = f[f["F"] != ""]
             f["piece"] = f["F"].str.split(SPLIT_RX_WITH_COMMA, regex=True)
             f = f.explode("piece")
             f["piece"] = f["piece"].astype(str).str.strip()
             f = f[f["piece"] != ""]
-            fn = (f["piece"].str.normalize("NFKD")
-                           .str.encode("ascii","ignore").str.decode("ascii")
+            fn = (f["piece"].str.normalize("NFKD").str.encode("ascii","ignore").str.decode("ascii")
                            .str.lower().str.replace(r"[^\w\s]"," ",regex=True)
                            .str.replace(r"\s+"," ",regex=True).str.strip())
             f["norm"] = fn
 
             known_mask_f = pd.Series(False, index=f.index)
-            rows_f = []
             for es, en in DISLIKE_ES_EN:
                 es_norm = _norm_local(es)
                 m = f["norm"].eq(es_norm) | f["norm"].str.contains(es_norm, na=False)
                 if m.any():
-                    tmp = f.loc[m, ["R"]].copy()
-                    tmp["item"] = en
-                    rows_f.append(tmp)
+                    for r in f.loc[m, ["A","R","N"]].itertuples(index=False):
+                        rows.append({
+                            "Date": r.A,
+                            "Month": int(r.R),
+                            "Course": _safe_text(r.N).strip(),
+                            "Category": "What disliked",
+                            "Item": en,
+                        })
                     known_mask_f |= m
-            if rows_f:
-                dis_known = (pd.concat(rows_f, ignore_index=True)
-                               .groupby(["R","item"], as_index=False)
-                               .size().rename(columns={"size":"count"})
-                               .rename(columns={"R":"Month"}))
 
-            unk_f = f.loc[~known_mask_f, ["R","piece"]].copy()
+            unk_f = f.loc[~known_mask_f, ["A","R","N","piece"]].copy()
             if not unk_f.empty:
-                unk_f["item"] = unk_f["piece"].apply(translate_es_to_en_safe)
-                dis_unknown = (unk_f.groupby(["R","item"], as_index=False)
-                                 .size().rename(columns={"size":"count"})
-                                 .rename(columns={"R":"Month"}))
+                for r in unk_f.itertuples(index=False):
+                    rows.append({
+                        "Date": r.A,
+                        "Month": int(r.R),
+                        "Course": _safe_text(r.N).strip(),
+                        "Category": "What disliked",
+                        "Item": translate_es_to_en_safe(r.piece),
+                    })
 
-        # ========== Comments ==========
-        # FR1:H by R
-        comm1 = pd.DataFrame(columns=["Month","item","count"])
-        if not d1.empty and {"R","H"}.issubset(d1.columns):
-            c1 = d1[["R","H"]].copy()
+        # ---------- FR1: H (комменты) ----------
+        if not d1.empty and {"A","R","H","N"}.issubset(d1.columns):
+            c1 = d1[["A","R","H","N"]].copy()
+            c1["A"] = pd.to_datetime(c1["A"], errors="coerce")
             c1["R"] = _to_int_series(c1["R"])
-            c1 = c1.dropna(subset=["R"])
+            c1 = c1.dropna(subset=["A","R"])
             c1["H"] = c1["H"].astype(str).str.strip().replace({"nan": ""})
             c1 = c1[c1["H"] != ""]
             c1["piece"] = c1["H"].str.split(SPLIT_RX_NO_COMMA, regex=True)
@@ -2753,17 +2797,23 @@ elif section == "Detailed feedback":
             c1 = c1[c1["piece"] != ""]
             uniq = c1["piece"].unique().tolist()
             m_en = {u: translate_es_to_en_safe(u) for u in uniq}
-            c1["item"] = c1["piece"].map(m_en)
-            comm1 = (c1.groupby(["R","item"], as_index=False)
-                        .size().rename(columns={"size":"count"})
-                        .rename(columns={"R":"Month"}))
+            c1["txt_en"] = c1["piece"].map(m_en)
 
-        # FR2:K by Q
-        comm2 = pd.DataFrame(columns=["Month","item","count"])
-        if not d2.empty and {"Q","K"}.issubset(d2.columns):
-            c2 = d2[["Q","K"]].copy()
+            for r in c1.itertuples(index=False):
+                rows.append({
+                    "Date": r.A,
+                    "Month": int(r.R),
+                    "Course": _safe_text(r.N).strip(),
+                    "Category": "Other comments",
+                    "Item": r.txt_en,
+                })
+
+        # ---------- FR2: K (комменты) ----------
+        if not d2.empty and {"A","Q","K","M"}.issubset(d2.columns):
+            c2 = d2[["A","Q","K","M"]].copy()
+            c2["A"] = pd.to_datetime(c2["A"], errors="coerce")
             c2["Q"] = _to_int_series(c2["Q"])
-            c2 = c2.dropna(subset=["Q"])
+            c2 = c2.dropna(subset=["A","Q"])
             c2["K"] = c2["K"].astype(str).str.strip().replace({"nan": ""})
             c2 = c2[c2["K"] != ""]
             c2["piece"] = c2["K"].str.split(SPLIT_RX_NO_COMMA, regex=True)
@@ -2772,89 +2822,54 @@ elif section == "Detailed feedback":
             c2 = c2[c2["piece"] != ""]
             uniq2 = c2["piece"].unique().tolist()
             m_en2 = {u: translate_es_to_en_safe(u) for u in uniq2}
-            c2["item"] = c2["piece"].map(m_en2)
-            comm2 = (c2.groupby(["Q","item"], as_index=False)
-                        .size().rename(columns={"size":"count"})
-                        .rename(columns={"Q":"Month"}))
+            c2["txt_en"] = c2["piece"].map(m_en2)
 
-        # === Подсчёт долей и сборка длинной таблицы ===
-        out_rows = []
+            for r in c2.itertuples(index=False):
+                rows.append({
+                    "Date": r.A,
+                    "Month": int(r.Q),
+                    "Course": _safe_text(r.M).strip(),
+                    "Category": "Other comments",
+                    "Item": r.txt_en,
+                })
 
-        # I–J
-        if not ij.empty:
-            for m, g in ij.groupby("Month"):
-                total = int(g["count"].sum())
-                g2 = g.sort_values(["count","I"], ascending=[False, False])
-                for r in g2.itertuples(index=False):
-                    # Item как "I — текст"
-                    item = f"{int(r.I)} — {r.txt}"
-                    share = (r.count / total) if total else 0.0
-                    out_rows.append({"Month": int(m), "Category": "Score with argumentation",
-                                     "Item": item, "Count": int(r.count), "Share": share})
+        if not rows:
+            return pd.DataFrame(columns=["Date","Month","Course","Category","Item"])
 
-        # Liked
-        liked = pd.concat([asp_known, asp_unknown], ignore_index=True)
-        if not liked.empty:
-            for m, g in liked.groupby("Month"):
-                total = int(g["count"].sum())
-                g2 = g.sort_values(["count","item"], ascending=[False, True])
-                for r in g2.itertuples(index=False):
-                    share = (r.count / total) if total else 0.0
-                    out_rows.append({"Month": int(m), "Category": "What liked",
-                                     "Item": r.item, "Count": int(r.count), "Share": share})
-
-        # Disliked
-        disliked = pd.concat([dis_known, dis_unknown], ignore_index=True)
-        if not disliked.empty:
-            for m, g in disliked.groupby("Month"):
-                total = int(g["count"].sum())
-                g2 = g.sort_values(["count","item"], ascending=[False, True])
-                for r in g2.itertuples(index=False):
-                    share = (r.count / total) if total else 0.0
-                    out_rows.append({"Month": int(m), "Category": "What disliked",
-                                     "Item": r.item, "Count": int(r.count), "Share": share})
-
-        # Comments
-        comments = pd.concat([comm1, comm2], ignore_index=True)
-        if not comments.empty:
-            for m, g in comments.groupby("Month"):
-                total = int(g["count"].sum())
-                g2 = g.sort_values(["count","item"], ascending=[False, True])
-                for r in g2.itertuples(index=False):
-                    share = (r.count / total) if total else 0.0
-                    out_rows.append({"Month": int(m), "Category": "Other comments",
-                                     "Item": r.item, "Count": int(r.count), "Share": share})
-
-        if not out_rows:
-            return pd.DataFrame(columns=["Month","Category","Item","Count","Share"])
-
-        out = pd.DataFrame(out_rows)
-
-        # Красивый порядок категорий + сортировка по месяцу и убыванию Count
-        cat_order = pd.CategoricalDtype(
-            ["Score with argumentation", "What liked", "What disliked", "Other comments"],
-            ordered=True
-        )
-        out["Category"] = out["Category"].astype(cat_order)
+        out = pd.DataFrame(rows)
+        # типы/сортировка
+        out["Date"] = pd.to_datetime(out["Date"], errors="coerce")
         out["Month"] = pd.to_numeric(out["Month"], errors="coerce").astype("Int64")
-        out = (out.sort_values(["Month","Category","Count"], ascending=[True, True, False])
-                  .reset_index(drop=True))
+        out["Course"] = out["Course"].astype(str).str.strip()
+        cat_order = pd.CategoricalDtype(cat_options, ordered=True)
+        out["Category"] = out["Category"].astype(cat_order)
+        out = out.sort_values(["Date", "Month", "Course", "Category", "Item"], na_position="last").reset_index(drop=True)
         return out
 
-    # ---- СЧИТАЕМ ТАБЛИЦУ (только FR1/FR2, БЕЗ рефандов) ----
-    table_df = _compute_detailed_table(
-        df1_base, df2_base, tuple(sorted(selected_months or []))
+    # ---- Локальная дата-фильтрация источников (A) ----
+    df1_local = filter_df(df1, "N", "A", selected_courses, local_date_range)
+    df2_local = filter_df(df2, "M", "A", selected_courses, local_date_range)
+
+    # ---- Подготовка таблицы (FR1/FR2, без рефандов) ----
+    table_df = _compute_detailed_rows(
+        df1_local, df2_local, tuple(sorted(selected_months or []))
     )
 
+    # ---- Локальный фильтр по категории ----
+    if selected_cats:
+        table_df = table_df[table_df["Category"].isin(selected_cats)]
+    else:
+        table_df = table_df.iloc[0:0]
+
+    # ---- Вывод ----
     if table_df.empty:
         st.info("No data")
     else:
-        # формат доли, но в df хранится float — показываем с округлением до 0%
         view = table_df.copy()
-        view["Share"] = (view["Share"].fillna(0).map(lambda x: f"{x:.0%}"))
-        height = min(1000, 140 + 28 * len(view))
+        view["Date"] = view["Date"].dt.date  # показываем только дату (без времени)
+        height = min(1000, 140 + 26 * len(view))
         st.dataframe(
-            view[["Month","Category","Item","Count","Share"]],
+            view[["Date","Month","Course","Category","Item"]],
             use_container_width=True,
             height=height
         )
