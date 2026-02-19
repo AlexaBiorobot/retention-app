@@ -57,23 +57,21 @@ def load_data_from_gsheet():
           .str.replace(r"\s+", "_", regex=True)
     )
 
-    # 3) гарантируем, что нужные колонки существуют (fallback по позициям R/S/T/U)
+    # 3) ЖЁСТКО берём даты из ресурсов по позициям R/S/T/U (чтобы не было None и дублей)
     # R=18, S=19, T=20, U=21 (1-based) => 17/18/19/20 (0-based)
-    pos_map = {
-        "last_lesson_date": 17,     # col R
-        "1st_period_end": 18,       # col S
-        "period2_end_date": 19,     # col T
-        "period3_end_date": 20,     # col U
-    }
-    for col_name, idx in pos_map.items():
-        if col_name not in df.columns:
-            if df.shape[1] > idx:
-                df[col_name] = df.iloc[:, idx]
-            else:
-                df[col_name] = ""
+    def force_col(name: str, idx0: int):
+        if df.shape[1] > idx0:
+            df[name] = df.iloc[:, idx0]
+        else:
+            df[name] = ""
 
-    # 4) парсим даты (last_lesson_date тоже, просто для нормального отображения)
-    for c in ["last_lesson_date", "1st_period_end", "period2_end_date", "period3_end_date"]:
+    force_col("last_lesson_date", 17)   # col R
+    force_col("period1_end_date", 18)   # col S
+    force_col("period2_end_date", 19)   # col T
+    force_col("period3_end_date", 20)   # col U
+
+    # 4) парсим даты (мягко)
+    for c in ["last_lesson_date", "period1_end_date", "period2_end_date", "period3_end_date"]:
         df[c] = (
             df[c].astype(str).str.strip()
               .replace({"^\s*$": None}, regex=True)
@@ -97,6 +95,10 @@ def load_data_from_gsheet():
     if "one_time_replacement" in df.columns:
         df["one_time_replacement"] = pd.to_numeric(df["one_time_replacement"], errors="coerce").fillna(0)
         df = df[df["one_time_replacement"] == 0]
+
+    # 7) Убираем дубли, если они есть (старые/другие имена)
+    df.drop(columns=[c for c in ["1st_period_end", "period2_end_date_date", "period3_end_date_date"] if c in df.columns],
+            inplace=True, errors="ignore")
 
     return df
 
@@ -126,7 +128,7 @@ with st.sidebar:
     p3 = ms("Period 3", "period_3")
 
     st.markdown("### Date ranges (end of period)")
-    d1 = st.date_input("1st_period_end between", [])
+    d1 = st.date_input("period1_end_date between", [])
     d2 = st.date_input("period2_end_date between", [])
     d3 = st.date_input("period3_end_date between", [])
 
@@ -145,7 +147,7 @@ dff = apply_multiselect(dff, "team_lead", leads)
 dff = apply_multiselect(dff, "course", courses)
 dff = apply_multiselect(dff, "group_title", groups)
 
-# period_1/2/3 — OR логика (как было)
+# period_1/2/3 — OR логика
 mask = pd.Series(False, index=dff.index)
 for col, sel in [("period_1", p1), ("period_2", p2), ("period_3", p3)]:
     if sel and col in dff.columns:
@@ -163,7 +165,7 @@ def apply_date_range(df_, col, dr):
         return df_[(col_dt >= start) & (col_dt <= end)]
     return df_
 
-dff = apply_date_range(dff, "1st_period_end", d1)
+dff = apply_date_range(dff, "period1_end_date", d1)
 dff = apply_date_range(dff, "period2_end_date", d2)
 dff = apply_date_range(dff, "period3_end_date", d3)
 
@@ -171,16 +173,8 @@ dff = apply_date_range(dff, "period3_end_date", d3)
 for col in dff.select_dtypes("number").columns:
     dff[col] = dff[col].round(2)
 
-# скрываем колонки, которые больше не нужны (если они есть в ресурсе)
+# скрываем колонки, которые не нужны
 hide_cols = [
-    "first_lesson_date_teach",
-    "first_lesson_date_dt",
-    "course_duration",
-    "first_lesson",
-    "step",
-    "1st_period_start",
-    "2nd_period_start",
-    "3rd_period_start",
     "dropp",
     "one_time_replacement",
 ]
