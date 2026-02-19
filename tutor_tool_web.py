@@ -88,19 +88,6 @@ def load_data_from_gsheet():
     if "first_lesson_date_teach" in df.columns:
         df["first_lesson_date_teach"] = df["first_lesson_date_teach"].apply(serial_to_datetime)
 
-        # оставить только дату (обнулить время)
-    date_cols = [
-        "last_lesson_date",
-        "period1_end_date",
-        "period2_end_date",
-        "period3_end_date",
-        "first_lesson_date_teach",
-    ]
-    
-    for c in date_cols:
-        if c in df.columns:
-            df[c] = pd.to_datetime(df[c], errors="coerce").dt.normalize()
-
 
     # убираем дубли, если в листе есть другие колонки с похожими названиями
     df.drop(columns=[c for c in ["1st_period_end", "period2_end_date_date", "period3_end_date_date"] if c in df.columns],
