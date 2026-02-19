@@ -33,23 +33,23 @@ def load_data_from_gsheet():
     creds = ServiceAccountCredentials.from_json_keyfile_dict(sa_info, scope)
     client = gspread.authorize(creds)
 
-    # 1) читаем таб auto целиком (чтобы гарантированно забрать R/S/T/U)
     ws = client.open_by_key(MAIN_SS_ID).worksheet(MAIN_SHEET)
-    all_vals = ws.get_all_values()
-    if not all_vals or len(all_vals) < 2:
+
+    # ВАЖНО: UNFORMATTED_VALUE => даты придут числами (serial), а не строками
+    vals = ws.get("A1:U", value_render_option="UNFORMATTED_VALUE")
+    if not vals or len(vals) < 2:
         return pd.DataFrame()
 
-    headers = all_vals[0]
-    max_len = max(len(r) for r in all_vals)
+    WIDTH = 21  # A..U
+    vals = [row + [""] * (WIDTH - len(row)) for row in vals]
 
-    # добиваем заголовки, если вдруг короче
-    if len(headers) < max_len:
-        headers = headers + [f"col_{i+1}" for i in range(len(headers), max_len)]
+    headers = vals[0]
+    if len(headers) < WIDTH:
+        headers = headers + [f"col_{i+1}" for i in range(len(headers), WIDTH)]
 
-    rows = [r + [""] * (max_len - len(r)) for r in all_vals[1:]]
-    df = pd.DataFrame(rows, columns=headers)
+    df = pd.DataFrame(vals[1:], columns=headers[:WIDTH])
 
-    # 2) нормализуем имена колонок
+    # нормализуем имена колонок (для фильтров/привычного вида)
     df.columns = (
         df.columns.astype(str)
           .str.strip()
@@ -57,28 +57,40 @@ def load_data_from_gsheet():
           .str.replace(r"\s+", "_", regex=True)
     )
 
-    # 3) ЖЁСТКО берём даты из ресурсов по позициям R/S/T/U (чтобы не было None и дублей)
-    # R=18, S=19, T=20, U=21 (1-based) => 17/18/19/20 (0-based)
-    def force_col(name: str, idx0: int):
-        if df.shape[1] > idx0:
-            df[name] = df.iloc[:, idx0]
-        else:
-            df[name] = ""
+    # --- R/S/T/U по позициям внутри A..U ---
+    # A=0 ... R=17, S=18, T=19, U=20
+    def normalize_serial(x):
+        """Оставляем как число/строку. Пусто => ''.
+        Если 45000.0 => 45000 (int), чтобы красивее выглядело.
+        """
+        if x is None or x == "":
+            return ""
+        if isinstance(x, float) and x.is_integer():
+            return int(x)
+        return x
 
-    force_col("last_lesson_date", 17)   # col R
-    force_col("period1_end_date", 18)   # col S
-    force_col("period2_end_date", 19)   # col T
-    force_col("period3_end_date", 20)   # col U
+    df["last_lesson_date"] = df.iloc[:, 17].apply(normalize_serial)  # R — ЧИСЛОМ, БЕЗ ПАРСИНГА
 
-    # 4) парсим даты (мягко)
-    for c in ["last_lesson_date", "period1_end_date", "period2_end_date", "period3_end_date"]:
-        df[c] = (
-            df[c].astype(str).str.strip()
-              .replace({"^\s*$": None}, regex=True)
-        )
-        df[c] = pd.to_datetime(df[c], errors="coerce", dayfirst=True)
+    # Эти 3 нужны тебе для date-фильтров, поэтому парсим (это не "расчёт", а только приведение типа)
+    # serial number -> datetime
+    def serial_to_datetime(x):
+        if x is None or x == "":
+            return pd.NaT
+        if isinstance(x, (int, float)):
+            # Google Sheets/Excel serial base
+            return pd.to_datetime(x, unit="D", origin="1899-12-30", errors="coerce")
+        # если вдруг придёт строка — тоже попробуем
+        return pd.to_datetime(str(x).strip(), errors="coerce", dayfirst=True)
 
-    # 5) team_lead
+    df["period1_end_date"] = df.iloc[:, 18].apply(serial_to_datetime)  # S
+    df["period2_end_date"] = df.iloc[:, 19].apply(serial_to_datetime)  # T
+    df["period3_end_date"] = df.iloc[:, 20].apply(serial_to_datetime)  # U
+
+    # убираем дубли, если в листе есть другие колонки с похожими названиями
+    df.drop(columns=[c for c in ["1st_period_end", "period2_end_date_date", "period3_end_date_date"] if c in df.columns],
+            inplace=True, errors="ignore")
+
+    # team_lead
     ws2 = client.open_by_key(LEADS_SS_ID).worksheet(LEADS_SHEET)
     leads = {
         row[0]: row[3]
@@ -91,14 +103,10 @@ def load_data_from_gsheet():
     else:
         df["team_lead"] = ""
 
-    # 6) one_time_replacement = 0
+    # one_time_replacement = 0
     if "one_time_replacement" in df.columns:
         df["one_time_replacement"] = pd.to_numeric(df["one_time_replacement"], errors="coerce").fillna(0)
         df = df[df["one_time_replacement"] == 0]
-
-    # 7) Убираем дубли, если они есть (старые/другие имена)
-    df.drop(columns=[c for c in ["1st_period_end", "period2_end_date_date", "period3_end_date_date"] if c in df.columns],
-            inplace=True, errors="ignore")
 
     return df
 
@@ -169,15 +177,8 @@ dff = apply_date_range(dff, "period1_end_date", d1)
 dff = apply_date_range(dff, "period2_end_date", d2)
 dff = apply_date_range(dff, "period3_end_date", d3)
 
-# округление чисел (если есть)
-for col in dff.select_dtypes("number").columns:
-    dff[col] = dff[col].round(2)
-
-# скрываем колонки, которые не нужны
-hide_cols = [
-    "dropp",
-    "one_time_replacement",
-]
+# скрываем мусорные/технические колонки
+hide_cols = ["dropp", "one_time_replacement"]
 dff = dff.drop(columns=[c for c in hide_cols if c in dff.columns], errors="ignore")
 
 st.dataframe(dff, use_container_width=True)
