@@ -84,6 +84,9 @@ def load_data_from_gsheet():
     df["period2_end_date"] = df.iloc[:, 19].apply(serial_to_datetime)   # T
     df["period3_end_date"] = df.iloc[:, 20].apply(serial_to_datetime)   # U
 
+    # first_lesson_date_teach -> datetime (если колонка есть в загруженном диапазоне)
+    if "first_lesson_date_teach" in df.columns:
+        df["first_lesson_date_teach"] = df["first_lesson_date_teach"].apply(serial_to_datetime)
 
     # убираем дубли, если в листе есть другие колонки с похожими названиями
     df.drop(columns=[c for c in ["1st_period_end", "period2_end_date_date", "period3_end_date_date"] if c in df.columns],
