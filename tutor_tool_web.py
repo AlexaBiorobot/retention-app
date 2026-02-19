@@ -70,21 +70,20 @@ def load_data_from_gsheet():
         return x
 
     df["last_lesson_date"] = df.iloc[:, 17].apply(normalize_serial)  # R — ЧИСЛОМ, БЕЗ ПАРСИНГА
-
-    # Эти 3 нужны тебе для date-фильтров, поэтому парсим (это не "расчёт", а только приведение типа)
-    # serial number -> datetime
+    # serial number -> datetime (Google Sheets / Excel)
     def serial_to_datetime(x):
         if x is None or x == "":
             return pd.NaT
         if isinstance(x, (int, float)):
-            # Google Sheets/Excel serial base
             return pd.to_datetime(x, unit="D", origin="1899-12-30", errors="coerce")
-        # если вдруг придёт строка — тоже попробуем
         return pd.to_datetime(str(x).strip(), errors="coerce", dayfirst=True)
+    
+    # A=0 ... R=17, S=18, T=19, U=20
+    df["last_lesson_date"] = df.iloc[:, 17].apply(serial_to_datetime)   # R -> datetime
+    df["period1_end_date"] = df.iloc[:, 18].apply(serial_to_datetime)   # S
+    df["period2_end_date"] = df.iloc[:, 19].apply(serial_to_datetime)   # T
+    df["period3_end_date"] = df.iloc[:, 20].apply(serial_to_datetime)   # U
 
-    df["period1_end_date"] = df.iloc[:, 18].apply(serial_to_datetime)  # S
-    df["period2_end_date"] = df.iloc[:, 19].apply(serial_to_datetime)  # T
-    df["period3_end_date"] = df.iloc[:, 20].apply(serial_to_datetime)  # U
 
     # убираем дубли, если в листе есть другие колонки с похожими названиями
     df.drop(columns=[c for c in ["1st_period_end", "period2_end_date_date", "period3_end_date_date"] if c in df.columns],
