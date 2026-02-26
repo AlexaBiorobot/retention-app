@@ -19,6 +19,7 @@ MAIN_SHEET = "auto"
 LEADS_SS_ID = "1SudB1YkPD0Tt7xkEiNJypRv0vb62BSdsCLrcrGqALAI"
 LEADS_SHEET = "Tutors"
 
+TECH_SS_ID = "1wJvMIf62izX10-r_-B1QtfKWRzobZHCH8dufVsCCVko"
 TECH_SHEET = "tech"
 
 @st.cache_data
@@ -147,7 +148,18 @@ def load_data_from_gsheet():
 
     # --- APPLY TECH OVERRIDES ---
     try:
-        ws_tech = client.open_by_key(MAIN_SS_ID).worksheet(TECH_SHEET)
+        tech_spread = client.open_by_key(TECH_SS_ID)
+    
+        ws_tech = None
+        for w in tech_spread.worksheets():
+            if w.title.strip().lower() == TECH_SHEET.strip().lower():
+                ws_tech = w
+                break
+    
+        if ws_tech is None:
+            available = [w.title for w in tech_spread.worksheets()]
+            raise ValueError(f"Sheet '{TECH_SHEET}' not found in TECH_SS_ID. Available sheets: {available}")
+    
         tech_vals = ws_tech.get("A:I", value_render_option="UNFORMATTED_VALUE")
 
         if tech_vals:
