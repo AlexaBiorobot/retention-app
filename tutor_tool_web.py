@@ -19,6 +19,7 @@ MAIN_SHEET = "auto"
 LEADS_SS_ID = "1SudB1YkPD0Tt7xkEiNJypRv0vb62BSdsCLrcrGqALAI"
 LEADS_SHEET = "Tutors"
 
+TECH_SHEET = "tech"
 
 @st.cache_data
 def load_data_from_gsheet():
@@ -35,7 +36,6 @@ def load_data_from_gsheet():
 
     ws = client.open_by_key(MAIN_SS_ID).worksheet(MAIN_SHEET)
 
-    # ВАЖНО: UNFORMATTED_VALUE => даты придут числами (serial), а не строками
     vals = ws.get("A1:U", value_render_option="UNFORMATTED_VALUE")
     if not vals or len(vals) < 2:
         return pd.DataFrame()
@@ -49,7 +49,7 @@ def load_data_from_gsheet():
 
     df = pd.DataFrame(vals[1:], columns=headers[:WIDTH])
 
-    # нормализуем имена колонок (для фильтров/привычного вида)
+    # нормализуем имена колонок
     df.columns = (
         df.columns.astype(str)
           .str.strip()
@@ -57,51 +57,160 @@ def load_data_from_gsheet():
           .str.replace(r"\s+", "_", regex=True)
     )
 
-    # --- R/S/T/U по позициям внутри A..U ---
-    # A=0 ... R=17, S=18, T=19, U=20
-    def normalize_serial(x):
-        """Оставляем как число/строку. Пусто => ''.
-        Если 45000.0 => 45000 (int), чтобы красивее выглядело.
+    def normalize_id(x):
         """
-        if x is None or x == "":
+        Приводим id к строке для стабильного матчинга.
+        123.0 -> "123"
+        123   -> "123"
+        ""    -> ""
+        """
+        if x is None or x == "" or pd.isna(x):
             return ""
         if isinstance(x, float) and x.is_integer():
-            return int(x)
-        return x
+            return str(int(x))
+        if isinstance(x, int):
+            return str(x)
 
-    df["last_lesson_date"] = df.iloc[:, 17].apply(normalize_serial)  # R — ЧИСЛОМ, БЕЗ ПАРСИНГА
-    # serial number -> datetime (Google Sheets / Excel)
+        s = str(x).strip()
+        if s.endswith(".0"):
+            maybe_num = s[:-2]
+            if maybe_num.isdigit():
+                return maybe_num
+        return s
+
+    def parse_override_value(x):
+        """
+        Значение из tech:
+        - пустая ячейка -> ""
+        - 0 / 1 / 2 -> число
+        - любой другой текст -> текст
+        """
+        if x is None or x == "" or pd.isna(x):
+            return ""
+
+        if isinstance(x, int):
+            return x
+        if isinstance(x, float):
+            if x.is_integer():
+                return int(x)
+            return x
+
+        s = str(x).strip()
+        if s == "":
+            return ""
+
+        # пробуем int
+        try:
+            if s.lstrip("-").isdigit():
+                return int(s)
+        except Exception:
+            pass
+
+        # пробуем float
+        try:
+            f = float(s)
+            if f.is_integer():
+                return int(f)
+            return f
+        except Exception:
+            pass
+
+        return s
+
     def serial_to_datetime(x):
         if x is None or x == "":
             return pd.NaT
         if isinstance(x, (int, float)):
             return pd.to_datetime(x, unit="D", origin="1899-12-30", errors="coerce")
         return pd.to_datetime(str(x).strip(), errors="coerce", dayfirst=True)
-    
-    # A=0 ... R=17, S=18, T=19, U=20
-    df["last_lesson_date"] = df.iloc[:, 17].apply(serial_to_datetime)   # R -> datetime
+
+    # даты
+    df["last_lesson_date"] = df.iloc[:, 17].apply(serial_to_datetime)   # R
     df["period1_end_date"] = df.iloc[:, 18].apply(serial_to_datetime)   # S
     df["period2_end_date"] = df.iloc[:, 19].apply(serial_to_datetime)   # T
     df["period3_end_date"] = df.iloc[:, 20].apply(serial_to_datetime)   # U
 
-    # first_lesson_date_teach -> datetime (если колонка есть в загруженном диапазоне)
     if "first_lesson_date_teach" in df.columns:
         df["first_lesson_date_teach"] = df["first_lesson_date_teach"].apply(serial_to_datetime)
 
+    df.drop(
+        columns=[c for c in ["1st_period_end", "period2_end_date_date", "period3_end_date_date"] if c in df.columns],
+        inplace=True,
+        errors="ignore"
+    )
 
-    # убираем дубли, если в листе есть другие колонки с похожими названиями
-    df.drop(columns=[c for c in ["1st_period_end", "period2_end_date_date", "period3_end_date_date"] if c in df.columns],
-            inplace=True, errors="ignore")
+    # нормализуем ключевые id для матчинга
+    if "teacher_id" in df.columns:
+        df["teacher_id"] = df["teacher_id"].apply(normalize_id)
+    if "bo_id" in df.columns:
+        df["bo_id"] = df["bo_id"].apply(normalize_id)
+
+    # --- APPLY TECH OVERRIDES ---
+    try:
+        ws_tech = client.open_by_key(MAIN_SS_ID).worksheet(TECH_SHEET)
+        tech_vals = ws_tech.get("A:I", value_render_option="UNFORMATTED_VALUE")
+
+        if tech_vals:
+            tech_rows = [row + [""] * (9 - len(row)) for row in tech_vals]
+
+            period1_map = {}
+            period2_map = {}
+            period3_map = {}
+
+            for row in tech_rows:
+                # A B C
+                t1 = normalize_id(row[0])
+                s1 = normalize_id(row[1])
+                v1 = parse_override_value(row[2])
+
+                # D E F
+                t2 = normalize_id(row[3])
+                s2 = normalize_id(row[4])
+                v2 = parse_override_value(row[5])
+
+                # G H I
+                t3 = normalize_id(row[6])
+                s3 = normalize_id(row[7])
+                v3 = parse_override_value(row[8])
+
+                if t1 and s1:
+                    period1_map[(t1, s1)] = v1
+
+                if t2 and s2:
+                    period2_map[(t2, s2)] = v2
+
+                if t3 and s3:
+                    period3_map[(t3, s3)] = v3
+
+            if "teacher_id" in df.columns and "bo_id" in df.columns:
+                df["_pair_key"] = list(zip(df["teacher_id"], df["bo_id"]))
+
+                if "period_1" in df.columns and period1_map:
+                    mask1 = df["_pair_key"].isin(set(period1_map.keys()))
+                    df.loc[mask1, "period_1"] = df.loc[mask1, "_pair_key"].map(period1_map)
+
+                if "period_2" in df.columns and period2_map:
+                    mask2 = df["_pair_key"].isin(set(period2_map.keys()))
+                    df.loc[mask2, "period_2"] = df.loc[mask2, "_pair_key"].map(period2_map)
+
+                if "period_3" in df.columns and period3_map:
+                    mask3 = df["_pair_key"].isin(set(period3_map.keys()))
+                    df.loc[mask3, "period_3"] = df.loc[mask3, "_pair_key"].map(period3_map)
+
+                df.drop(columns=["_pair_key"], inplace=True, errors="ignore")
+
+    except Exception as e:
+        st.warning(f"Не удалось применить overrides из tech: {e}")
 
     # team_lead
     ws2 = client.open_by_key(LEADS_SS_ID).worksheet(LEADS_SHEET)
     leads = {
-        row[0]: row[3]
+        normalize_id(row[0]): row[3]
         for row in ws2.get_all_values()[1:]
         if row and row[0]
     }
+
     if "teacher_id" in df.columns:
-        df["teacher_id"] = df["teacher_id"].astype(str).str.strip()
         df["team_lead"] = df["teacher_id"].map(leads).fillna("")
     else:
         df["team_lead"] = ""
