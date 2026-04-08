@@ -1159,13 +1159,23 @@ def main():
                 curated.rename(columns={rating_colname: "Rating"}, inplace=True)
 
             def _to_na(v):
-                if v is None or pd.isna(v): return pd.NA
+                if v is None or pd.isna(v):
+                    return pd.NA
                 if isinstance(v, str):
-                    s = (v.replace("\u00A0"," ").replace("\u200B","").replace("\u200C","").replace("\u200D","").replace("\uFEFF","").strip())
-                    if s == "" or s.lower() in {"nan","none","null","na"}: return pd.NA
+                    s = (
+                        v.replace("\u00A0", " ")
+                         .replace("\u200B", "")
+                         .replace("\u200C", "")
+                         .replace("\u200D", "")
+                         .replace("\uFEFF", "")
+                         .strip()
+                    )
+                    if s == "" or s.lower() in {"nan", "none", "null", "na"}:
+                        return pd.NA
                     return s
                 return v
-            curated = curated.applymap(_to_na)
+            
+            curated = curated.map(_to_na)
 
             count_cols = [c for c in ["Matches_count","WideMatches_count"] if c in curated.columns]
             text_cols  = [c for c in ["Matches","WideMatches"] if c in curated.columns]
@@ -1368,7 +1378,7 @@ def main():
                     if s == "" or s.lower() in {"nan","none","null","na"}: return pd.NA
                     return s
                 return v
-            curated = curated.applymap(_to_na)
+            curated = curated.map(_to_na)
 
             count_cols = [c for c in ["Matches_count","WideMatches_count"] if c in curated.columns]
             text_cols  = [c for c in ["Matches","WideMatches"] if c in curated.columns]
