@@ -738,7 +738,7 @@ def exclude_c6_h_before_14d(df: pd.DataFrame) -> pd.DataFrame:
     c_num = pd.to_numeric(df[col_c], errors="coerce")
 
     # сначала пробуем ISO/US, затем fallback на dayfirst
-    h_dt = pd.to_datetime(df[col_h], errors="coerce", dayfirst=False, infer_datetime_format=True)
+    h_dt = pd.to_datetime(df[col_h], errors="coerce", dayfirst=False)
     miss = h_dt.isna()
     if miss.any():
         h_dt.loc[miss] = pd.to_datetime(df.loc[miss, col_h], errors="coerce", dayfirst=True)
